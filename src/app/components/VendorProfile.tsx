@@ -1,0 +1,1945 @@
+import { useState, useEffect, useMemo, useRef, useCallback, Component, type ReactNode } from "react";
+import { publicAnonKey } from "../../../utils/supabase/info";
+import { API_BASE_URL } from "../../utils/api-client";
+import { 
+  ArrowLeft, 
+  Mail, 
+  Phone, 
+  MapPin, 
+  Calendar,
+  TrendingUp,
+  Package,
+  ShoppingCart,
+  DollarSign,
+  Edit,
+  MoreVertical,
+  Download,
+  FileText,
+  Store,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Plus,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
+import { VendorOnlinePresenceProfileView } from "./VendorOnlinePresenceFields";
+import { pickOnlinePresenceLinks } from "../utils/vendorOnlinePresence";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Badge } from "./ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import { VendorStorefront } from "./VendorStorefront";
+import { toast } from "sonner";
+import {
+  getCachedAdminOrdersPayload,
+  getCachedAdminProductsPage,
+  getCachedVendorProductsAdmin,
+  ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
+  CACHE_KEYS,
+  moduleCache,
+  invalidateAdminAllProductsCache,
+  invalidateVendorProductsAdminCache,
+  invalidateVendorStorefrontCatalogCachesAfterProductLinkChange,
+} from "../utils/module-cache";
+import {
+  buildAssignPickerSession,
+  reuseAssignPickerSession,
+  type VendorAssignPickerSession,
+} from "../utils/vendorAssignPickerSession";
+import { productMatchesAdminLiveSearch } from "../utils/adminProductSearch";
+
+const PICKER_SEARCH_DEBOUNCE_MS = 350;
+
+type VendorStatus = "active" | "inactive" | "pending" | "suspended" | "banned";
+
+interface Vendor {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  location: string;
+  status: VendorStatus;
+  productsCount: number;
+  totalRevenue: number;
+  commission: number;
+  joinedDate: string;
+  avatar: string;
+  logo?: string; // 🔥 Logo from vendor storefront settings
+  /** Public storefront path segment — used to bust catalog cache after product assignment changes */
+  storeSlug?: string;
+  description?: string;
+  website?: string;
+  facebook?: string;
+  instagram?: string;
+  youtube?: string;
+  tiktok?: string;
+  businessName?: string;
+  businessType?: string;
+  businessAddress?: string;
+  taxId?: string;
+  bankName?: string;
+  accountNumber?: string;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  category: string;
+  price: string;
+  stock: number;
+  status: string;
+  images?: string[];
+  image?: string;
+  commissionRate?: number;
+}
+
+interface Order {
+  id: string;
+  orderNumber: string;
+  date: string;
+  customer: string;
+  items: number;
+  total: number;
+  status: string;
+}
+
+function mapVendorAdminJsonToProfileProducts(data: unknown): Product[] {
+  const raw = Array.isArray((data as { products?: unknown })?.products)
+    ? (data as { products: any[] }).products
+    : [];
+  return raw.map((p: any) => {
+    const st = String(p.status ?? "active").trim().toLowerCase();
+    return {
+      id: p.id,
+      name: p.name || p.title || "",
+      sku: p.sku || "",
+      category: p.category || "Uncategorized",
+      price: String(p.price ?? ""),
+      stock: typeof p.inventory === "number" ? p.inventory : Number(p.stock) || 0,
+      status: st || "active",
+      images: p.images || [],
+      image: p.images?.[0],
+      commissionRate:
+        typeof p.commissionRate === "number" ? p.commissionRate : parseFloat(p.commissionRate) || undefined,
+    };
+  });
+}
+
+interface VendorProfileProps {
+  vendor: Vendor;
+  onBack: () => void;
+  onEdit: (vendor: Vendor) => void;
+  onPreviewVendorStore?: (vendorId: string, storeSlug: string, vendor: Vendor) => void;
+  onLoginAsVendor?: (vendor: Vendor) => void;
+}
+
+function parseOrderMoney(v: unknown): number {
+  if (v == null || v === "") return 0;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** React throws if a plain object is rendered as a child; coerce order fields safely. */
+function textForTableCell(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+    return String(v);
+  }
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    return v.toISOString().slice(0, 10);
+  }
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.toDate === "function") {
+      try {
+        const d = (o.toDate as () => Date)();
+        if (d instanceof Date && !Number.isNaN(d.getTime())) {
+          return d.toISOString().slice(0, 10);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return "";
+  }
+}
+
+/** Shipping / checkout sometimes stores customer as JSON string or object — show account-style name only. */
+function parseCustomerDisplayName(raw: unknown): string {
+  if (raw == null || raw === "") return "";
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (s.startsWith("{") && s.endsWith("}")) {
+      try {
+        const o = JSON.parse(s) as Record<string, unknown>;
+        for (const key of ["fullName", "name", "customerName", "displayName"] as const) {
+          const v = o[key];
+          if (typeof v === "string" && v.trim() !== "") return v.trim();
+        }
+      } catch {
+        return s;
+      }
+    }
+    return s;
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const o = raw as Record<string, unknown>;
+    for (const key of ["fullName", "name", "customerName", "displayName"] as const) {
+      const v = o[key];
+      if (typeof v === "string" && v.trim() !== "") return v.trim();
+    }
+  }
+  return "";
+}
+
+function orderDisplayCustomerName(order: any): string {
+  const a = parseCustomerDisplayName(order?.customer);
+  if (a) return a;
+  const b = parseCustomerDisplayName(order?.customerName);
+  if (b) return b;
+  const ship = order?.shippingAddress ?? order?.shipping;
+  const c = parseCustomerDisplayName(ship);
+  if (c) return c;
+  const user = order?.user;
+  if (user && typeof user === "object" && !Array.isArray(user)) {
+    const u = user as Record<string, unknown>;
+    for (const key of ["fullName", "name", "displayName", "email"] as const) {
+      const v = u[key];
+      if (typeof v === "string" && v.trim() !== "") return v.trim();
+    }
+  }
+  return "Guest";
+}
+
+function normalizeOrderStatusKey(status: string | undefined): string {
+  return String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+}
+
+type VendorCatalogKeys = { ids: Set<string>; skus: Set<string> };
+
+function buildVendorCatalogKeys(products: Product[]): VendorCatalogKeys {
+  const ids = new Set<string>();
+  const skus = new Set<string>();
+  for (const p of products) {
+    if (p.id != null && String(p.id).trim() !== "") ids.add(String(p.id).trim());
+    if (p.sku != null && String(p.sku).trim() !== "") skus.add(String(p.sku).trim());
+  }
+  return { ids, skus };
+}
+
+/** True when this line is sold by the vendor (checkout uses flat vendorId / vendor on items). */
+function lineItemBelongsToVendor(
+  item: any,
+  v: Vendor,
+  catalog?: VendorCatalogKeys
+): boolean {
+  if (item == null || typeof item !== "object") return false;
+  const vid = String(v.id ?? "").trim();
+  if (!vid) return false;
+  const idCandidates = [item.vendorId, item.vendor, item.product?.vendorId].filter(
+    (x) => x != null && String(x).trim() !== ""
+  );
+  if (idCandidates.some((x) => String(x).trim() === vid)) return true;
+  const sel = item.product?.selectedVendors ?? item.selectedVendors;
+  if (Array.isArray(sel) && sel.some((x: unknown) => String(x).trim() === vid)) return true;
+  if (catalog && (catalog.ids.size > 0 || catalog.skus.size > 0)) {
+    const pid = item.productId != null ? String(item.productId).trim() : "";
+    const sku = item.sku != null ? String(item.sku).trim() : "";
+    const cartId = item.id != null ? String(item.id).trim() : "";
+    const idFromCart = cartId.includes(":") ? cartId.split(":")[0]!.trim() : "";
+    if (pid && catalog.ids.has(pid)) return true;
+    if (idFromCart && catalog.ids.has(idFromCart)) return true;
+    if (sku && catalog.skus.has(sku)) return true;
+  }
+  return false;
+}
+
+function orderTouchesVendor(order: any, v: Vendor, catalog?: VendorCatalogKeys): boolean {
+  if (order == null || typeof order !== "object" || Array.isArray(order)) return false;
+  if (!Array.isArray(order.items) || order.items.length === 0) return false;
+  if (order.items.some((it: any) => lineItemBelongsToVendor(it, v, catalog))) return true;
+  const vLabel = String(v.businessName || v.name || "")
+    .trim()
+    .toLowerCase();
+  const orderLabel = String(order.vendorName || order.vendor || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(vLabel && orderLabel && orderLabel === vLabel);
+}
+
+/** Gross line total before order-level discount (unit price × qty unless subtotal/total set). */
+function orderLineGross(item: any): number {
+  if (item.subtotal != null && item.subtotal !== "") return parseOrderMoney(item.subtotal);
+  if (item.total != null && item.total !== "") return parseOrderMoney(item.total);
+  const qty = Math.max(1, parseOrderMoney(item.quantity) || 1);
+  const unit = parseOrderMoney(item.price ?? item.product?.price);
+  return unit * qty;
+}
+
+/** Allocate this line's share of order-level coupon discount (matches storefront totals). */
+function orderLineNetAfterDiscount(lineGross: number, order: any): number {
+  const orderSub = parseOrderMoney(order.subtotal);
+  const orderDisc = parseOrderMoney(order.discount);
+  if (orderSub > 0 && orderDisc > 0) {
+    const net = lineGross - (orderDisc * lineGross) / orderSub;
+    return Math.max(0, Math.round(net * 100) / 100);
+  }
+  return lineGross;
+}
+
+/** Commission & vendor revenue accrue only after fulfillment pipeline (super admin ready-to-ship / fulfilled). */
+const VENDOR_COMMISSION_STATUSES = new Set([
+  "ready-to-ship",
+  "fulfilled",
+  "shipped",
+  "delivered",
+]);
+
+class VendorProfileOrdersErrorBoundary extends Component<
+  { children: ReactNode },
+  { err: Error | null }
+> {
+  state: { err: Error | null } = { err: null };
+
+  static getDerivedStateFromError(err: Error) {
+    return { err };
+  }
+
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <p className="font-medium">Could not display vendor orders</p>
+          <p className="mt-1 break-words text-red-700">{this.state.err.message}</p>
+          <p className="mt-2 text-xs text-red-600">
+            Try Refresh Data or reload the page. If this persists, one order row may have unexpected data
+            shape.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, onLoginAsVendor }: VendorProfileProps) {
+  const [activeTab, setActiveTab] = useState<"overview" | "products" | "orders" | "contract" | "storefront" | "social">("overview");
+  const [socialRefreshKey, setSocialRefreshKey] = useState(() => Date.now());
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  
+  // Product selection modal state
+  const [showProductSelectModal, setShowProductSelectModal] = useState(false);
+  /** Paged mode: current API page rows (may include products already linked to this vendor). */
+  const [allPlatformProducts, setAllPlatformProducts] = useState<any[]>([]);
+  const [loadingAllProducts, setLoadingAllProducts] = useState(false);
+  const [searchProductQuery, setSearchProductQuery] = useState("");
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [pickerAssignedUncheckedIds, setPickerAssignedUncheckedIds] = useState<string[]>([]);
+  const [savingProducts, setSavingProducts] = useState(false);
+  const [assignPickerPage, setAssignPickerPage] = useState(1);
+  const [assignPickerPageSize, setAssignPickerPageSize] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
+  const [assignPickerUseFullCache, setAssignPickerUseFullCache] = useState(false);
+  const [assignPickerServerTotal, setAssignPickerServerTotal] = useState(0);
+  const [assignPickerServerHasMore, setAssignPickerServerHasMore] = useState(false);
+  const [debouncedPickerQ, setDebouncedPickerQ] = useState("");
+  const assignPickerServerSessionRef = useRef<VendorAssignPickerSession | null>(null);
+
+  useEffect(() => {
+    if (!showProductSelectModal) {
+      setDebouncedPickerQ("");
+      return;
+    }
+    const q = searchProductQuery.trim();
+    if (q === "") {
+      setDebouncedPickerQ("");
+      return;
+    }
+    const t = window.setTimeout(() => setDebouncedPickerQ(q), PICKER_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [searchProductQuery, showProductSelectModal]);
+
+  // 🔥 Track vendor logo with state that can be updated (prioritize logo over avatar)
+  const [currentVendorLogo, setCurrentVendorLogo] = useState<string>(vendor.logo || vendor.avatar || "");
+
+  // 🔥 Track vendor storefront settings to get phone and other updated info
+  const [storefrontSettings, setStorefrontSettings] = useState<any>(null);
+
+  const onlinePresenceLinks = useMemo(
+    () => pickOnlinePresenceLinks({ ...vendor, socialLinks: storefrontSettings?.socialLinks }),
+    [vendor, storefrontSettings]
+  );
+
+  // Fetch vendor's products — module cache first (instant revisit), then refresh when cache hit
+  useEffect(() => {
+    setProducts([]);
+    loadProducts();
+  }, [vendor.id]);
+
+  const vendorRef = useRef(vendor);
+  vendorRef.current = vendor;
+  const productsRef = useRef<Product[]>([]);
+  productsRef.current = products;
+  const ordersRef = useRef<any[]>([]);
+  ordersRef.current = orders;
+
+  const isProductAssignedToThisVendor = useCallback(
+    (p: any) =>
+      p?.selectedVendors?.includes(vendor.id) || String(p?.vendorId ?? "") === String(vendor.id),
+    [vendor.id]
+  );
+
+  // Fetch vendor's orders — shared admin orders cache (no force on first read = instant UI)
+  useEffect(() => {
+    setOrders([]);
+    loadOrders();
+  }, [vendor.id]);
+
+  // Re-filter once catalog is loaded so line items match by productId/sku (vendor id on lines may differ from admin record)
+  useEffect(() => {
+    if (products.length === 0) return;
+    loadOrders();
+  }, [products]);
+
+  useEffect(() => {
+    const onAdminOrdersUpdated = () => {
+      void loadOrders(true);
+    };
+    window.addEventListener("adminOrdersUpdated", onAdminOrdersUpdated);
+    return () => window.removeEventListener("adminOrdersUpdated", onAdminOrdersUpdated);
+  }, []);
+  
+  // 🔥 Fetch vendor storefront settings for phone number and other details
+  useEffect(() => {
+    loadStorefrontSettings();
+  }, [vendor.id]);
+  
+  // 🔥 Listen for logo updates from vendor admin portal
+  useEffect(() => {
+    const handleLogoUpdate = (event: CustomEvent) => {
+      console.log("🔄 Vendor logo updated via event:", event.detail);
+      if (event.detail.vendorId === vendor.id && event.detail.logo) {
+        setCurrentVendorLogo(event.detail.logo);
+        toast.success("Vendor logo updated!");
+      }
+    };
+    
+    const handleSettingsUpdate = (event: CustomEvent) => {
+      console.log("🔄 Vendor settings updated via event:", event.detail);
+      if (event.detail.vendorId === vendor.id) {
+        loadStorefrontSettings(); // Reload settings when updated
+      }
+    };
+    
+    window.addEventListener('vendorLogoUpdated', handleLogoUpdate as EventListener);
+    window.addEventListener('vendorSettingsUpdated', handleSettingsUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('vendorLogoUpdated', handleLogoUpdate as EventListener);
+      window.removeEventListener('vendorSettingsUpdated', handleSettingsUpdate as EventListener);
+    };
+  }, [vendor.id]);
+  
+  // 🔥 Update logo when vendor prop changes (prioritize logo over avatar)
+  useEffect(() => {
+    setCurrentVendorLogo(vendor.logo || vendor.avatar || "");
+  }, [vendor.logo, vendor.avatar]);
+
+  const applyVendorOrdersFromPayload = (payload: { orders?: unknown }, v: Vendor, catalog: VendorCatalogKeys) => {
+    const rawList = Array.isArray(payload.orders) ? payload.orders : [];
+    return rawList.filter((order: any) => {
+      try {
+        return orderTouchesVendor(order, v, catalog);
+      } catch {
+        return false;
+      }
+    });
+  };
+
+  /** Module cache + stale-while-revalidate. Pass true after order mutations or Refresh Data. */
+  const loadProducts = async (forceRefresh = false) => {
+    const vid = vendorRef.current.id;
+    const key = CACHE_KEYS.vendorProductsAdmin(vid);
+    const hadCache = !forceRefresh && moduleCache.has(key);
+
+    if (forceRefresh) {
+      if (productsRef.current.length === 0) setIsLoadingProducts(true);
+    } else if (!hadCache) {
+      setIsLoadingProducts(true);
+    }
+
+    try {
+      const data = await getCachedVendorProductsAdmin(vid, forceRefresh);
+      setProducts(mapVendorAdminJsonToProfileProducts(data));
+      console.log(
+        `[VENDOR PROFILE] Products loaded for ${vendorRef.current.name} (forceRefresh=${forceRefresh})`
+      );
+    } catch (error) {
+      console.error("Error loading vendor products:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Could not load vendor products."
+      );
+      if (!forceRefresh || productsRef.current.length === 0) {
+        setProducts([]);
+      }
+    } finally {
+      setIsLoadingProducts(false);
+    }
+
+    if (!forceRefresh && hadCache) {
+      void getCachedVendorProductsAdmin(vid, true)
+        .then((fresh) => setProducts(mapVendorAdminJsonToProfileProducts(fresh)))
+        .catch((e) => console.warn("[VENDOR PROFILE] background product refresh failed:", e));
+    }
+  };
+
+  const loadOrders = async (forceRefresh = false) => {
+    const v = vendorRef.current;
+    const catalog = buildVendorCatalogKeys(productsRef.current);
+    const ordersKey = CACHE_KEYS.ADMIN_ORDERS;
+    const hadCache = !forceRefresh && moduleCache.has(ordersKey);
+
+    if (forceRefresh) {
+      if (ordersRef.current.length === 0) setIsLoadingOrders(true);
+    } else if (!hadCache) {
+      setIsLoadingOrders(true);
+    }
+
+    try {
+      const payload = await getCachedAdminOrdersPayload(forceRefresh);
+      const vendorOrders = applyVendorOrdersFromPayload(payload, v, catalog);
+      setOrders(vendorOrders);
+      console.log(
+        `[VENDOR PROFILE] Orders loaded for ${v.name}: ${vendorOrders.length} (forceRefresh=${forceRefresh})`
+      );
+    } catch (error) {
+      console.error("Error loading vendor orders:", error);
+      toast.error("Could not load vendor orders.");
+      if (!forceRefresh || ordersRef.current.length === 0) {
+        setOrders([]);
+      }
+    } finally {
+      setIsLoadingOrders(false);
+    }
+
+    if (!forceRefresh && hadCache) {
+      void getCachedAdminOrdersPayload(true)
+        .then((fresh) => {
+          const next = applyVendorOrdersFromPayload(fresh, vendorRef.current, buildVendorCatalogKeys(productsRef.current));
+          setOrders(next);
+        })
+        .catch((e) => console.warn("[VENDOR PROFILE] background orders refresh failed:", e));
+    }
+  };
+
+  const loadStorefrontSettings = async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/vendor/storefront/${vendor.id}`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${publicAnonKey}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setStorefrontSettings(data.settings);
+        console.log("✅ Loaded vendor storefront settings:", data.settings);
+      }
+    } catch (error) {
+      console.error("❌ Error loading storefront settings:", error);
+    }
+  };
+
+  // Format MMK currency with small unit
+  const formatMMK = (value: number | string) => {
+    if (value === null || value === undefined || value === '') {
+      return <span>0 <span className="text-xs">MMK</span></span>;
+    }
+    const num = typeof value === 'string' ? parseFloat(value.replace(/,/g, '')) : value;
+    if (isNaN(num)) {
+      return <span>0 <span className="text-xs">MMK</span></span>;
+    }
+    return <span>{Math.round(num).toLocaleString()} <span className="text-xs">MMK</span></span>;
+  };
+
+  // Calculate stats from real data
+  const totalProducts = products.length;
+  const activeProducts = products.filter(p => p.status === "active").length;
+
+  const safeOrders = useMemo(() => {
+    return (orders as unknown[]).filter(
+      (o): o is Record<string, unknown> =>
+        o != null && typeof o === "object" && !Array.isArray(o)
+    ) as any[];
+  }, [orders]);
+
+  const totalOrders = safeOrders.length;
+
+  const vendorCatalogKeys = useMemo(
+    () => buildVendorCatalogKeys(products),
+    [products]
+  );
+
+  /**
+   * Headline % on profile cards: vendor contract wins when set (including 0%).
+   * Only if contract is absent do we show max product rate (per-line commission math unchanged).
+   */
+  const commissionRateDisplay = useMemo(() => {
+    const raw = vendor.commission;
+    const contractUnset =
+      raw === undefined ||
+      raw === null ||
+      (typeof raw === "string" && raw.trim() === "");
+    if (!contractUnset) {
+      const v = parseOrderMoney(raw);
+      if (Number.isFinite(v)) {
+        return {
+          value: Math.round(v * 100) / 100,
+          subtitle: "Contract rate" as const,
+        };
+      }
+    }
+    const rates = products
+      .map((p) => p.commissionRate)
+      .filter((r): r is number => typeof r === "number" && !Number.isNaN(r) && r > 0);
+    if (rates.length > 0) {
+      return {
+        value: Math.round(Math.max(...rates) * 100) / 100,
+        subtitle: "From product settings" as const,
+      };
+    }
+    return { value: 0, subtitle: "Contract rate" as const };
+  }, [vendor.commission, products]);
+
+  const displayCommissionRate = commissionRateDisplay.value;
+
+  // Revenue & commission: vendor lines only, net of order-level discount; accrue when status is ready-to-ship / fulfilled / shipped / delivered
+  const { totalRevenue, commissionEarned } = useMemo(() => {
+    let revenue = 0;
+    let commission = 0;
+
+    safeOrders.forEach((order: any) => {
+      if (order == null || typeof order !== "object") return;
+      const st = normalizeOrderStatusKey(String(order.status ?? ""));
+      const shouldAccrue = VENDOR_COMMISSION_STATUSES.has(st);
+      const lineItems = Array.isArray(order.items) ? order.items : [];
+
+      lineItems.forEach((item: any) => {
+        if (!lineItemBelongsToVendor(item, vendor, vendorCatalogKeys)) return;
+
+        const gross = orderLineGross(item);
+        const net = orderLineNetAfterDiscount(gross, order);
+
+        if (shouldAccrue) {
+          revenue += net;
+
+          let productCommission = 0;
+          if (
+            item.commissionRate != null &&
+            item.commissionRate !== "" &&
+            (typeof item.commissionRate !== "number" ||
+              Number.isFinite(item.commissionRate))
+          ) {
+            productCommission = parseOrderMoney(item.commissionRate);
+          } else if (item.product?.commission != null) {
+            productCommission = parseOrderMoney(item.product.commission);
+          } else if (item.commission != null) {
+            productCommission = parseOrderMoney(item.commission);
+          } else {
+            const matchedProduct = products.find(
+              (p: Product) =>
+                (item.sku && p.sku === item.sku) ||
+                (item.name && p.name === item.name) ||
+                (item.productId != null &&
+                  p.id != null &&
+                  String(p.id) === String(item.productId))
+            );
+            if (matchedProduct?.commissionRate != null) {
+              productCommission = parseOrderMoney(matchedProduct.commissionRate);
+            } else if (matchedProduct && (matchedProduct as any).commission != null) {
+              productCommission = parseOrderMoney((matchedProduct as any).commission);
+            } else {
+              productCommission = parseOrderMoney(vendor.commission);
+            }
+          }
+
+          commission += (net * productCommission) / 100;
+        }
+      });
+    });
+
+    return {
+      totalRevenue: Math.round(revenue * 100) / 100,
+      commissionEarned: Math.round(commission * 100) / 100,
+    };
+  }, [products, safeOrders, vendor.id, vendor.commission, vendorCatalogKeys]);
+  
+  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+  const getStatusBadge = (status: VendorStatus) => {
+    const variants: Record<string, { color: string; label: string }> = {
+      active: { color: "bg-green-100 text-green-700 border-green-200", label: "Active" },
+      inactive: { color: "bg-gray-100 text-gray-700 border-gray-200", label: "Inactive" },
+      pending: { color: "bg-yellow-100 text-yellow-700 border-yellow-200", label: "Pending" },
+      suspended: { color: "bg-orange-100 text-orange-700 border-orange-200", label: "Suspended" },
+      banned: { color: "bg-red-100 text-red-700 border-red-200", label: "Banned" },
+    };
+    const variant = variants[status] || variants.pending;
+    return (
+      <Badge className={`${variant.color} border`}>
+        {variant.label}
+      </Badge>
+    );
+  };
+
+  const getProductStatusBadge = (status: string) => {
+    const variants: Record<string, { color: string; label: string }> = {
+      active: { color: "bg-green-100 text-green-700 border-green-200", label: "Active" },
+      "off-shelf": { color: "bg-red-100 text-red-700 border-red-200", label: "Off Shelf" },
+      discontinued: { color: "bg-gray-100 text-gray-700 border-gray-200", label: "Discontinued" },
+    };
+    const variant = variants[status] || variants.active;
+    return (
+      <Badge className={`${variant.color} border text-xs`}>
+        {variant.label}
+      </Badge>
+    );
+  };
+
+  const getOrderStatusBadge = (status: unknown) => {
+    const normalizedStatus =
+      normalizeOrderStatusKey(String(status ?? "")) || "pending";
+    const variants: Record<string, { color: string; label: string }> = {
+      pending: { color: "bg-yellow-100 text-yellow-700 border-yellow-200", label: "Pending" },
+      processing: { color: "bg-slate-100 text-slate-700 border-slate-200", label: "Processing" },
+      'ready-to-ship': { color: "bg-cyan-100 text-cyan-700 border-cyan-200", label: "Ready to Ship" },
+      fulfilled: { color: "bg-emerald-100 text-emerald-700 border-emerald-200", label: "Fulfilled" },
+      shipped: { color: "bg-purple-100 text-purple-700 border-purple-200", label: "Shipped" },
+      delivered: { color: "bg-green-100 text-green-700 border-green-200", label: "Delivered" },
+      cancelled: { color: "bg-red-100 text-red-700 border-red-200", label: "Cancelled" },
+    };
+    const variant = variants[normalizedStatus] || variants.pending;
+    return (
+      <Badge className={`${variant.color} border text-xs`}>
+        {variant.label}
+      </Badge>
+    );
+  };
+
+  useEffect(() => {
+    if (!showProductSelectModal) return;
+
+    const full = moduleCache.peek<unknown[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+    const useLocalCatalogOnly =
+      full && Array.isArray(full) && full.length > 0 && debouncedPickerQ === "";
+
+    if (useLocalCatalogOnly) {
+      setAssignPickerUseFullCache(true);
+      setLoadingAllProducts(false);
+      setAssignPickerServerTotal(0);
+      setAssignPickerServerHasMore(false);
+      setAllPlatformProducts([]);
+      return;
+    }
+
+    setAssignPickerUseFullCache(false);
+
+    const reused = reuseAssignPickerSession(
+      assignPickerServerSessionRef.current,
+      vendor.id,
+      debouncedPickerQ.trim(),
+      assignPickerPage,
+      assignPickerPageSize
+    );
+    if (reused) {
+      setAllPlatformProducts(reused.rows);
+      setAssignPickerServerTotal(reused.total);
+      setAssignPickerServerHasMore(reused.hasMore);
+      setLoadingAllProducts(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      setLoadingAllProducts(true);
+      try {
+        const payload = await getCachedAdminProductsPage(
+          {
+            page: assignPickerPage,
+            pageSize: assignPickerPageSize,
+            q: debouncedPickerQ,
+            tab: "all",
+            status: "all",
+            vendor: "all",
+            collaborator: "all",
+            sort: "newest",
+          },
+          false
+        );
+        if (cancelled) return;
+        const rows = (payload.products || []) as any[];
+        setAllPlatformProducts(rows);
+        setAssignPickerServerTotal(payload.total);
+        setAssignPickerServerHasMore(!!payload.hasMore);
+        assignPickerServerSessionRef.current = buildAssignPickerSession(
+          vendor.id,
+          debouncedPickerQ.trim(),
+          assignPickerPage,
+          assignPickerPageSize,
+          payload
+        );
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Assign picker: failed to load products page", error);
+          toast.error("Failed to load products");
+          setAllPlatformProducts([]);
+          setAssignPickerServerTotal(0);
+          setAssignPickerServerHasMore(false);
+          assignPickerServerSessionRef.current = null;
+        }
+      } finally {
+        if (!cancelled) setLoadingAllProducts(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showProductSelectModal,
+    assignPickerPage,
+    assignPickerPageSize,
+    debouncedPickerQ,
+    vendor.id,
+  ]);
+
+  // Open product selection modal
+  const handleSelectProduct = () => {
+    assignPickerServerSessionRef.current = null;
+    setSelectedProductIds([]);
+    setPickerAssignedUncheckedIds([]);
+    setSearchProductQuery("");
+    setDebouncedPickerQ("");
+    setAssignPickerPage(1);
+    setAssignPickerPageSize(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
+    setLoadingAllProducts(true);
+    setShowProductSelectModal(true);
+  };
+
+  const toggleVendorPickerCatalogRow = useCallback(
+    (product: any) => {
+      const id = String(product?.id ?? "");
+      if (!id) return;
+      if (isProductAssignedToThisVendor(product)) {
+        setPickerAssignedUncheckedIds((prev) =>
+          prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+        return;
+      }
+      setSelectedProductIds((prev) =>
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      );
+    },
+    [isProductAssignedToThisVendor]
+  );
+
+  const handleSaveSelectedProducts = async () => {
+    const toAdd = selectedProductIds;
+    const toRemove = [...new Set(pickerAssignedUncheckedIds)];
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      toast.error("No changes to apply");
+      return;
+    }
+
+    setSavingProducts(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/products/bulk-assign-vendor`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({
+            vendorId: vendor.id,
+            productIds: toAdd,
+            removeProductIds: toRemove,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof data?.error === "string" ? data.error : `Update failed (${res.status})`
+        );
+      }
+      let added = typeof data.added === "number" ? data.added : 0;
+      let addFailed = typeof data.addFailed === "number" ? data.addFailed : 0;
+      let removed = typeof data.removed === "number" ? data.removed : 0;
+      let removeFailed = typeof data.removeFailed === "number" ? data.removeFailed : 0;
+      if (toAdd.length > 0 && toRemove.length === 0) {
+        if (added === 0 && typeof data.updated === "number") added = data.updated;
+        if (addFailed === 0 && typeof data.failed === "number") addFailed = data.failed;
+      }
+
+      if (addFailed > 0 || removeFailed > 0) {
+        toast.warning(
+          `Updated ${vendor.name}: +${added} added, −${removed} removed. Some operations failed (${addFailed + removeFailed}).`
+        );
+      } else if (toAdd.length > 0 && toRemove.length > 0) {
+        toast.success(`Added ${added} and removed ${removed} product(s) for ${vendor.name}`);
+      } else if (toRemove.length > 0) {
+        toast.success(`Removed ${removed} product(s) from ${vendor.name}`);
+      } else {
+        toast.success(`${added} product(s) added to ${vendor.name}`);
+      }
+
+      setShowProductSelectModal(false);
+      setSelectedProductIds([]);
+      setPickerAssignedUncheckedIds([]);
+      invalidateAdminAllProductsCache();
+      invalidateVendorProductsAdminCache(vendor.id);
+      invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendor.id, [
+        vendor.storeSlug,
+      ]);
+      await loadProducts(true);
+    } catch (error) {
+      console.error("Error applying vendor product picker:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to apply changes");
+    } finally {
+      setSavingProducts(false);
+    }
+  };
+
+  const pickerAssignableFromFullCache = useMemo(() => {
+    if (!showProductSelectModal || !assignPickerUseFullCache) return [];
+    const full = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+    if (!full || !Array.isArray(full)) return [];
+    return full.filter((p) => productMatchesAdminLiveSearch(p, searchProductQuery.trim()));
+  }, [showProductSelectModal, assignPickerUseFullCache, searchProductQuery]);
+
+  const displayPickerRows = useMemo(() => {
+    if (assignPickerUseFullCache) {
+      const start = (assignPickerPage - 1) * assignPickerPageSize;
+      return pickerAssignableFromFullCache.slice(start, start + assignPickerPageSize);
+    }
+    return allPlatformProducts;
+  }, [
+    assignPickerUseFullCache,
+    pickerAssignableFromFullCache,
+    assignPickerPage,
+    assignPickerPageSize,
+    allPlatformProducts,
+  ]);
+
+  const pickerEveryRowChecked = useMemo(() => {
+    if (displayPickerRows.length === 0) return false;
+    return displayPickerRows.every((p) =>
+      isProductAssignedToThisVendor(p)
+        ? !pickerAssignedUncheckedIds.includes(p.id)
+        : selectedProductIds.includes(p.id)
+    );
+  }, [displayPickerRows, pickerAssignedUncheckedIds, selectedProductIds, isProductAssignedToThisVendor]);
+
+  const pickerAssignedCheckedOnPageCount = useMemo(
+    () =>
+      displayPickerRows.filter(
+        (p) => isProductAssignedToThisVendor(p) && !pickerAssignedUncheckedIds.includes(p.id)
+      ).length,
+    [displayPickerRows, pickerAssignedUncheckedIds, isProductAssignedToThisVendor]
+  );
+
+  const assignPickerTotalPages = assignPickerUseFullCache
+    ? Math.max(1, Math.ceil(pickerAssignableFromFullCache.length / assignPickerPageSize) || 1)
+    : Math.max(1, Math.ceil(assignPickerServerTotal / assignPickerPageSize) || 1);
+
+  const assignPickerFooterProductCount = assignPickerUseFullCache
+    ? pickerAssignableFromFullCache.length
+    : assignPickerServerTotal;
+
+  const assignPickerCanGoNext = assignPickerUseFullCache
+    ? assignPickerPage < assignPickerTotalPages
+    : assignPickerServerHasMore;
+
+  const pickerShowEmpty =
+    !loadingAllProducts &&
+    (assignPickerUseFullCache
+      ? pickerAssignableFromFullCache.length === 0
+      : allPlatformProducts.length === 0 && !assignPickerServerHasMore);
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button type="button" variant="ghost" size="icon" onClick={onBack}>
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900">Vendor Profile</h1>
+            <p className="text-sm text-slate-500 mt-1">View comprehensive vendor information</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {onLoginAsVendor && (
+            <Button 
+              type="button"
+              variant="default"
+              onClick={() => onLoginAsVendor(vendor)}
+              className="bg-slate-900 hover:bg-slate-800 text-white"
+            >
+              <Store className="w-4 h-4 mr-2" />
+              Login as Vendor
+            </Button>
+          )}
+          <Button 
+            type="button"
+            variant="outline" 
+            onClick={() => setActiveTab("storefront")}
+            className="border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            <Store className="w-4 h-4 mr-2" />
+            Manage Storefront
+          </Button>
+          <Button type="button" variant="outline" onClick={() => onEdit(vendor)}>
+            <Edit className="w-4 h-4 mr-2" />
+            Edit Profile
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" size="icon">
+                <MoreVertical className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem>
+                <Mail className="w-4 h-4 mr-2" />
+                Send Email
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Download className="w-4 h-4 mr-2" />
+                Export Data
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Vendor Info Card */}
+      <Card className="p-6 border border-slate-200">
+        <div className="flex items-start gap-6">
+          <div className="w-20 h-20 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+            <img 
+              src={currentVendorLogo || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${vendor.name}`}
+              alt={vendor.name}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${vendor.name}`;
+              }}
+            />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h2 className="text-2xl font-semibold text-slate-900">{vendor.name}</h2>
+                  {getStatusBadge(vendor.status)}
+                </div>
+                <p className="text-slate-600 mb-4">{vendor.description || vendor.businessName || "Premium vendor partner"}</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Mail className="w-4 h-4" />
+                    <span>{vendor.email}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Phone className="w-4 h-4" />
+                    <span>{storefrontSettings?.contactPhone || vendor.phone || "+95 9 XXX XXX XXX"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <MapPin className="w-4 h-4" />
+                    <span>{vendor.location || "Myanmar"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Calendar className="w-4 h-4" />
+                    <span>Joined {vendor.joinedDate || "Recently"}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Stats Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <Card className="p-4 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Total Revenue</p>
+              <p className="text-xl font-semibold text-slate-900 mt-1">{formatMMK(totalRevenue)}</p>
+            </div>
+            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+              <DollarSign className="w-5 h-5 text-purple-600" />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Total Orders</p>
+              <p className="text-xl font-semibold text-slate-900 mt-1">{totalOrders}</p>
+              <p className="text-xs text-slate-400 mt-0.5">All time</p>
+            </div>
+            <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
+              <ShoppingCart className="w-5 h-5 text-slate-600" />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Products</p>
+              <p className="text-xl font-semibold text-slate-900 mt-1">{totalProducts}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{activeProducts} active</p>
+            </div>
+            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+              <Package className="w-5 h-5 text-green-600" />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Commission Earned</p>
+              <p className="text-xl font-semibold text-slate-900 mt-1">{formatMMK(commissionEarned)}</p>
+              <p className="text-xs text-green-600 mt-0.5">To pay vendor</p>
+            </div>
+            <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-orange-600" />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Commission Rate</p>
+              <p className="text-xl font-semibold text-slate-900 mt-1">{displayCommissionRate}%</p>
+              <p className="text-xs text-slate-400 mt-0.5">{commissionRateDisplay.subtitle}</p>
+              <p className="text-xs text-green-600 mt-0.5">{formatMMK(commissionEarned)} to pay</p>
+            </div>
+            <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-pink-600" />
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Tabs */}
+      <Card className="border border-slate-200">
+        <div className="border-b border-slate-200">
+          <div className="flex gap-6 px-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab("overview")}
+              className={`py-4 px-2 border-b-2 transition-colors ${
+                activeTab === "overview"
+                  ? "border-slate-900 text-slate-900 font-medium"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("products")}
+              className={`py-4 px-2 border-b-2 transition-colors ${
+                activeTab === "products"
+                  ? "border-slate-900 text-slate-900 font-medium"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Products ({totalProducts})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("orders")}
+              className={`py-4 px-2 border-b-2 transition-colors ${
+                activeTab === "orders"
+                  ? "border-slate-900 text-slate-900 font-medium"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Orders ({totalOrders})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("contract")}
+              className={`py-4 px-2 border-b-2 transition-colors ${
+                activeTab === "contract"
+                  ? "border-slate-900 text-slate-900 font-medium"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Contract
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("storefront")}
+              className={`py-4 px-2 border-b-2 transition-colors ${
+                activeTab === "storefront"
+                  ? "border-slate-900 text-slate-900 font-medium"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Storefront
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("social");
+                setSocialRefreshKey(Date.now());
+              }}
+              className={`py-4 px-2 border-b-2 transition-colors ${
+                activeTab === "social"
+                  ? "border-slate-900 text-slate-900 font-medium"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Social Profile
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        <div className="p-6">
+          {/* Overview Tab */}
+          {activeTab === "overview" && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">Vendor Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <p className="text-sm text-slate-500 mb-1">Business Name</p>
+                    <p className="font-medium text-slate-900">{vendor.businessName || vendor.name}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <p className="text-sm text-slate-500 mb-1">Business Type</p>
+                    <p className="font-medium text-slate-900">{vendor.businessType || "General"}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <p className="text-sm text-slate-500 mb-1">Tax ID</p>
+                    <p className="font-medium text-slate-900">{vendor.taxId || "N/A"}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <p className="text-sm text-slate-500 mb-1">Bank Account</p>
+                    <p className="font-medium text-slate-900">{vendor.bankName || "N/A"} - {vendor.accountNumber || "N/A"}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-base font-semibold text-slate-900 mb-4">Performance Summary</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                        <DollarSign className="w-5 h-5 text-purple-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">Total Revenue</p>
+                        <p className="text-xs text-slate-500">All time earnings</p>
+                      </div>
+                    </div>
+                    <p className="text-base font-semibold text-slate-900">{formatMMK(totalRevenue)}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                        <Package className="w-5 h-5 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">Active Products</p>
+                        <p className="text-xs text-slate-500">Currently available</p>
+                      </div>
+                    </div>
+                    <p className="text-base font-semibold text-slate-900">{activeProducts}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
+                        <TrendingUp className="w-5 h-5 text-pink-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">Commission to Pay Vendor</p>
+                        <p className="text-xs text-slate-500">Referral bonus at {vendor.commission}%</p>
+                      </div>
+                    </div>
+                    <p className="text-base font-semibold text-green-600">{formatMMK(commissionEarned)}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Products Tab */}
+          {activeTab === "products" && (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-slate-900">Vendor Products</h3>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleSelectProduct}
+                    className="border-slate-300 text-slate-700 hover:bg-slate-50"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Select Product
+                  </Button>
+                  <Badge variant="secondary">{totalProducts} total</Badge>
+                </div>
+              </div>
+              
+              {isLoadingProducts && products.length === 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50">
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Product</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">SKU</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Category</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Price</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Stock</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 5 }).map((_, index) => (
+                        <tr key={`product-skeleton-${index}`} className="border-b border-slate-100 animate-pulse">
+                          <td className="p-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-slate-200 rounded-lg"></div>
+                              <div className="h-4 bg-slate-200 rounded w-40"></div>
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-24"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-20"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-24"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-12"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-6 bg-slate-200 rounded-full w-16"></div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : products.length === 0 ? (
+                <div className="text-center py-12">
+                  <Package className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-1">No Products Yet</h3>
+                  <p className="text-sm text-slate-500 mb-4">This vendor hasn't added any products</p>
+                  <Button 
+                    onClick={handleSelectProduct}
+                    className="bg-slate-900 hover:bg-slate-800"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Select Product
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50">
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Product</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">SKU</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Category</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Price</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Stock</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map((product) => (
+                        <tr key={product.id} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="p-3">
+                            <div className="flex items-center gap-3">
+                              <img 
+                                src={product.images?.[0] || product.image || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=100&h=100&fit=crop"}
+                                alt={product.name}
+                                className="w-10 h-10 rounded-lg object-cover"
+                              />
+                              <span className="text-sm font-medium text-slate-900">{product.name}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-sm text-slate-600">{product.sku}</td>
+                          <td className="p-3 text-sm text-slate-600">{product.category}</td>
+                          <td className="p-3 text-sm font-medium text-slate-900">
+                            {(() => {
+                              // Parse price from string format like "$25.00" or numeric value
+                              let priceValue = 0;
+                              const rawPrice = (product as any).price || (product as any).salePrice || (product as any).regularPrice;
+                              
+                              if (typeof rawPrice === 'string') {
+                                // Remove $, commas, and parse
+                                priceValue = parseFloat(rawPrice.replace(/[$,]/g, '')) || 0;
+                              } else if (typeof rawPrice === 'number') {
+                                priceValue = rawPrice;
+                              }
+                              
+                              return formatMMK(priceValue);
+                            })()}
+                          </td>
+                          <td className="p-3 text-sm text-slate-600">{product.stock}</td>
+                          <td className="p-3">{getProductStatusBadge(product.status)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Orders Tab */}
+          {activeTab === "orders" && (
+            <VendorProfileOrdersErrorBoundary>
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-slate-900">Vendor Orders</h3>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    type="button"
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      void loadOrders(true);
+                      void loadProducts(true);
+                    }}
+                    disabled={isLoadingOrders || isLoadingProducts}
+                  >
+                    {isLoadingOrders || isLoadingProducts ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                    )}
+                    Refresh Data
+                  </Button>
+                  <Badge variant="secondary">{totalOrders} total</Badge>
+                </div>
+              </div>
+              
+              {isLoadingOrders && safeOrders.length === 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50">
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Order #</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Date</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Customer</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Items</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Total</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 5 }).map((_, index) => (
+                        <tr key={`order-skeleton-${index}`} className="border-b border-slate-100 animate-pulse">
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-24"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-28"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-32"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-8"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-4 bg-slate-200 rounded w-24"></div>
+                          </td>
+                          <td className="p-3">
+                            <div className="h-6 bg-slate-200 rounded-full w-20"></div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : safeOrders.length === 0 ? (
+                <div className="text-center py-12">
+                  <ShoppingCart className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-1">No Orders Yet</h3>
+                  <p className="text-sm text-slate-500">No orders have been placed for this vendor's products</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50">
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Order #</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Date</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Customer</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Items</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Total</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {safeOrders.map((order: any, rowIdx: number) => {
+                        const lineItems = Array.isArray(order.items) ? order.items : [];
+                        const vendorItemsCount =
+                          lineItems.filter((item: any) =>
+                            lineItemBelongsToVendor(item, vendor, vendorCatalogKeys)
+                          ).length || 0;
+
+                        let vendorTotal = 0;
+                        lineItems.forEach((item: any) => {
+                          if (!lineItemBelongsToVendor(item, vendor, vendorCatalogKeys)) return;
+                          const gross = orderLineGross(item);
+                          vendorTotal += orderLineNetAfterDiscount(gross, order);
+                        });
+                        vendorTotal = Math.round(vendorTotal * 100) / 100;
+
+                        const rowKey = `${textForTableCell(order.id) || textForTableCell(order.orderNumber) || "order"}-${rowIdx}`;
+
+                        return (
+                          <tr key={rowKey} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="p-3 text-sm font-medium text-slate-900">
+                              {textForTableCell(order.orderNumber) || "—"}
+                            </td>
+                            <td className="p-3 text-sm text-slate-600">{textForTableCell(order.date) || "—"}</td>
+                            <td className="p-3 text-sm text-slate-600">
+                              {orderDisplayCustomerName(order)}
+                            </td>
+                            <td className="p-3 text-sm text-slate-600">{vendorItemsCount}</td>
+                            <td className="p-3 text-sm font-medium text-slate-900">{formatMMK(vendorTotal)}</td>
+                            <td className="p-3">{getOrderStatusBadge(order.status)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            </VendorProfileOrdersErrorBoundary>
+          )}
+
+          {/* Contract Tab */}
+          {activeTab === "contract" && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">Contract Details</h3>
+                <Card className="p-6 border border-slate-200 bg-slate-50">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600">Commission Rate</span>
+                      <span className="font-semibold text-slate-900">{displayCommissionRate}%</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600">Contract Start Date</span>
+                      <span className="font-medium text-slate-900">{vendor.joinedDate || "N/A"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600">Status</span>
+                      {getStatusBadge(vendor.status)}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600">Total Earnings (Platform)</span>
+                      <span className="font-semibold text-green-600">{formatMMK(commissionEarned)}</span>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">Terms & Conditions</h3>
+                <Card className="p-6 border border-slate-200">
+                  <div className="space-y-3 text-sm text-slate-600">
+                    <p>• Vendor agrees to maintain product quality standards</p>
+                    <p>
+                      • Commission rate of {displayCommissionRate}% applies to sales (product-level rates
+                      when set)
+                    </p>
+                    <p>• Vendor is responsible for product inventory and fulfillment</p>
+                    <p>• Platform provides marketing and sales infrastructure</p>
+                    <p>• Monthly settlement of commissions on the 1st of each month</p>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          )}
+
+          {/* Storefront Tab */}
+          {activeTab === "storefront" && (
+            <VendorStorefront 
+              vendor={vendor}
+              onPreviewStore={onPreviewVendorStore}
+            />
+          )}
+
+          {/* Social Profile Tab */}
+          {activeTab === "social" && (
+            <VendorOnlinePresenceProfileView links={onlinePresenceLinks} refreshKey={socialRefreshKey} />
+          )}
+        </div>
+      </Card>
+
+      {/* Product Selection Modal */}
+      <Dialog
+        open={showProductSelectModal}
+        onOpenChange={(open) => {
+          setShowProductSelectModal(open);
+          if (!open) {
+            assignPickerServerSessionRef.current = null;
+            setPickerAssignedUncheckedIds([]);
+          }
+        }}
+      >
+        <DialogContent className="!w-[80vw] !max-w-[80vw] max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Select Products</DialogTitle>
+            <DialogDescription>
+              Add products from the platform to this vendor's inventory.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {/* Search Box */}
+          <AdminClearableSearchInput
+            placeholder="Search products by name, SKU, or category..."
+            value={searchProductQuery}
+            onValueChange={(v) => {
+              setSearchProductQuery(v);
+              setAssignPickerPage(1);
+            }}
+          />
+
+          {/* Products List - Scrollable */}
+          <div className="flex-1 overflow-y-auto min-h-0 scrollbar-dark">
+            {loadingAllProducts ? (
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
+                        <div className="w-4 h-4 bg-slate-200 rounded animate-pulse"></div>
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Product</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">SKU</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Category</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Price</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Stock</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white">
+                    {Array.from({ length: 8 }).map((_, index) => (
+                      <tr key={`skeleton-${index}`} className="border-b border-slate-100 animate-pulse">
+                        <td className="py-3 px-4">
+                          <div className="w-4 h-4 bg-slate-200 rounded"></div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-slate-200 rounded"></div>
+                            <div className="h-4 bg-slate-200 rounded w-40"></div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="h-4 bg-slate-200 rounded w-24"></div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="h-4 bg-slate-200 rounded w-20"></div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="h-4 bg-slate-200 rounded w-24"></div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="h-4 bg-slate-200 rounded w-12"></div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="h-6 bg-slate-200 rounded-full w-16"></div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : pickerShowEmpty ? (
+              <div className="text-center py-12">
+                <Package className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-900 mb-1">No Products Found</h3>
+                <p className="text-sm text-slate-500">
+                  {searchProductQuery ? "No products match your search criteria" : "All platform products are already assigned to this vendor"}
+                </p>
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-slate-50 z-10">
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
+                        <Checkbox
+                          checked={pickerEveryRowChecked}
+                          onCheckedChange={(checked) => {
+                            const unassignedIds = displayPickerRows
+                              .filter((p) => !isProductAssignedToThisVendor(p))
+                              .map((p) => p.id);
+                            const assignedOnPageIds = displayPickerRows
+                              .filter((p) => isProductAssignedToThisVendor(p))
+                              .map((p) => p.id);
+                            const assignedSet = new Set(assignedOnPageIds);
+                            const unassignedSet = new Set(unassignedIds);
+                            if (checked) {
+                              setSelectedProductIds((prev) =>
+                                Array.from(new Set([...prev, ...unassignedIds]))
+                              );
+                              setPickerAssignedUncheckedIds((prev) =>
+                                prev.filter((id) => !assignedSet.has(id))
+                              );
+                            } else {
+                              setSelectedProductIds((prev) =>
+                                prev.filter((id) => !unassignedSet.has(id))
+                              );
+                              setPickerAssignedUncheckedIds((prev) =>
+                                Array.from(new Set([...prev, ...assignedOnPageIds]))
+                              );
+                            }
+                          }}
+                        />
+                      </th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Product</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">SKU</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Category</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Price</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Stock</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white">
+                    {displayPickerRows.map((product) => {
+                      const alreadyOnVendor = isProductAssignedToThisVendor(product);
+                      const rowChecked = alreadyOnVendor
+                        ? !pickerAssignedUncheckedIds.includes(product.id)
+                        : selectedProductIds.includes(product.id);
+                      const linkedRow =
+                        alreadyOnVendor && !pickerAssignedUncheckedIds.includes(product.id);
+                      return (
+                      <tr 
+                        key={product.id} 
+                        className={`border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${
+                          linkedRow ? "bg-slate-50/70" : ""
+                        }`}
+                        onClick={() => toggleVendorPickerCatalogRow(product)}
+                      >
+                        <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={rowChecked}
+                            onCheckedChange={() => toggleVendorPickerCatalogRow(product)}
+                          />
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <img 
+                              src={product.images?.[0] || product.image || "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=100&h=100&fit=crop"}
+                              alt={product.name}
+                              className="w-10 h-10 rounded-lg object-cover border border-slate-200"
+                            />
+                            <span className="text-sm font-medium text-slate-900">{product.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-slate-600">{product.sku}</td>
+                        <td className="py-3 px-4 text-sm text-slate-600">{product.category}</td>
+                        <td className="py-3 px-4 text-sm font-medium text-slate-900">
+                          {(() => {
+                            let priceValue = 0;
+                            const rawPrice = (product as any).price || (product as any).salePrice || (product as any).regularPrice;
+                            
+                            if (typeof rawPrice === 'string') {
+                              priceValue = parseFloat(rawPrice.replace(/[$,]/g, '')) || 0;
+                            } else if (typeof rawPrice === 'number') {
+                              priceValue = rawPrice;
+                            }
+                            
+                            return formatMMK(priceValue);
+                          })()}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-slate-600">{product.stock || 0}</td>
+                        <td className="py-3 px-4">{getProductStatusBadge(product.status)}</td>
+                      </tr>
+                    );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {!loadingAllProducts && !pickerShowEmpty && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-1 py-2 border border-slate-200 rounded-lg bg-slate-50/80">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <span>Rows per page</span>
+                <Select
+                  value={String(assignPickerPageSize)}
+                  onValueChange={(v) => {
+                    setAssignPickerPageSize(Number(v));
+                    setAssignPickerPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[88px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="15">15</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-slate-500">
+                  Page {assignPickerPage} of {assignPickerTotalPages} · {assignPickerFooterProductCount}{" "}
+                  products
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={assignPickerPage <= 1 || loadingAllProducts}
+                  onClick={() => setAssignPickerPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={!assignPickerCanGoNext || loadingAllProducts}
+                  onClick={() => setAssignPickerPage((p) => p + 1)}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Footer with stats and actions */}
+          <DialogFooter className="flex items-center justify-between border-t border-slate-200 pt-4">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
+              <span>{selectedProductIds.length} to add</span>
+              {pickerAssignedUncheckedIds.length > 0 ? (
+                <>
+                  <span className="text-slate-400">•</span>
+                  <span className="text-amber-700">
+                    {pickerAssignedUncheckedIds.length} to remove from vendor
+                  </span>
+                </>
+              ) : null}
+              {pickerAssignedCheckedOnPageCount > 0 ? (
+                <>
+                  <span className="text-slate-400">•</span>
+                  <span className="text-slate-500">
+                    {pickerAssignedCheckedOnPageCount} on this page linked to vendor
+                  </span>
+                </>
+              ) : null}
+              <span className="text-slate-400">•</span>
+              <span>
+                {assignPickerUseFullCache
+                  ? `${pickerAssignableFromFullCache.length} matching catalog`
+                  : `${assignPickerServerTotal} products in catalog`}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowProductSelectModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="default"
+                onClick={handleSaveSelectedProducts}
+                disabled={
+                  savingProducts ||
+                  (selectedProductIds.length === 0 && pickerAssignedUncheckedIds.length === 0)
+                }
+                className="bg-slate-900 hover:bg-slate-800"
+              >
+                {savingProducts ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4 mr-2" />
+                )}
+                Apply changes
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

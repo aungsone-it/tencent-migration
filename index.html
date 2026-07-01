@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+          var search = location.search || "";
+          var host = location.hostname.toLowerCase();
+          var isPlainLocal =
+            host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+          var previewApex = /\.(vercel\.app|netlify\.app|railway\.app)$/.test(host);
+          var parts = host.split(".").filter(Boolean);
+          var bareHostEarly = host.replace(/^www\./, "");
+          var barePartsEarly = bareHostEarly.split(".").filter(Boolean);
+          var isBareApexEarly =
+            !previewApex &&
+            !isPlainLocal &&
+            barePartsEarly.length === 2 &&
+            (host === bareHostEarly || host === "www." + bareHostEarly);
+          var isVendorSubdomain =
+            !isPlainLocal &&
+            !previewApex &&
+            !isBareApexEarly &&
+            parts.length >= 3 &&
+            parts[parts.length - 1] !== "localhost";
+          var hasKpayQuery =
+            /(?:^|[?&])(?:merch_order_id|merchOrderId|prepay_id|prepayId|callback_info)=/i.test(
+              search
+            );
+          var pendingKpay = false;
+          try {
+            pendingKpay = Boolean(localStorage.getItem("kpay_pwa_pending_order"));
+          } catch (e) {}
+          if (
+            isVendorSubdomain &&
+            (hasKpayQuery ||
+              pendingKpay ||
+              path === "/kpay/return" ||
+              (path === "/" && pendingKpay))
+          ) {
+            document.documentElement.className += " kpay-unified-redirect";
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script>
+      try {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.style.colorScheme = "light";
+        localStorage.removeItem("migoo-theme");
+      } catch (e) {}
+    </script>
+    <style>
+      html.kpay-unified-redirect,
+      html.kpay-unified-redirect body {
+        background: #fff;
+      }
+    </style>
+    <script>
+      (function () {
+        try {
+          var search = location.search || "";
+          var path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+          var host = location.hostname.toLowerCase();
+          var isPlainLocal =
+            host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+          var previewApex =
+            /\.(vercel\.app|netlify\.app|railway\.app)$/.test(host);
+          var bareHost = host.replace(/^www\./, "");
+          var bareParts = bareHost.split(".").filter(Boolean);
+          var isBareApex =
+            !previewApex &&
+            !isPlainLocal &&
+            bareParts.length === 2 &&
+            (host === bareHost || host === "www." + bareHost);
+          var isUnifiedApex = isPlainLocal || isBareApex;
+
+          var hasKpayQuery =
+            /(?:^|[?&])(?:merch_order_id|merchOrderId|prepay_id|prepayId|callback_info)=/i.test(
+              search
+            );
+          var pendingKpay = false;
+          try {
+            pendingKpay = Boolean(localStorage.getItem("kpay_pwa_pending_order"));
+          } catch (e) {}
+
+          if (isUnifiedApex && (path === "/summary" || path === "/kpay/return")) {
+            try {
+              document.documentElement.classList.remove("kpay-unified-redirect");
+            } catch (e) {}
+          }
+
+          if (isUnifiedApex && path === "/kpay/return") {
+            if (!hasKpayQuery && pendingKpay) {
+              try {
+                var rawReturn = localStorage.getItem("kpay_pwa_pending_order");
+                if (rawReturn) {
+                  var pendingReturn = JSON.parse(rawReturn);
+                  var qsReturn = new URLSearchParams(search.replace(/^\?/, ""));
+                  if (
+                    pendingReturn.merchantOrderId &&
+                    !qsReturn.get("merch_order_id") &&
+                    !qsReturn.get("merchOrderId")
+                  ) {
+                    qsReturn.set("merch_order_id", pendingReturn.merchantOrderId);
+                  }
+                  if (
+                    pendingReturn.prepayId &&
+                    !qsReturn.get("prepay_id") &&
+                    !qsReturn.get("prepayId")
+                  ) {
+                    qsReturn.set("prepay_id", pendingReturn.prepayId);
+                  }
+                  var mergedReturn = qsReturn.toString();
+                  search = mergedReturn ? "?" + mergedReturn : "";
+                }
+              } catch (e) {}
+            }
+            history.replaceState(null, "", "/summary" + search);
+            return;
+          }
+
+          if (isUnifiedApex && path === "/summary") {
+            if (!hasKpayQuery && pendingKpay) {
+              try {
+                var rawSummary = localStorage.getItem("kpay_pwa_pending_order");
+                if (rawSummary) {
+                  var pendingSummary = JSON.parse(rawSummary);
+                  var qsSummary = new URLSearchParams(search.replace(/^\?/, ""));
+                  var changed = false;
+                  if (
+                    pendingSummary.merchantOrderId &&
+                    !qsSummary.get("merch_order_id") &&
+                    !qsSummary.get("merchOrderId")
+                  ) {
+                    qsSummary.set("merch_order_id", pendingSummary.merchantOrderId);
+                    changed = true;
+                  }
+                  if (
+                    pendingSummary.prepayId &&
+                    !qsSummary.get("prepay_id") &&
+                    !qsSummary.get("prepayId")
+                  ) {
+                    qsSummary.set("prepay_id", pendingSummary.prepayId);
+                    changed = true;
+                  }
+                  if (changed) {
+                    var mergedSummary = qsSummary.toString();
+                    history.replaceState(
+                      null,
+                      "",
+                      "/summary" + (mergedSummary ? "?" + mergedSummary : "")
+                    );
+                  }
+                }
+              } catch (e) {}
+            }
+            return;
+          }
+
+          var shouldRedirect = false;
+          if (hasKpayQuery && (path === "/summary" || path === "/kpay/return" || path === "/")) {
+            shouldRedirect = true;
+          } else if (path === "/summary" && pendingKpay) {
+            shouldRedirect = true;
+          } else if (path === "/kpay/return") {
+            shouldRedirect = true;
+          }
+
+          if (!shouldRedirect) return;
+
+          document.documentElement.className += " kpay-unified-redirect";
+
+          if (!hasKpayQuery && pendingKpay) {
+            try {
+              var raw = localStorage.getItem("kpay_pwa_pending_order");
+              if (raw) {
+                var pending = JSON.parse(raw);
+                var qs = new URLSearchParams(search.replace(/^\?/, ""));
+                if (pending.merchantOrderId && !qs.get("merch_order_id") && !qs.get("merchOrderId")) {
+                  qs.set("merch_order_id", pending.merchantOrderId);
+                }
+                if (pending.prepayId && !qs.get("prepay_id") && !qs.get("prepayId")) {
+                  qs.set("prepay_id", pending.prepayId);
+                }
+                var merged = qs.toString();
+                search = merged ? "?" + merged : "";
+              }
+            } catch (e) {}
+          }
+
+          var port = location.port ? ":" + location.port : "";
+          var unifiedOrigin;
+          if (isPlainLocal) {
+            unifiedOrigin = location.protocol + "//localhost" + port;
+          } else if (isBareApex) {
+            unifiedOrigin = location.protocol + "//" + host.split(":")[0] + port;
+          } else {
+            var parts = host.split(".").filter(Boolean);
+            var derivedApex =
+              parts.length >= 3 ? parts.slice(-2).join(".") : bareHost;
+            unifiedOrigin = "https://" + derivedApex;
+          }
+          var target = unifiedOrigin + "/summary" + search;
+          if (location.href.split("#")[0] === target) return;
+          location.replace(target);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script src="/platform-branding-head.js" defer></script>
+    <script src="/vendor-storefront-head.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://lmkthofnydxxgowryjcz.supabase.co" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rubik:wght@500;600;700&family=Noto+Sans+Myanmar:wght@400;500;600&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rubik:wght@500;600;700&family=Noto+Sans+Myanmar:wght@400;500;600&display=swap"
+      />
+    </noscript>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SECURE — multi-vendor e-commerce platform" />
+    <meta name="keywords" content="ecommerce, marketplace, vendor, admin, dashboard, myanmar" />
+    <meta name="author" content="SECURE" />
+    <title>SECURE</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

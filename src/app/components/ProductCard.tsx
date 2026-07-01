@@ -1,0 +1,297 @@
+import { useState, useMemo } from "react";
+import { Plus, Heart, Star } from "lucide-react";
+import { Card } from "./ui/card";
+import { LazyImage } from "./LazyImage";
+import {
+  initVariantSelections,
+  matchVariantForProduct,
+  productHasVariantPicker,
+  type VariantProduct,
+} from "./ProductVariantChips";
+import { ProductVariantQuickAddModal } from "./ProductVariantQuickAddModal";
+import { gridDisplayImageUrl } from "../utils/module-cache";
+import { isOutOfStockDisplay } from "../utils/productInventory";
+
+export type ProductCardProduct = VariantProduct & {
+  image: string;
+  images?: string[];
+  name: string;
+  price: string;
+  salesVolume?: number;
+  sku?: string;
+};
+
+/** Second argument to onAddToCart — variant line, quantity, or express checkout */
+export type ProductCardAddOpts = {
+  sku?: string;
+  price?: string | number;
+  image?: string;
+  quantity?: number;
+  /** Clear cart / single-item checkout where the parent supports it */
+  buyNow?: boolean;
+};
+
+interface ProductCardProps {
+  product: ProductCardProduct;
+  onProductClick: () => void;
+  onAddToCart: (e: React.MouseEvent | null, opts?: ProductCardAddOpts) => void;
+  onToggleWishlist: (e: React.MouseEvent) => void;
+  isWishlisted: boolean;
+  formatPriceMMK: (price: string | number) => string;
+  viewType?: "grid" | "list";
+  /** First row above-the-fold cards — eager image load for LCP */
+  priority?: boolean;
+}
+
+export const ProductCard = ({
+  product,
+  onProductClick,
+  onAddToCart,
+  onToggleWishlist,
+  isWishlisted,
+  formatPriceMMK,
+  viewType = "grid",
+  priority = false,
+}: ProductCardProps) => {
+  const [variantModalOpen, setVariantModalOpen] = useState(false);
+
+  const defaultSelections = useMemo(
+    () => initVariantSelections(product),
+    [product.id, product.variantOptions?.length, product.variants?.length]
+  );
+  const resolvedVariant = useMemo(
+    () => matchVariantForProduct(product, defaultSelections),
+    [product, defaultSelections]
+  );
+  const showVariantPicker = productHasVariantPicker(product);
+  const displayPrice = resolvedVariant?.price ?? product.price;
+  const heroImage =
+    product.images && product.images.length > 0 ? product.images[0] : product.image;
+  const heroImageForGrid = gridDisplayImageUrl(heroImage);
+  const outOfStock = isOutOfStockDisplay(product, resolvedVariant, 1);
+
+  const handleAdd = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!showVariantPicker && outOfStock) return;
+    if (showVariantPicker) {
+      setVariantModalOpen(true);
+      return;
+    }
+    onAddToCart(e);
+  };
+
+  const handleVariantModalConfirm = (args: {
+    sku: string;
+    price: number;
+    image?: string;
+    quantity: number;
+    buyNow: boolean;
+  }) => {
+    onAddToCart(null, {
+      sku: args.sku,
+      price: args.price,
+      image: args.image,
+      quantity: args.quantity,
+      buyNow: args.buyNow,
+    });
+  };
+
+  // List view layout
+  if (viewType === "list") {
+    return (
+      <>
+        {showVariantPicker && (
+          <ProductVariantQuickAddModal
+            product={product}
+            open={variantModalOpen}
+            onOpenChange={setVariantModalOpen}
+            formatPriceMMK={formatPriceMMK}
+            onConfirm={handleVariantModalConfirm}
+          />
+        )}
+        <div className="transition-transform duration-150 hover:-translate-y-0.5">
+          <Card
+            className="group overflow-hidden border-0 hover:shadow-xl transition-all duration-300 cursor-pointer bg-white shadow-md rounded-2xl animate-scale-in w-full"
+            onClick={onProductClick}
+          >
+            <div className="flex gap-4 p-3 md:p-4">
+              {/* Product Image */}
+              <div className="w-24 h-24 md:w-32 md:h-32 flex-shrink-0 overflow-hidden bg-white relative rounded">
+                <LazyImage
+                  src={heroImageForGrid}
+                  alt={product.name}
+                  priority={priority}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+                {outOfStock && (
+                  <span className="absolute left-1 top-1 z-10 rounded bg-red-600/90 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
+                    Out of stock
+                  </span>
+                )}
+              </div>
+
+              {/* Product Info */}
+              <div className="flex-1 flex flex-col justify-between py-1">
+                <div>
+                  {/* Product Name */}
+                  <h4 className="font-semibold text-slate-900 text-sm md:text-base leading-tight mb-1.5">
+                    {product.name}
+                  </h4>
+
+                  {/* Star Rating */}
+                  <div className="flex items-center gap-0.5 mb-2">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
+                    ))}
+                    <span className="text-xs text-slate-500 ml-1">
+                      ({product.salesVolume || 0})
+                    </span>
+                  </div>
+                </div>
+
+                {/* Price and Actions */}
+                <div className="flex items-center justify-between">
+                  <p className="text-base md:text-lg font-bold text-slate-900">
+                    {formatPriceMMK(displayPrice)}
+                  </p>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    {/* Wishlist Button */}
+                    <button
+                      type="button"
+                      className="w-9 h-9 bg-slate-100 hover:bg-amber-600 rounded-lg flex items-center justify-center transition-all group/btn active:scale-95"
+                      onClick={onToggleWishlist}
+                    >
+                      <Heart
+                        className={`w-4.5 h-4.5 transition-colors ${isWishlisted ? "fill-amber-600 text-amber-600 group-hover/btn:fill-white group-hover/btn:text-white" : "text-slate-600 group-hover/btn:text-white"}`}
+                      />
+                    </button>
+
+                    {/* Add to Cart Button */}
+                    <button
+                      type="button"
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all active:scale-95 ${
+                        outOfStock
+                          ? "bg-slate-300 cursor-not-allowed"
+                          : "bg-amber-600 hover:bg-amber-700"
+                      }`}
+                      onClick={handleAdd}
+                      disabled={outOfStock}
+                    >
+                      <Plus className={`w-4.5 h-4.5 ${outOfStock ? "text-slate-500" : "text-white"}`} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </>
+    );
+  }
+
+  // Grid view layout (original)
+  return (
+    <>
+      {showVariantPicker && (
+        <ProductVariantQuickAddModal
+          product={product}
+          open={variantModalOpen}
+          onOpenChange={setVariantModalOpen}
+          formatPriceMMK={formatPriceMMK}
+          onConfirm={handleVariantModalConfirm}
+        />
+      )}
+      <div className="transition-transform duration-150 hover:-translate-y-1">
+        <Card
+          className="group overflow-hidden border-0 hover:shadow-xl transition-all duration-300 cursor-pointer flex flex-col gap-3 bg-white shadow-md rounded-lg animate-scale-in w-full"
+          onClick={onProductClick}
+        >
+          {/* Product Image */}
+          <div className="aspect-square overflow-hidden bg-white relative">
+            <LazyImage
+              src={heroImageForGrid}
+              alt={product.name}
+              priority={priority}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            />
+            {outOfStock && (
+              <span className="absolute left-2 top-2 z-10 rounded bg-red-600/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                Out of stock
+              </span>
+            )}
+
+            {/* Action Buttons - Hidden by default on desktop, shown on hover. Always visible on mobile */}
+            <div className="absolute top-2 right-2 md:top-2.5 md:right-2.5 flex flex-col gap-1.5 z-10 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
+              {/* Add to Cart Button */}
+              <button
+                type="button"
+                className={`w-7 h-7 md:w-9 md:h-9 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md transition-all group/btn active:scale-95 ${
+                  outOfStock
+                    ? "bg-slate-200/90 cursor-not-allowed"
+                    : "bg-white/90 hover:bg-amber-600"
+                }`}
+                onClick={handleAdd}
+                disabled={outOfStock}
+                aria-label={outOfStock ? `${product.name} out of stock` : `Add ${product.name} to cart`}
+              >
+                <Plus
+                  className={`w-3.5 h-3.5 md:w-4.5 md:h-4.5 transition-colors ${
+                    outOfStock
+                      ? "text-slate-400"
+                      : "text-slate-900 group-hover/btn:text-white"
+                  }`}
+                />
+              </button>
+
+              {/* Wishlist Button */}
+              <button
+                type="button"
+                className="w-7 h-7 md:w-9 md:h-9 bg-white/90 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md transition-all hover:bg-amber-600 group/btn active:scale-95"
+                onClick={onToggleWishlist}
+                aria-label={isWishlisted ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`}
+              >
+                <Heart
+                  className={`w-3.5 h-3.5 md:w-4.5 md:h-4.5 transition-colors ${isWishlisted ? "fill-amber-600 text-amber-600 group-hover/btn:fill-white group-hover/btn:text-white" : "text-slate-600 group-hover/btn:text-white"}`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Product Info */}
+          <div className="px-2 pb-2">
+            {/* Product Name */}
+            <h4 className="font-semibold text-slate-900 text-sm leading-tight truncate mb-0.5">
+              {product.name.length > 30 ? (
+                <>
+                  {product.name.substring(0, 30)}
+                  <span className="text-slate-400">...</span>
+                  <span className="text-slate-400 text-xs">readmore</span>
+                </>
+              ) : (
+                product.name
+              )}
+            </h4>
+
+            {/* Star Rating */}
+            <div className="flex items-center gap-0.5 mb-1">
+              {[...Array(5)].map((_, i) => (
+                <Star key={i} className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+              ))}
+              <span className="text-[10px] text-slate-500 ml-1">
+                ({product.salesVolume || 0})
+              </span>
+            </div>
+
+            {/* Price */}
+            <div className="text-sm text-slate-900">
+              <span className="text-base font-bold">{formatPriceMMK(displayPrice).replace(" MMK", "")}</span>
+              <span className="text-[11px] ml-1 font-semibold text-slate-900">MMK</span>
+            </div>
+          </div>
+        </Card>
+      </div>
+    </>
+  );
+};

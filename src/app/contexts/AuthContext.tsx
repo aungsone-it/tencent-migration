@@ -1,41 +1,35 @@
 // Auth Context - User authentication management
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import {
+  createTencentCloudBaseCompatClient,
+  type TencentCloudBaseCompatClient,
+} from '../../utils/tencentCloudbaseClient';
+import { cloudbasePublishableKey, getCloudBaseRequestHeaders, cloudbaseApiBaseUrl } from '../../../utils/supabase/info';
+import { API_BASE_URL } from '../../utils/api-client';
 import {
   freeLocalStorageForAuth,
   isStorageQuotaError,
 } from '../utils/persistedLocalCache';
 
-const supabaseUrl = `https://${projectId}.supabase.co`;
-
 // ============================================
 // REMOVED: Session cleanup code
-// Supabase handles session management automatically
+// The auth provider handles session management through the Tencent compatibility client.
 // Manual cleanup was causing legitimate sessions to be cleared
 // ============================================
 
-// Single shared Supabase client instance to prevent multiple GoTrueClient instances
-let supabaseInstance: SupabaseClient | null = null;
+// Single shared Tencent client instance to preserve the previous app-wide client contract.
+let cloudbaseInstance: TencentCloudBaseCompatClient | null = null;
 
-// Create Supabase client - ONLY ONE INSTANCE FOR THE ENTIRE APP
-const getSupabaseClient = (): SupabaseClient => {
-  if (!supabaseInstance) {
-    console.log('🔧 Initializing Supabase client (SINGLE INSTANCE)');
-    supabaseInstance = createClient(supabaseUrl, publicAnonKey, {
-      auth: {
-        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: false,
-      }
-    });
+const getTencentClient = (): TencentCloudBaseCompatClient => {
+  if (!cloudbaseInstance) {
+    console.log('🔧 Initializing Tencent CloudBase client (SINGLE INSTANCE)');
+    cloudbaseInstance = createTencentCloudBaseCompatClient();
   }
-  return supabaseInstance;
+  return cloudbaseInstance;
 };
 
-// Export the single client instance
-export const supabase = getSupabaseClient();
+// Export name kept for existing realtime call sites during the migration.
+export const supabase = getTencentClient();
 
 export type UserRole =
   | 'super-admin'
@@ -214,13 +208,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const timeoutMs = PROFILE_FETCH_TIMEOUT_MS(isBackgroundRefresh);
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-        const url = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/profile/${userId}`;
+        const url = `${API_BASE_URL}/auth/profile/${userId}`;
         console.log("📡 Fetching profile from:", url);
 
         try {
           const response = await fetch(url, {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             signal: controller.signal,
           });
@@ -315,12 +310,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('🧹 Auto-cleanup: Checking for corrupted customer data...');
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/cleanup-corrupted`,
+        `${API_BASE_URL}/customers/cleanup-corrupted`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -368,7 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
           return { 
             success: false, 
-            error: 'Cannot connect to server. Please check if the Supabase Edge Function is deployed and running.' 
+            error: 'Cannot connect to server. Please check if the Tencent CloudBase function is deployed and running.' 
           };
         }
         // Handle invalid credentials error
@@ -404,7 +400,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
         return { 
           success: false, 
-          error: 'Cannot connect to authentication server. Please ensure Supabase is running properly.' 
+        error: 'Cannot connect to authentication server. Please ensure Tencent CloudBase is running properly.' 
         };
       }
       return { success: false, error: error.message || 'An unexpected error occurred during login' };
@@ -436,12 +432,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Update tempPassword flag
       if (user) {
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/update-temp-password`,
+          `${API_BASE_URL}/auth/update-temp-password`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+              ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify({ userId: user.id }),
           }

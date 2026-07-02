@@ -21,7 +21,7 @@ import {
 } from "../utils/module-cache";
 import { CategorySelect } from "./CategorySelect";
 import { useLanguage } from "../contexts/LanguageContext";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 // Separator Component
 function Separator() {
@@ -317,10 +317,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       setLoadingVendors(true);
       try {
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendors`,
+          `${cloudbaseApiBaseUrl}/vendors`,
           {
             headers: {
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );

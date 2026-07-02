@@ -1,4 +1,4 @@
-import { Context } from "npm:hono@4";
+import { Context } from "hono";
 import * as kv from "./kv_store.tsx";
 import {
   savePwaCheckoutDraft,

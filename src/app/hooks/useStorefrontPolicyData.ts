@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { resolveVendorSubdomainStoreSlug } from "../utils/vendorSubdomainHooks";
 import {
@@ -191,7 +191,8 @@ async function fetchVendorStoreBySlug(
   if (!inflight) {
     inflight = (async () => {
       const response = await fetch(`${API_BASE_URL}/vendor/store/${encodeURIComponent(key)}`, {
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) },
         signal,
       }).catch(() => null);
       if (!response?.ok) return null;

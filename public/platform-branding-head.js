@@ -5,9 +5,9 @@
 (function () {
   var CACHE_KEY = "admin:branding:v1";
   var FAVICON_CACHE_KEY = "admin:branding:favicon:v1";
-  var PROJECT_ID = "lmkthofnydxxgowryjcz";
-  var ANON_KEY =
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxta3Rob2ZueWR4eGdvd3J5amN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzNTQyMDUsImV4cCI6MjA4NTkzMDIwNX0.MpID6QuedE9KPzMXbWMGYPpbm98tOhUWxE7Kk7iaV_Q";
+  var API_BASE =
+    (window.NEXA_CLOUDBASE_API_BASE_URL || "/api/make-server-16010b6f").replace(/\/+$/, "");
+  var PUBLISHABLE_KEY = window.NEXA_CLOUDBASE_PUBLISHABLE_KEY || "";
   var RESERVED = ["www", "api", "admin", "app", "cdn", "mail", "ftp", "staging", "preview"];
   var DEFAULT_ICON = "/favicon.svg";
 
@@ -223,12 +223,9 @@
   }
 
   function refreshBrandingFromServer() {
-    fetch(
-      "https://" +
-        PROJECT_ID +
-        ".supabase.co/functions/v1/make-server-16010b6f/settings/general",
-      { headers: { Authorization: "Bearer " + ANON_KEY } }
-    )
+    fetch(API_BASE + "/settings/general", {
+      headers: PUBLISHABLE_KEY ? { Authorization: "Bearer " + PUBLISHABLE_KEY } : {},
+    })
       .then(function (res) {
         return res.ok ? res.json() : null;
       })

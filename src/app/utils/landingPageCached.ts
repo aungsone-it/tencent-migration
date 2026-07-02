@@ -2,7 +2,7 @@
  * Landing page (`/`) data — localStorage first, then edge; same TTL as storefront.
  */
 
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import {
   readPersistedJson,
   writePersistedJson,
@@ -13,8 +13,9 @@ import {
   LS_LANDING_CATEGORIES,
 } from "./persistedLocalCache";
 
-const base = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f`;
-const auth = { Authorization: `Bearer ${publicAnonKey}` };
+const base = `${cloudbaseApiBaseUrl}`;
+const auth = { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) };
 
 async function getJson(path: string): Promise<any> {
   const response = await fetch(`${base}${path}`, { headers: auth });

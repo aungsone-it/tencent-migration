@@ -37,7 +37,7 @@ import { format, startOfDay, endOfDay } from "date-fns";
 import { PrintInvoice } from "../PrintInvoice";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
-import { publicAnonKey } from "../../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { API_BASE_URL } from "../../../utils/api-client";
 import { ordersApi } from "../../../utils/api";
 import { ApiError } from "../../../utils/api-client";
@@ -118,7 +118,8 @@ async function fetchVendorContractCommissionPercent(slugOrId: string | undefined
   try {
     const res = await fetch(
       `${API_BASE_URL}/vendors/by-slug/${encodeURIComponent(key)}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
     );
     if (!res.ok) return 15;
     const data = (await res.json()) as { vendor?: { commission?: unknown } };

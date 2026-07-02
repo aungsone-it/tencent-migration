@@ -71,7 +71,7 @@ INACTIVE VENDOR  → Shows: ✅ Activate | 🔴 Ban
 
 ### **Files Modified**
 1. ✅ `/src/app/components/Vendor.tsx` - Frontend logic
-2. ✅ `/supabase/functions/server/index.tsx` - Backend endpoint
+2. ✅ `/cloudbase/functions/server/index.tsx` - Backend endpoint
 
 ### **Changes Made**
 
@@ -181,8 +181,8 @@ INACTIVE VENDOR  → Shows: ✅ Activate | 🔴 Ban
 ### **Deployment Steps**
 1. ✅ Commit all changes to Git
 2. ✅ Push to repository
-3. ✅ Deploy Supabase Edge Function (if auto-deploy not enabled)
-4. ✅ Verify Supabase Function is running
+3. ✅ Deploy CloudBase Function (if auto-deploy not enabled)
+4. ✅ Verify CloudBase Function is running
 5. ✅ Deploy frontend (Vite build)
 6. ✅ Test in production environment
 7. ✅ Monitor logs for errors
@@ -192,8 +192,8 @@ INACTIVE VENDOR  → Shows: ✅ Activate | 🔴 Ban
 
 ### **Post-Deployment Monitoring**
 ```bash
-# Check Supabase Function Logs
-Supabase Dashboard → Edge Functions → server → Logs
+# Check CloudBase Function Logs
+CloudBase Console → Edge Functions → server → Logs
 
 # Look for:
 ✅ Vendor {id} updated successfully. Status: {newStatus}
@@ -211,7 +211,7 @@ Supabase Dashboard → Edge Functions → server → Logs
 
 ### **What "Working Correctly" Means:**
 1. ✅ No JavaScript errors in browser console
-2. ✅ No errors in Supabase Function logs
+2. ✅ No errors in CloudBase Function logs
 3. ✅ Status changes complete in < 2 seconds
 4. ✅ Status changes persist after page refresh
 5. ✅ Correct menu items show for each status
@@ -228,7 +228,7 @@ Supabase Dashboard → Edge Functions → server → Logs
 ### **Problem: Status doesn't change**
 **Solution:**
 1. Check browser console for errors
-2. Check Supabase Function logs
+2. Check CloudBase Function logs
 3. Verify vendor exists in database
 4. Check network tab for failed requests
 5. Verify backend is deployed
@@ -248,7 +248,7 @@ Supabase Dashboard → Edge Functions → server → Logs
 
 ### **Problem: Changes don't persist**
 **Solution:**
-1. Check Supabase Function deployment
+1. Check CloudBase Function deployment
 2. Verify KV store is working
 3. Check backend error logs
 4. Verify cache is being cleared
@@ -294,7 +294,7 @@ Supabase Dashboard → Edge Functions → server → Logs
 ### **What to Watch:**
 - Browser console for JavaScript errors
 - Network tab for failed requests
-- Supabase logs for backend errors
+- CloudBase logs for backend errors
 - Toast notifications for user feedback
 - Status badge updates in real-time
 
@@ -306,7 +306,7 @@ Browser Console:
 📦 Fetching vendors...
 ✅ Loaded {count} vendors
 
-Supabase Logs:
+CloudBase Logs:
 ✅ Vendor {id} updated successfully. Status: {newStatus}
 🔄 Cleared vendor list cache after vendor update
 ```

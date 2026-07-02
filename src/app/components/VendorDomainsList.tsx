@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Globe, CheckCircle, XCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 interface VendorDomain {
   vendorId: string;
@@ -25,10 +25,12 @@ export function VendorDomainsList() {
     setLoading(true);
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/admin/vendor-domains`,
+        `${cloudbaseApiBaseUrl}/admin/vendor-domains`,
         {
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );

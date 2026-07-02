@@ -1,7 +1,7 @@
 // 💳 STRIPE PAYMENT ROUTES
 // Backend endpoint for creating Stripe Payment Intents
 
-import { Context } from "npm:hono@4";
+import { Context } from "hono";
 
 // 🔑 STRIPE SECRET KEY (You'll add this to Supabase secrets)
 // Get it from: https://dashboard.stripe.com/apikeys

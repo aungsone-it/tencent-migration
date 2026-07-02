@@ -7,15 +7,15 @@ CREATE TABLE kv_store_16010b6f (
 );
 */
 
-// View at https://supabase.com/dashboard/project/lmkthofnydxxgowryjcz/database/tables
+// Backed by TencentDB for PostgreSQL through the CloudBase/PostgREST adapter.
 
 // This file provides a simple key-value interface for storing Figma Make data. It should be adequate for most small-scale use cases.
-import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { createClient } from "./cloudbase_compat.ts";
 
 // Reuse single client instance instead of creating new one each time
 const supabaseClient = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,

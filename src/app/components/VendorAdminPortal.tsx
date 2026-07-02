@@ -44,7 +44,7 @@ import { VendorAdminOrderManagement } from "./vendor-admin/VendorAdminOrderManag
 import { VendorAdminSettings } from "./vendor-admin/VendorAdminSettings";
 import { VendorAdminFinances } from "./vendor-admin/VendorAdminFinances";
 import { VendorAdminUsers } from "./vendor-admin/VendorAdminUsers";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { applyVendorStoreLogoFavicon, resetDocumentFavicon } from "../utils/documentFavicon";
 import { isRenderableImageSrc, pickStoreLogo } from "../utils/renderableImageSrc";
@@ -258,7 +258,9 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
         `${API_BASE_URL}/vendor/storefront/${vendor.id}`,
         {
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -456,7 +458,9 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
           `${API_BASE_URL}/vendor/orders/${encodeURIComponent(vendor.id)}`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );

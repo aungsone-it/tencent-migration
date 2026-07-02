@@ -6,6 +6,11 @@ import {
   resolvePrimaryPlatformApexHost,
   resolveVendorSubdomainApexFromHost,
 } from "./platformApexHost";
+import {
+  cloudbaseApiBaseUrl,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from "../../../utils/supabase/info";
 
 export type KPaySession = {
   merchantOrderId: string;
@@ -39,6 +44,16 @@ type KPayBaseParams = {
   projectId: string;
   publicAnonKey: string;
 };
+
+const API_ROOT = cloudbaseApiBaseUrl;
+
+function cloudbaseHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    ...getCloudBaseRequestHeaders(),
+    ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+    ...extra,
+  };
+}
 
 type CreateKPayQrParams = KPayBaseParams & {
   amount: number;
@@ -341,20 +356,19 @@ export function buildMerchantOrderId(prefix = "ORD"): string {
 
 export async function createKPayQrSession(params: CreateKPayQrParams): Promise<KPaySession> {
   const {
-    projectId,
-    publicAnonKey,
+    projectId: _projectId,
+    publicAnonKey: _publicAnonKey,
     amount,
     merchantOrderId = buildMerchantOrderId("KPAY"),
     currency = "MMK",
     notifyUrl,
   } = params;
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/kpay/create-qr`,
+    `${API_ROOT}/kpay/create-qr`,
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
+        ...cloudbaseHeaders({ "Content-Type": "application/json" }),
       },
       body: JSON.stringify({
         merchantOrderId,
@@ -406,13 +420,11 @@ export async function createKPayQrSession(params: CreateKPayQrParams): Promise<K
 export async function fetchKPaySessionStatus(
   params: KPayBaseParams & { merchantOrderId: string },
 ): Promise<KPaySession> {
-  const { projectId, publicAnonKey, merchantOrderId } = params;
+  const { projectId: _projectId, publicAnonKey: _publicAnonKey, merchantOrderId } = params;
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/kpay/status/${encodeURIComponent(merchantOrderId)}`,
+    `${API_ROOT}/kpay/status/${encodeURIComponent(merchantOrderId)}`,
     {
-      headers: {
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
+      headers: cloudbaseHeaders(),
     },
   );
   const data = await response.json().catch(() => ({}));
@@ -620,8 +632,8 @@ export type KPayPwaSession = {
  */
 export async function startKPayPwa(params: StartKPayPwaParams): Promise<KPayPwaSession> {
   const {
-    projectId,
-    publicAnonKey,
+    projectId: _projectId,
+    publicAnonKey: _publicAnonKey,
     amount,
     merchantOrderId = buildMerchantOrderId(),
     currency = "MMK",
@@ -635,12 +647,11 @@ export async function startKPayPwa(params: StartKPayPwaParams): Promise<KPayPwaS
   } = params;
 
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/kpay/pwa/start`,
+    `${API_ROOT}/kpay/pwa/start`,
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
+        ...cloudbaseHeaders({ "Content-Type": "application/json" }),
       },
       body: JSON.stringify({
         merchantOrderId,
@@ -688,10 +699,10 @@ export async function startKPayPwa(params: StartKPayPwaParams): Promise<KPayPwaS
 export async function fetchPwaCheckoutDraft(
   params: KPayBaseParams & { merchantOrderId: string }
 ): Promise<PwaCheckoutDraftResponse | null> {
-  const { projectId, publicAnonKey, merchantOrderId } = params;
+  const { projectId: _projectId, publicAnonKey: _publicAnonKey, merchantOrderId } = params;
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/kpay/pwa/draft/${encodeURIComponent(merchantOrderId)}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/kpay/pwa/draft/${encodeURIComponent(merchantOrderId)}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) return null;
   const data = (await response.json().catch(() => ({}))) as { draft?: PwaCheckoutDraftResponse };
@@ -701,12 +712,12 @@ export async function fetchPwaCheckoutDraft(
 export async function finalizePwaCheckoutOrderApi(
   params: KPayBaseParams & { merchantOrderId: string }
 ): Promise<{ ok: boolean; created?: boolean; error?: string; message?: string }> {
-  const { projectId, publicAnonKey, merchantOrderId } = params;
+  const { projectId: _projectId, publicAnonKey: _publicAnonKey, merchantOrderId } = params;
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/kpay/pwa/finalize/${encodeURIComponent(merchantOrderId)}`,
+    `${API_ROOT}/kpay/pwa/finalize/${encodeURIComponent(merchantOrderId)}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -743,8 +754,8 @@ export async function fetchOrphanedPwaDrafts(params?: {
   if (params?.merchantOrderId?.trim()) qs.set("merchantOrderId", params.merchantOrderId.trim());
   const query = qs.toString();
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/kpay/pwa/orphaned-drafts${query ? `?${query}` : ""}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } },
+    `${API_ROOT}/kpay/pwa/orphaned-drafts${query ? `?${query}` : ""}`,
+    { headers: cloudbaseHeaders() },
   );
   const data = (await response.json().catch(() => ({}))) as {
     drafts?: OrphanedPwaDraftRow[];

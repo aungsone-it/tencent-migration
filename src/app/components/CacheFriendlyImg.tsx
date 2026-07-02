@@ -22,7 +22,7 @@ function resolveDisplaySrc(src: string, priority: boolean, logo?: boolean): stri
 }
 
 /**
- * Storefront / storage-friendly <img>: resized Supabase URLs + fetch priority hints.
+ * Storefront / storage-friendly <img>: resized CloudBase URLs + fetch priority hints.
  */
 export function CacheFriendlyImg({
   src,

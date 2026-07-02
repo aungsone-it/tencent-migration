@@ -40,7 +40,7 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { ordersApi } from "../../utils/api";
 import { ApiError, getAdminOperationHeaders } from "../../utils/api-client";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { useLanguage } from "../contexts/LanguageContext";
 import {
   getCachedAdminOrdersPage,
@@ -724,11 +724,13 @@ export function Orders({
       }
       try {
         const response = await fetch(
-          `${projectId.includes("localhost") ? "http://localhost:54321" : `https://${projectId}.supabase.co`}/functions/v1/make-server-16010b6f/rebuild-cache`,
+          `${cloudbaseApiBaseUrl}/rebuild-cache`,
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               "Content-Type": "application/json",
               ...getAdminOperationHeaders(),
             },

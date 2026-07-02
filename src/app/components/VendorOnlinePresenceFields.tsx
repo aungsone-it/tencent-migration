@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Globe, Loader2, Sparkles } from "lucide-react";
 import { API_BASE_URL } from "../../utils/api-client";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import {
   VENDOR_ONLINE_PRESENCE_FIELDS,
   type VendorOnlinePresenceKey,
@@ -70,7 +70,9 @@ function SocialProfileCard({
 
     fetch(avatarUrl, {
       headers: {
-        Authorization: `Bearer ${publicAnonKey}`,
+        ...getCloudBaseRequestHeaders(),
+
+        ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
       },
     })
       .then((response) => (response.ok ? response.blob() : Promise.reject(new Error("avatar fetch failed"))))

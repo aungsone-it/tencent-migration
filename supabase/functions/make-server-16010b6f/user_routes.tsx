@@ -1,15 +1,15 @@
-import { Hono } from "npm:hono@4";
+import { Hono } from "hono";
 import * as kv from "./kv_store.tsx";
-import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { createClient } from "./cloudbase_compat.ts";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
 import { deleteOwnedStorageRefs } from "./storage_delete_helpers.tsx";
 
 const userApp = new Hono();
 
-// Initialize Supabase client
+// Initialize Tencent CloudBase/PostgREST compatibility client.
 const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,

@@ -8,7 +8,7 @@ import { Input } from "./ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { POLLING_INTERVALS_MS } from "../../constants";
 import {
   Select,
@@ -328,12 +328,14 @@ export function Marketing() {
   const handleSaveAppearanceSettings = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/appearance-settings`,
+        `${cloudbaseApiBaseUrl}/appearance-settings`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             image: appearanceImage,
@@ -358,12 +360,14 @@ export function Marketing() {
   const fetchAppearanceSettings = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/appearance-settings`,
+        `${cloudbaseApiBaseUrl}/appearance-settings`,
         {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -465,12 +469,14 @@ export function Marketing() {
       
       console.log("📣 Fetching campaigns from server...");
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns`,
+        `${cloudbaseApiBaseUrl}/campaigns`,
         {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -505,12 +511,14 @@ export function Marketing() {
   const fetchAnnouncementSettings = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/announcement`,
+        `${cloudbaseApiBaseUrl}/announcement`,
         {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -588,14 +596,16 @@ export function Marketing() {
       console.log(isEditing ? "📤 Updating campaign:" : "📤 Creating campaign:", newCampaign);
 
       const url = isEditing 
-        ? `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns/${selectedCampaign.id}`
-        : `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns`;
+        ? `${cloudbaseApiBaseUrl}/campaigns/${selectedCampaign.id}`
+        : `${cloudbaseApiBaseUrl}/campaigns`;
 
       const response = await fetch(url, {
         method: isEditing ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
         body: JSON.stringify({
           ...newCampaign,
@@ -649,12 +659,14 @@ export function Marketing() {
       console.log(`🗑️ Attempting to delete campaign: ${id}`);
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns/${id}`,
+        `${cloudbaseApiBaseUrl}/campaigns/${id}`,
         {
           method: "DELETE",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -686,12 +698,14 @@ export function Marketing() {
   const handleSaveAnnouncementSettings = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/announcement`,
+        `${cloudbaseApiBaseUrl}/announcement`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             enabled: announcementEnabled,
@@ -793,12 +807,14 @@ export function Marketing() {
       
       // Update backend
       await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns/${campaignId}`,
+        `${cloudbaseApiBaseUrl}/campaigns/${campaignId}`,
         {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(updatedCampaign),
         }

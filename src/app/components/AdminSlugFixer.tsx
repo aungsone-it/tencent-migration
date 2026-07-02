@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import "../utils/adminStyles";
 
 export function AdminSlugFixer() {
@@ -14,11 +14,13 @@ export function AdminSlugFixer() {
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/admin/fix-vendor-slugs`,
+        `${cloudbaseApiBaseUrl}/admin/fix-vendor-slugs`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             "Content-Type": "application/json",
           },
         }

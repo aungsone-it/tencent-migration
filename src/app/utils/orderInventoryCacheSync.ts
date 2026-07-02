@@ -1,6 +1,6 @@
 /**
  * Client-side inventory alignment when order status changes — mirrors
- * `supabase/functions/make-server-16010b6f/index.tsx` PUT /orders/:id rules.
+ * `cloudbase/functions/make-server-16010b6f/index.tsx` PUT /orders/:id rules.
  * Prefer refetching `/products` after PUT (server truth for variant stock); fall back to in-memory patch.
  */
 

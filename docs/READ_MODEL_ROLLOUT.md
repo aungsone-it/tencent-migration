@@ -6,7 +6,7 @@ Use this when deploying the KV-to-SQL read-model changes.
 
 Set these before exposing monitoring endpoints:
 
-- Supabase Edge secret: `EDGE_ADMIN_OPERATION_SECRET`
+- CloudBase/Tencent Edge secret: `EDGE_ADMIN_OPERATION_SECRET`
 - Frontend env, if using the admin diagnostics UI: `VITE_ADMIN_OPERATION_SECRET`
 
 The values must match. Monitoring endpoints reject requests without `x-admin-operation-secret`.
@@ -32,8 +32,8 @@ The values must match. Monitoring endpoints reject requests without `x-admin-ope
 Preferred repeatable check:
 
 ```bash
-SUPABASE_PROJECT_REF=<project-ref> \
-SUPABASE_ANON_KEY=<anon-key> \
+CLOUDBASE_API_BASE_URL=<cloudbase-api-base-url> \
+CLOUDBASE_PUBLISHABLE_KEY=<publishable-key> \
 EDGE_ADMIN_OPERATION_SECRET=<secret> \
 npm run validate:read-model
 ```
@@ -43,7 +43,7 @@ After deployment, call:
 ```bash
 curl -H "Authorization: Bearer <anon-key>" \
   -H "x-admin-operation-secret: <secret>" \
-  "https://<project-ref>.supabase.co/functions/v1/make-server-16010b6f/read-model/validate"
+  "$CLOUDBASE_API_BASE_URL/read-model/validate"
 ```
 
 Expected result:
@@ -57,7 +57,7 @@ Then call:
 ```bash
 curl -H "Authorization: Bearer <anon-key>" \
   -H "x-admin-operation-secret: <secret>" \
-  "https://<project-ref>.supabase.co/functions/v1/make-server-16010b6f/monitoring/summary"
+  "$CLOUDBASE_API_BASE_URL/monitoring/summary"
 ```
 
 Check:
@@ -68,7 +68,7 @@ Check:
 - `readModels.status`
 - `realtime.*.available`
 
-## 4. Supabase Dashboard Checks
+## 4. CloudBase/Tencent Dashboard Checks
 
 Monitor these during the first production window:
 

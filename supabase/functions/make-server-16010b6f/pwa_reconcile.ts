@@ -1,7 +1,7 @@
 /**
  * KBZ PWA safety net: find checkout drafts without storefront orders and finalize them.
  */
-import type { Context } from "npm:hono@4";
+import type { Context } from "hono";
 import * as kv from "./kv_store.tsx";
 import {
   finalizePwaCheckoutOrder,

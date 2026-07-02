@@ -402,7 +402,7 @@ SAVINGS: $0.42 → $0.0001 = 99.976% reduction! 🎉
 4. Share screenshots with your team
 
 ### **This Week:**
-1. Monitor Supabase usage dashboard
+1. Monitor CloudBase/Tencent usage dashboard
 2. Compare to previous weeks
 3. Calculate actual dollar savings
 4. Celebrate the results! 🎉

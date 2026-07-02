@@ -1,7 +1,7 @@
 // App Router Component - Handles setup and auth flow
 import { useState, useEffect } from 'react';
 import { Navigate, useLocation } from 'react-router';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { AuthGate } from './AuthGate';
 import { Loader2 } from 'lucide-react';
 import { usePlatformBranding } from '../hooks/usePlatformBranding';
@@ -24,10 +24,12 @@ export function AppRouter({ children }: { children: React.ReactNode }) {
   const checkIfSetupNeeded = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/check-setup`,
+        `${cloudbaseApiBaseUrl}/auth/check-setup`,
         {
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );

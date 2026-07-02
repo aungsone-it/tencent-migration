@@ -1,13 +1,18 @@
-import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import {
+  cloudbaseApiBaseUrl,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from '../../utils/supabase/info';
 
 export async function testConnection() {
-  const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f`;
+  const baseUrl = cloudbaseApiBaseUrl;
   
   try {
     const response = await fetch(`${baseUrl}/health`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${publicAnonKey}`,
+        ...getCloudBaseRequestHeaders(),
+        ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
       },
     });
     
@@ -26,14 +31,15 @@ export async function testConnection() {
 }
 
 export async function testEndpoint(endpoint: string, method = 'GET', body?: any) {
-  const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f`;
+  const baseUrl = cloudbaseApiBaseUrl;
   
   try {
     const options: RequestInit = {
       method,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${publicAnonKey}`,
+        ...getCloudBaseRequestHeaders(),
+        ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
       },
     };
     

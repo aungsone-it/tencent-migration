@@ -1,7 +1,7 @@
-import { Hono } from "npm:hono@4";
-import { cors } from "npm:hono/cors";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
 import * as kv from "./kv_store.tsx";
-import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { createClient } from "./cloudbase_compat.ts";
 import authApp from "./auth_routes.tsx";
 import blogEngagementApp from "./blog_engagement_routes.tsx";
 import customerApp from "./customer_routes.tsx";
@@ -127,10 +127,10 @@ globalThis.addEventListener("unhandledrejection", (event) => {
 
 const app = new Hono();
 
-// Initialize Supabase client with connection pool settings
+// Initialize Tencent CloudBase/PostgREST compatibility client with connection pool settings.
 const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,
@@ -139,10 +139,10 @@ const supabase = createClient(
   }
 );
 
-/** Used to verify current password via signInWithPassword (storefront customers use Supabase Auth, not KV). */
+/** Used to verify current password via CloudBase Auth sign-in (storefront customers are not KV-only). */
 const supabaseAuth = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_ANON_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,
@@ -14871,79 +14871,88 @@ app.post("/make-server-16010b6f/admin/fix-vendor-slugs", async (c) => {
   }
 });
 
-console.log("🚀 Starting SECURE server...");
+console.log("🚀 Starting SECURE server handler...");
 
-// Wrap fetch handler with comprehensive error suppression at Deno.serve level
-Deno.serve({
-  handler: async (req) => {
+export async function handleRequest(req: Request): Promise<Response> {
+  try {
+    const response = await app.fetch(req);
+
+    // Try to return the response, but catch HTTP errors during response sending
     try {
-      const response = await app.fetch(req);
-      
-      // Try to return the response, but catch HTTP errors during response sending
-      try {
-        return response;
-      } catch (httpError: any) {
-        const errorMsg = String(httpError?.message || "").toLowerCase();
-        const errorName = String(httpError?.name || "").toLowerCase();
-        
-        // Suppress HTTP runtime errors when trying to send response
-        if (errorName === "http" || 
-            errorMsg.includes("connection") ||
-            errorMsg.includes("closed") ||
-            errorMsg.includes("message completed")) {
-          // Connection already closed, can't send response
-          return new Response(null);
-        }
-        throw httpError;
-      }
-    } catch (error: any) {
-      const errorMsg = String(error?.message || "").toLowerCase();
-      const errorName = String(error?.name || "").toLowerCase();
-      
-      // Silently handle ALL connection errors
-      if (errorName === "http" || 
-          error?.code === "EPIPE" ||
-          error?.code === "ECONNRESET" ||
+      return response;
+    } catch (httpError: any) {
+      const errorMsg = String(httpError?.message || "").toLowerCase();
+      const errorName = String(httpError?.name || "").toLowerCase();
+
+      // Suppress HTTP runtime errors when trying to send response
+      if (errorName === "http" ||
           errorMsg.includes("connection") ||
-          errorMsg.includes("message") ||
-          errorMsg.includes("completed") ||
           errorMsg.includes("closed") ||
-          errorMsg.includes("pipe") ||
-          errorMsg.includes("broken") ||
-          errorMsg.includes("reset")) {
-        // Don't log these - they're expected
-        try {
-          return new Response(null, { status: 499 });
-        } catch {
-          return new Response(null);
-        }
+          errorMsg.includes("message completed")) {
+        // Connection already closed, can't send response
+        return new Response(null);
       }
-      
-      // Log actual server errors
-      console.error("❌ Unhandled server error:", error?.message || error);
-      
-      // Try to return error response
+      throw httpError;
+    }
+  } catch (error: any) {
+    const errorMsg = String(error?.message || "").toLowerCase();
+    const errorName = String(error?.name || "").toLowerCase();
+
+    // Silently handle ALL connection errors
+    if (errorName === "http" ||
+        error?.code === "EPIPE" ||
+        error?.code === "ECONNRESET" ||
+        errorMsg.includes("connection") ||
+        errorMsg.includes("message") ||
+        errorMsg.includes("completed") ||
+        errorMsg.includes("closed") ||
+        errorMsg.includes("pipe") ||
+        errorMsg.includes("broken") ||
+        errorMsg.includes("reset")) {
+      // Don't log these - they're expected
       try {
-        return new Response(
-          JSON.stringify({ 
-            error: "Internal server error",
-            message: String(error?.message || error)
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
-      } catch (responseError) {
-        console.warn("⚠️ Could not send error response (connection lost)");
-        try {
-          return new Response(null, { status: 499 });
-        } catch {
-          return new Response(null);
-        }
+        return new Response(null, { status: 499 });
+      } catch {
+        return new Response(null);
       }
     }
-  },
+
+    // Log actual server errors
+    console.error("❌ Unhandled server error:", error?.message || error);
+
+    // Try to return error response
+    try {
+      return new Response(
+        JSON.stringify({
+          error: "Internal server error",
+          message: String(error?.message || error)
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        }
+      );
+    } catch (responseError) {
+      console.warn("⚠️ Could not send error response (connection lost)");
+      try {
+        return new Response(null, { status: 499 });
+      } catch {
+        return new Response(null);
+      }
+    }
+  }
+}
+
+export { app };
+
+const denoRuntime = (globalThis as {
+  Deno?: { serve?: (opts: { handler: (req: Request) => Promise<Response>; onError?: (error: Error) => Response }) => unknown };
+}).Deno;
+
+// Wrap fetch handler with comprehensive error suppression at Deno.serve level when run by Deno.
+if (typeof denoRuntime?.serve === "function") {
+  denoRuntime.serve({
+  handler: handleRequest,
   onError: (error) => {
     // Catch errors at the Deno.serve level (lowest/runtime level)
     const errorMsg = String(error?.message || "").toLowerCase();
@@ -14965,4 +14974,5 @@ Deno.serve({
     console.error("❌ Deno.serve onError:", error);
     return new Response("Internal Server Error", { status: 500 });
   }
-});
+  });
+}

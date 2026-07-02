@@ -1,4 +1,4 @@
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import {
   normalizePlatformStoreName,
 } from "../utils/platformBranding";
@@ -408,10 +408,12 @@ export function Settings() {
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/general`,
+        `${cloudbaseApiBaseUrl}/settings/general`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           signal: controller.signal,
         }
@@ -476,10 +478,12 @@ export function Settings() {
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/banners`,
+        `${cloudbaseApiBaseUrl}/settings/banners`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           signal: controller.signal,
         }
@@ -509,11 +513,13 @@ export function Settings() {
     setSaving(true);
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/general`,
+        `${cloudbaseApiBaseUrl}/settings/general`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -575,11 +581,13 @@ export function Settings() {
       
       // Upload to backend
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/upload-banner`,
+        `${cloudbaseApiBaseUrl}/settings/upload-banner`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: formData,
         }
@@ -620,11 +628,13 @@ export function Settings() {
     setSaving(true);
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/banners`,
+        `${cloudbaseApiBaseUrl}/settings/banners`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ banners }),
@@ -645,13 +655,15 @@ export function Settings() {
   };
 
   const syncUsersFromApi = async () => {
-    console.log("🔄 Syncing users from Supabase Auth...");
+    console.log("🔄 Syncing users from CloudBase Auth...");
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/sync-users`,
+      `${cloudbaseApiBaseUrl}/auth/sync-users`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
       }
     );
@@ -996,12 +1008,14 @@ export function Settings() {
       }
 
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/create-user`,
+        `${cloudbaseApiBaseUrl}/auth/create-user`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(createPayload),
         }
@@ -1082,12 +1096,14 @@ export function Settings() {
     // Persist to backend
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/user/${userId}`,
+        `${cloudbaseApiBaseUrl}/auth/user/${userId}`,
         {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             status: newStatus,
@@ -1122,11 +1138,13 @@ export function Settings() {
       console.log(`🗑️ Deleting user: ${userId}`);
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/user/${userId}?deletedBy=${encodeURIComponent(String(user?.id || ""))}`,
+        `${cloudbaseApiBaseUrl}/auth/user/${userId}?deletedBy=${encodeURIComponent(String(user?.id || ""))}`,
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -1232,11 +1250,13 @@ export function Settings() {
                         
                         // Upload to backend
                         const response = await fetch(
-                          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/upload-logo`,
+                          `${cloudbaseApiBaseUrl}/settings/upload-logo`,
                           {
                             method: 'POST',
                             headers: {
-                              'Authorization': `Bearer ${publicAnonKey}`,
+                              ...getCloudBaseRequestHeaders(),
+
+                              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                             },
                             body: formData,
                           }

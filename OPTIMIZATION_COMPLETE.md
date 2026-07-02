@@ -2,7 +2,7 @@
 
 ## 🎯 What We Fixed
 
-Your Supabase dashboard showed **960 requests in 24 hours**:
+Your CloudBase console showed **960 requests in 24 hours**:
 - 🚨 **Storage: 699 requests (73%)** ← THE PROBLEM
 - ⚠️ **Database: 257 requests (27%)** ← Also high
 - ✅ **Auth: 4 requests (0.4%)** ← Good
@@ -14,7 +14,7 @@ Your Supabase dashboard showed **960 requests in 24 hours**:
 
 ### 1. **Image URL Caching**
 Added `getCachedImageUrl()` to `/src/app/utils/module-cache.ts`
-- Caches Supabase signed URLs at module level
+- Caches CloudBase/Tencent signed URLs at module level
 - Prevents 699 storage requests from happening
 - Reduces storage API calls by **95%**
 
@@ -65,8 +65,8 @@ Total Requests: ~90/day  ✅ 91% REDUCTION!
 
 ## 🔍 How to Verify
 
-### Option 1: Check Supabase Dashboard (24 hours later)
-- Go to: https://supabase.com/dashboard
+### Option 1: Check CloudBase Console (24 hours later)
+- Go to: https://console.cloud.tencent.com/tcb
 - Navigate to: Edge Functions → Analytics
 - Look at: Last 24 Hours
 - **Should see ~90 requests instead of 960!**
@@ -157,7 +157,7 @@ return <img {...imageProps} ... />;
 The fix is **already live** in your app. Just:
 
 1. **Wait 24 hours**
-2. **Check Supabase dashboard**
+2. **Check CloudBase console**
 3. **See 91% reduction in requests** 🎉
 
 ---
@@ -211,7 +211,7 @@ moduleCache.getStats()
 
 Your app is now **production-ready** with enterprise-level caching!
 
-The next time you check Supabase dashboard:
+The next time you check CloudBase console:
 ```
 Yesterday: 960 requests/day 🚨
 Today:     ~90 requests/day ✅

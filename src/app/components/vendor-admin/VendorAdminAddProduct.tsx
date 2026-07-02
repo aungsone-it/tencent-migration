@@ -35,7 +35,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Separator } from "../ui/separator";
 import { Label } from "../ui/label";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { compressMultipleImagesToDataURLVendor } from "../../../utils/imageCompression";
 import { RichTextEditor } from "../RichTextEditor";
 
@@ -368,8 +368,8 @@ export function VendorAdminAddProduct({
       });
 
       const url = mode === "edit" 
-        ? `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products/${initialData?.id}`
-        : `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products`;
+        ? `${cloudbaseApiBaseUrl}/products/${initialData?.id}`
+        : `${cloudbaseApiBaseUrl}/products`;
       
       const method = mode === "edit" ? "PUT" : "POST";
 
@@ -379,7 +379,9 @@ export function VendorAdminAddProduct({
         method,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
         body: JSON.stringify(productData),
       });

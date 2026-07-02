@@ -6,7 +6,7 @@ import { Input } from "./ui/input";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { useLanguage } from "../contexts/LanguageContext";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { toast } from "sonner";
 import {
   getCachedAdminProductsPage,
@@ -416,12 +416,14 @@ export function Inventory({
     // Sync with backend in background
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/inventory/adjust`,
+        `${cloudbaseApiBaseUrl}/inventory/adjust`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             itemId: item.id,
@@ -471,12 +473,14 @@ export function Inventory({
 
     try {
       const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/inventory/adjust`,
+        `${cloudbaseApiBaseUrl}/inventory/adjust`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             itemId: item.id,

@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { toast } from 'sonner';
 import { notifyMigooUserSessionChanged } from '../../constants';
 
@@ -43,12 +43,14 @@ export function ResetPasswordPage() {
   const sendOtpRequest = async (targetEmail: string) => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/send-email-otp`,
+        `${cloudbaseApiBaseUrl}/auth/send-email-otp`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'apikey': publicAnonKey,
           },
           body: JSON.stringify({ email: targetEmail.trim() })
@@ -105,12 +107,14 @@ export function ResetPasswordPage() {
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/verify-otp-and-reset`,
+        `${cloudbaseApiBaseUrl}/auth/verify-otp-and-reset`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'apikey': publicAnonKey,
           },
           body: JSON.stringify({ 
@@ -133,12 +137,14 @@ export function ResetPasswordPage() {
       // Auto-login after successful password reset for smoother storefront UX
       try {
         const loginResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/login`,
+          `${cloudbaseApiBaseUrl}/auth/login`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               'apikey': publicAnonKey,
             },
             body: JSON.stringify({

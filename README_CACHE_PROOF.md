@@ -73,13 +73,13 @@
 ## 📊 What The Numbers Mean
 
 ### **Cache Hits (Green) ✅**
-- **What it is:** API calls that were served from cache instead of hitting Supabase
+- **What it is:** API calls that were served from cache instead of hitting CloudBase/Tencent
 - **What it saves:** Each hit = 1 API call saved = $0.00002 saved
 - **Goal:** This number should INCREASE with each navigation
 - **Example:** 147 hits = 147 API calls you didn't have to pay for!
 
 ### **Cache Misses (Red) ❌**
-- **What it is:** API calls that actually hit Supabase (initial data fetch)
+- **What it is:** API calls that actually hit CloudBase/Tencent (initial data fetch)
 - **When it happens:** First page load, hard refresh, cache clear
 - **Goal:** This number should stay LOW (3-10 total)
 - **Example:** 5 misses = 5 initial data fetches (normal!)
@@ -166,7 +166,7 @@
 
 2. **Filter for API Calls**
    - In filter box, type: `make-server-16010b6f`
-   - This shows only your Supabase edge functions
+   - This shows only your CloudBase/Tencent edge functions
 
 3. **First Load**
    ```
@@ -383,7 +383,7 @@ Check all that apply:
 
 **You're saving:**
 - 99% on API calls
-- 99% on Supabase costs  
+- 99% on backend costs  
 - 100% on loading time
 - Infinite% on user happiness
 

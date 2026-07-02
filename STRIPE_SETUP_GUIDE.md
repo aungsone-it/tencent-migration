@@ -50,9 +50,9 @@ STRIPE_SECRET_KEY=sk_test_YOUR_SECRET_KEY_HERE
 3. Replace `pk_test_YOUR_PUBLISHABLE_KEY_HERE` with your actual publishable key
 4. Replace `sk_test_YOUR_SECRET_KEY_HERE` with your actual secret key
 
-**Option B: Using Supabase Secrets (Production)**
+**Option B: Using CloudBase/Tencent Secrets (Production)**
 
-1. Go to your Supabase project dashboard
+1. Go to your CloudBase/Tencent project dashboard
 2. Click **"Settings"** → **"Edge Functions"**
 3. Scroll to **"Secrets"**
 4. Add these secrets:
@@ -156,7 +156,7 @@ Once approved:
 3. Copy your LIVE keys:
    - `pk_live_51xxxxxxxxxxxxx`
    - `sk_live_51xxxxxxxxxxxxx`
-4. Replace test keys in your .env / Supabase secrets
+4. Replace test keys in your .env / CloudBase/Tencent secrets
 5. REAL payments will now work! 💰
 
 ---
@@ -165,7 +165,7 @@ Once approved:
 
 - ✅ **NEVER** put secret key (`sk_live_xxx`) in frontend code
 - ✅ **ONLY** use publishable key (`pk_live_xxx`) in frontend
-- ✅ Secret key should ONLY be in backend/Supabase environment
+- ✅ Secret key should ONLY be in backend/CloudBase/Tencent environment
 - ✅ Use HTTPS in production (Vercel does this automatically)
 - ✅ Validate payment on backend before fulfilling orders
 
@@ -217,10 +217,10 @@ If you prefer Myanmar local payment, you can integrate **KBZPay** instead:
 **Solution:** Make sure you added `VITE_STRIPE_PUBLISHABLE_KEY` to environment variables
 
 ### Problem: "Failed to create payment intent"
-**Solution:** Check that `STRIPE_SECRET_KEY` is added to Supabase secrets
+**Solution:** Check that `STRIPE_SECRET_KEY` is added to CloudBase/Tencent secrets
 
 ### Problem: "Payment gateway not configured"
-**Solution:** Secret key is missing. Add it to Supabase Edge Functions secrets
+**Solution:** Secret key is missing. Add it to CloudBase Functions secrets
 
 ### Problem: Test cards not working
 **Solution:** Make sure you're using TEST keys (`pk_test_` and `sk_test_`), not live keys

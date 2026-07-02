@@ -2,7 +2,7 @@
  * Caches storage.listBuckets() per Edge isolate to cut Storage API volume.
  * Every upload route was calling listBuckets() — that adds up fast under demo traffic.
  */
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.49.8";
+import type { CloudBaseCompatClient } from "./cloudbase_compat.ts";
 
 type CreateBucketOptions = {
   public: boolean;
@@ -14,7 +14,7 @@ let cacheExpiresAt = 0;
 /** Long TTL: bucket set rarely changes; invalidates naturally on new isolate. */
 const LIST_BUCKETS_TTL_MS = 60 * 60 * 1000;
 
-export async function getBucketNames(supabase: SupabaseClient): Promise<Set<string>> {
+export async function getBucketNames(supabase: CloudBaseCompatClient): Promise<Set<string>> {
   const now = Date.now();
   if (cachedNames && now < cacheExpiresAt) {
     return cachedNames;
@@ -30,7 +30,7 @@ export async function getBucketNames(supabase: SupabaseClient): Promise<Set<stri
 }
 
 export async function ensureBucket(
-  supabase: SupabaseClient,
+  supabase: CloudBaseCompatClient,
   bucketName: string,
   options: CreateBucketOptions
 ): Promise<void> {

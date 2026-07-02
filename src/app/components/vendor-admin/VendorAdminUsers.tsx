@@ -14,7 +14,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Checkbox } from "../ui/checkbox";
@@ -175,11 +175,13 @@ export function VendorAdminUsers({ vendorId, vendorName }: VendorAdminUsersProps
           params.set("tier", filterTier);
           params.set("segment", filterSegment);
           const response = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/audience/${vendorId}?${params.toString()}`,
+            `${cloudbaseApiBaseUrl}/vendor/audience/${vendorId}?${params.toString()}`,
             {
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${publicAnonKey}`,
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               },
             }
           );
@@ -242,11 +244,13 @@ export function VendorAdminUsers({ vendorId, vendorName }: VendorAdminUsersProps
               params.set("tier", filterTier);
               params.set("segment", filterSegment);
               const response = await fetch(
-                `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/audience/${vendorId}?${params.toString()}`,
+                `${cloudbaseApiBaseUrl}/vendor/audience/${vendorId}?${params.toString()}`,
                 {
                   headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${publicAnonKey}`,
+                    ...getCloudBaseRequestHeaders(),
+
+                    ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                   },
                 }
               );

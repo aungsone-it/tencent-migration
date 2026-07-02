@@ -14,7 +14,7 @@ import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import {
   getCachedVendorProductsAdmin,
   primeVendorProductsAdminCache,
@@ -100,11 +100,13 @@ export function VendorAdminProducts({ vendorId, onNavigateToAdd, onNavigateToEdi
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/products/${vendorId}/${productId}`,
+        `${cloudbaseApiBaseUrl}/vendor/products/${vendorId}/${productId}`,
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );

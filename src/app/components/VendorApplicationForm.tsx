@@ -15,7 +15,7 @@ import {
   Store,
 } from "lucide-react";
 import { toast } from "sonner";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import {
   invalidateAdminVendorApplicationsCache,
@@ -339,7 +339,9 @@ export function VendorApplicationForm({ onBack, source = "admin" }: VendorApplic
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ email }),
           signal: controller.signal,
@@ -644,7 +646,9 @@ export function VendorApplicationForm({ onBack, source = "admin" }: VendorApplic
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(applicationData),
         }

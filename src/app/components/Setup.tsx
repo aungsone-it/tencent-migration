@@ -1,4 +1,4 @@
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -199,12 +199,14 @@ export function Setup() {
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/setup`,
+        `${cloudbaseApiBaseUrl}/auth/setup`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(payload),
         }

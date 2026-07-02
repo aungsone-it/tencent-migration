@@ -31,7 +31,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { publicAnonKey } from "../../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { API_BASE_URL } from "../../../utils/api-client";
 import {
   getCachedVendorOrders,
@@ -109,7 +109,8 @@ async function fetchVendorContractCommissionPercent(slugOrId: string | undefined
   try {
     const res = await fetch(
       `${API_BASE_URL}/vendors/by-slug/${encodeURIComponent(key)}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
     );
     if (!res.ok) return 15;
     const data = (await res.json()) as { vendor?: { commission?: unknown } };

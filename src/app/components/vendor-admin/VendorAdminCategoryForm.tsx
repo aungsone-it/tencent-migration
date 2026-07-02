@@ -10,7 +10,7 @@ import { Label } from "../ui/label";
 import { Skeleton } from "../ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { compressImageToDataURLVendor } from "../../../utils/imageCompression";
 import {
   broadcastVendorCategoryAssignmentChanged,
@@ -236,12 +236,14 @@ export function VendorAdminCategoryForm({
       if (editingCategory) {
         // Update existing category
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/categories/${editingCategory.id}`,
+          `${cloudbaseApiBaseUrl}/vendor/categories/${editingCategory.id}`,
           {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify(categoryData),
           }
@@ -259,12 +261,14 @@ export function VendorAdminCategoryForm({
       } else {
         // Create new category
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/categories`,
+          `${cloudbaseApiBaseUrl}/vendor/categories`,
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify(categoryData),
           }

@@ -6,9 +6,9 @@ This file is the evergreen technical reference for the **current** app structure
 
 - React + TypeScript + Vite frontend
 - React Router route trees for public / admin / vendor paths
-- Supabase Auth + Edge Functions + Storage
+- CloudBase Auth + Edge Functions + Storage
 - **Primary datastore:** Postgres KV table `kv_store_16010b6f` (key + JSONB value) — see [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md)
-- Supabase project binding: `utils/supabase/info.tsx` (`projectId`, `publicAnonKey`)
+- CloudBase/Tencent project binding: `utils/tencent/cloudbase.ts` (`cloudbaseApiBaseUrl`, `cloudbasePublishableKey`)
 - Shared API client in `src/utils/api-client.ts`
 
 ## 2) Runtime layout
@@ -113,7 +113,7 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 
 ## 8) Data/API model
 
-- Frontend calls Supabase Edge endpoints through the shared API client (`api-client.ts` → `utils/supabase/info.tsx`).
+- Frontend calls CloudBase/Tencent Edge endpoints through the shared API client (`api-client.ts` → `utils/tencent/cloudbase.ts`).
 - Primary server function namespace: `make-server-16010b6f`.
 - Payment webhook: `kpay-webhook`.
 - Public vendor catalog: `GET .../vendor/products/:vendorId?page=&pageSize=&category=&q=` (SQL RPC when migrations applied).

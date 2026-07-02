@@ -60,7 +60,7 @@ The **Appearance** tab is hidden in the UI; branding fields live under **General
 - Vendor rows display as: `Vendor Approved > StoreName | email | phone` and **By Name · Role**
 - Feed is stored in KV `staff:activity:global-feed` (max 500 entries)
 - While the Activities tab is open, the client polls incrementally every **30 seconds** (`?since=` timestamp) — no full reload on every visit
-- Approve/reject/delete actions require the acting staff member’s Supabase Auth UUID (`performedByUserId`) from the browser session
+- Approve/reject/delete actions require the acting staff member’s CloudBase Auth UUID (`performedByUserId`) from the browser session
 
 ### Typical daily flow
 

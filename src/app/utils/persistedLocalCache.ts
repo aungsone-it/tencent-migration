@@ -1,5 +1,5 @@
 /**
- * Cross-session JSON cache in localStorage to cut repeat Supabase / edge calls
+ * Cross-session JSON cache in localStorage to cut repeat CloudBase / edge calls
  * after first visit: `/` landing, `/store` marketplace, vendor storefront.
  */
 
@@ -58,7 +58,7 @@ export function readPersistedPayloadSavedAt(key: string): number | null {
   }
 }
 
-const SUPABASE_AUTH_LS_PREFIX = "sb-";
+const CLOUDBASE_AUTH_LS_PREFIX = "nexa-cloudbase";
 
 /** Prefixes safe to delete before auth/session writes (catalog + admin caches). */
 const CACHE_LS_PREFIXES = [
@@ -73,8 +73,8 @@ const CACHE_LS_PREFIXES = [
 ];
 
 /**
- * Free localStorage so Supabase can persist `sb-*-auth-token` (fixes QuotaExceededError on login).
- * Keeps existing Supabase auth keys until sign-in replaces them.
+ * Free localStorage so CloudBase can persist auth/session state.
+ * Keeps existing CloudBase auth keys until sign-in replaces them.
  */
 export function freeLocalStorageForAuth(opts?: { clearAll?: boolean }): number {
   if (typeof localStorage === "undefined") return 0;
@@ -89,7 +89,7 @@ export function freeLocalStorageForAuth(opts?: { clearAll?: boolean }): number {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
-      if (k.startsWith(SUPABASE_AUTH_LS_PREFIX)) continue;
+      if (k.startsWith(CLOUDBASE_AUTH_LS_PREFIX)) continue;
       if (CACHE_LS_PREFIXES.some((p) => k.startsWith(p) || k.includes(p))) {
         keys.push(k);
         continue;

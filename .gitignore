@@ -10,6 +10,7 @@ node_modules/
 # Build Outputs
 dist/
 build/
+.cloudbase/
 *.log
 
 # Editor/System Files

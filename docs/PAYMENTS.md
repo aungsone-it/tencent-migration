@@ -32,8 +32,8 @@ Implementation: `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, `
 - Frontend checkout UI: `src/app/components/Checkout.tsx`
 - Frontend KBZPay client helpers: `src/app/utils/kpayClient.ts`
 - Return landing page: `src/app/pages/KPayReturnPage.tsx`
-- Server KBZPay routes: `supabase/functions/make-server-16010b6f/kpay_routes.tsx`
-- Webhook function: `supabase/functions/kpay-webhook/index.ts`
+- Server KBZPay routes: `cloudbase/functions/make-server-16010b6f/kpay_routes.tsx`
+- Webhook function: `cloudbase/functions/kpay-webhook/index.ts`
 
 ## Branding and naming
 
@@ -58,12 +58,12 @@ KBZ PWA checkouts store a server draft (`kpay_pwa_draft:ORD-…`) before payment
 
 ### Automatic recovery (recommended)
 
-1. Set Supabase Edge secret **`KPAY_PWA_RECONCILE_SECRET`** (or reuse `EDGE_ADMIN_OPERATION_SECRET`).
+1. Set CloudBase/Tencent Edge secret **`KPAY_PWA_RECONCILE_SECRET`** (or reuse `EDGE_ADMIN_OPERATION_SECRET`).
 2. Schedule **`POST /make-server-16010b6f/kpay/pwa/reconcile`** every 10–15 minutes with header `x-kpay-reconcile-secret`.
 3. Use the helper script:
 
 ```bash
-SUPABASE_PROJECT_REF=your-project-ref \
+CLOUDBASE_API_BASE_URL=https://your-api-domain.example.com/make-server-16010b6f \
 KPAY_PWA_RECONCILE_SECRET=your-secret \
 ./scripts/kpay-pwa-reconcile.sh
 ```

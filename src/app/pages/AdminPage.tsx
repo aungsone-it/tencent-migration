@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } fro
 import "../utils/adminStyles";
 import { useSearchParams, useParams, useNavigate, useLocation } from "react-router";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import type { User } from "../types/user";
 import type { Order } from "../types";
 import { useAuth } from "../contexts/AuthContext";
@@ -389,11 +389,13 @@ export function AdminPage() {
       try {
         // Check if user exists in user profiles
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/users/${currentUser.id}`,
+          `${cloudbaseApiBaseUrl}/users/${currentUser.id}`,
           {
             method: "GET",
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -402,11 +404,13 @@ export function AdminPage() {
         if (response.status === 404) {
           console.log("🔧 Initializing user data in backend...");
           const createResponse = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/users/${currentUser.id}`,
+            `${cloudbaseApiBaseUrl}/users/${currentUser.id}`,
             {
               method: "PUT",
               headers: {
-                Authorization: `Bearer ${publicAnonKey}`,
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                 "Content-Type": "application/json",
               },
               body: JSON.stringify(currentUser),
@@ -420,11 +424,13 @@ export function AdminPage() {
         
         // Also ensure user exists in auth system for Settings page
         const authCheckResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/init-user`,
+          `${cloudbaseApiBaseUrl}/auth/init-user`,
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
@@ -462,12 +468,14 @@ export function AdminPage() {
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/health`, 
+          `${cloudbaseApiBaseUrl}/health`, 
           {
             method: 'GET',
             headers: { 
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${publicAnonKey}`
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {})
             },
             signal: controller.signal,
           }

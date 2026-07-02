@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { useLanguage } from "../contexts/LanguageContext";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import {
   readPlatformBrandingCache,
   writePlatformBrandingCache,
@@ -91,10 +91,12 @@ export function SideNav({
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
         
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/general`,
+          `${cloudbaseApiBaseUrl}/settings/general`,
           {
             headers: {
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             signal: controller.signal,
           }

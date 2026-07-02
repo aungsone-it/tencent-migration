@@ -1,10 +1,10 @@
-import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { createClient } from "./cloudbase_compat.ts";
 
 type AnyRecord = Record<string, unknown>;
 
 const readModelClient = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,

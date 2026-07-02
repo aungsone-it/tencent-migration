@@ -45,7 +45,7 @@ This is the ULTIMATE proof - you'll see it with your own eyes!
 
 3. **Filter for API calls**
    - In the filter box, type: `make-server-16010b6f`
-   - This shows only your Supabase edge function calls
+   - This shows only your CloudBase/Tencent edge function calls
 
 4. **Test the cache:**
 
@@ -281,7 +281,7 @@ You'll know the cache is working perfectly when:
 2. ✅ **Debug panel shows 95%+ hit rate**
 3. ✅ **Console logs show "CACHE HIT"** messages
 4. ✅ **Navigation is INSTANT** (no loading states)
-5. ✅ **Supabase dashboard shows dramatic request drop**
+5. ✅ **CloudBase console shows dramatic request drop**
 
 ---
 
@@ -289,7 +289,7 @@ You'll know the cache is working perfectly when:
 
 Now that you can SEE the savings:
 
-1. **Monitor Supabase Dashboard**
+1. **Monitor CloudBase Console**
    - Check your usage over the next week
    - Compare to previous weeks
    - Enjoy the 99% reduction! 🎉
@@ -324,6 +324,6 @@ Now that you can SEE the savings:
 - First load: A few API calls ✅
 - Every navigation after: ZERO API calls ✅
 - Debug panel shows 95%+ hit rate ✅
-- You're saving 99% on Supabase costs ✅
+- You're saving 99% on backend costs ✅
 
 **Congratulations! You've successfully implemented enterprise-grade caching!** 🎉🚀💰

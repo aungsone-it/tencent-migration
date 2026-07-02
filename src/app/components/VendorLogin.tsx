@@ -10,7 +10,7 @@ import { getEffectiveVendorSubdomainBase } from '../utils/vendorSubdomainBase';
 import { subdomainHostLabelForVendorProfile } from '../utils/subdomainSlugMap';
 import { storeSlugFromBusinessName } from '../../utils/storeSlug';
 import { applyVendorStoreLogoFavicon, resetDocumentFavicon } from '../utils/documentFavicon';
-import { publicAnonKey } from '../../../utils/supabase/info';
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { API_BASE_URL } from '../../utils/api-client';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -147,7 +147,8 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
       try {
         const res = await fetch(
           `${API_BASE_URL}/vendor/storefront/${encodeURIComponent(vendor.vendorId)}`,
-          { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+          { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
         );
         if (res.ok) {
           const data = (await res.json()) as {
@@ -268,7 +269,9 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
             `${API_BASE_URL}/vendor/by-domain?domain=${encodeURIComponent(host)}`,
             {
               headers: {
-                Authorization: `Bearer ${publicAnonKey}`,
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               },
             }
           );
@@ -290,7 +293,8 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
             if (byDomainData.vendorId) {
               const storefrontRes = await fetch(
                 `${API_BASE_URL}/vendor/storefront/${encodeURIComponent(byDomainData.vendorId)}`,
-                { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+                { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
               ).catch(() => null);
               if (storefrontRes?.ok) {
                 const storefrontData = (await storefrontRes.json().catch(() => ({}))) as {
@@ -316,7 +320,9 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
           `${API_BASE_URL}/vendors/by-slug/${storeName}`,
           {
             headers: {
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -348,7 +354,7 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
       } catch (error) {
         if (error.message === 'Failed to fetch') {
           console.error('❌ Error fetching vendor: Cannot connect to server.');
-          console.error('   The Supabase edge function may not be deployed yet.');
+          console.error('   The CloudBase function may not be deployed yet.');
         } else {
           console.error('❌ Error fetching vendor:', error);
         }

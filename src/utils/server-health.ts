@@ -2,9 +2,13 @@
 // SERVER HEALTH MONITORING
 // ============================================
 
-import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import {
+  cloudbaseApiBaseUrl,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from '../../utils/supabase/info';
 
-const HEALTH_CHECK_URL = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/health`;
+const HEALTH_CHECK_URL = `${cloudbaseApiBaseUrl}/health`;
 
 export interface HealthCheckResult {
   isHealthy: boolean;
@@ -27,7 +31,8 @@ export async function checkServerHealth(timeoutMs = 10000): Promise<HealthCheckR
     const response = await fetch(HEALTH_CHECK_URL, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${publicAnonKey}`,
+        ...getCloudBaseRequestHeaders(),
+        ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
       },
       signal: controller.signal,
     });

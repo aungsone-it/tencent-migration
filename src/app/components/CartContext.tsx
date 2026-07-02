@@ -1,6 +1,6 @@
 // Cart Context - Shopping cart state management (DATABASE-FIRST)
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../contexts/AuthContext';
 import { MIGOO_USER_SESSION_CHANGED_EVENT } from "../../constants";
@@ -116,11 +116,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const body = JSON.stringify({ cart });
       const bodySize = new Blob([body]).size;
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${userId}/cart`,
+        `${cloudbaseApiBaseUrl}/customers/${userId}/cart`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'Content-Type': 'application/json',
           },
           body,
@@ -172,10 +174,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     try {
       console.log(`🛒 Loading cart from database for user: ${userId}`);
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${userId}/cart`,
+        `${cloudbaseApiBaseUrl}/customers/${userId}/cart`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );

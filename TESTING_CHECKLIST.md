@@ -149,9 +149,9 @@ if (!cardElement) {
   return;
 }
 
-// ✅ Check 5: Supabase configured?
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Supabase configuration missing');
+// ✅ Check 5: CloudBase configured?
+if (!cloudbaseUrl || !cloudbaseAnonKey) {
+  throw new Error('CloudBase/Tencent configuration missing');
 }
 
 // ✅ Check 6: Try/catch everything
@@ -198,8 +198,8 @@ Before deployment, verify:
 ### **Component Files:**
 - [x] `/src/app/components/StripePayment.tsx` - Created ✅
 - [x] `/src/app/components/PaymentSettings.tsx` - Created ✅
-- [x] `/supabase/functions/server/stripe_routes.tsx` - Created ✅
-- [x] `/supabase/functions/server/index.tsx` - Updated ✅
+- [x] `/cloudbase/functions/server/stripe_routes.tsx` - Created ✅
+- [x] `/cloudbase/functions/server/index.tsx` - Updated ✅
 
 ### **Imports:**
 - [x] `@stripe/stripe-js` installed ✅

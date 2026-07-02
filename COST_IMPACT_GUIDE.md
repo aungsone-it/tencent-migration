@@ -69,7 +69,7 @@ This dashboard shows **EXACTLY** what optimization actions you implemented and *
 │  💡 Return on Investment                        │
 │  With 3 optimization actions implemented,      │
 │  you're saving $8.20 per month and $2,993.00   │
-│  per year on Supabase costs. Your cache hit    │
+│  per year on backend costs. Your cache hit    │
 │  rate of 96.7% means most requests are served  │
 │  instantly without API calls!                   │
 │                                                 │
@@ -187,7 +187,7 @@ Option 2: Click the 💵 dollar icon in top-right navigation
 ### **Perfect for Presentations:**
 
 **Slide 1: The Problem**
-- Before: High Supabase API costs
+- Before: High CloudBase/Tencent API costs
 - 20.5 API calls per user session
 - Costing $0.42 per user
 

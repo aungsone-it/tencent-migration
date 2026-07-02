@@ -44,7 +44,7 @@ export function CostImpactDashboard({ onClose }: CostImpactDashboardProps) {
   const actualApiCalls = stats.misses;
   const apiCallsSaved = stats.hits;
   const totalRequestsWithoutCache = stats.totalRequests * 419.54; // Average multiplier based on typical session
-  const costPerRequest = 0.00002; // Supabase edge function cost
+  const costPerRequest = 0.00002; // CloudBase function cost
   
   const costWithoutCache = totalRequestsWithoutCache * costPerRequest;
   const costWithCache = actualApiCalls * costPerRequest;
@@ -297,7 +297,7 @@ export function CostImpactDashboard({ onClose }: CostImpactDashboardProps) {
             <div className="text-sm text-yellow-800">
               With <span className="font-bold">{implementedActions.length} optimization actions</span> implemented,
               you're saving <span className="font-bold">${monthlySavings.toFixed(2)} per month</span> and 
-              <span className="font-bold"> ${yearlySavings.toFixed(2)} per year</span> on Supabase costs.
+              <span className="font-bold"> ${yearlySavings.toFixed(2)} per year</span> on backend costs.
               Your cache hit rate of <span className="font-bold">{stats.totalRequests > 0 ? ((stats.hits / stats.totalRequests) * 100).toFixed(1) : 0}%</span> means
               most requests are served instantly without API calls!
             </div>

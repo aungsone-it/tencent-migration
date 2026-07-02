@@ -267,7 +267,7 @@ Purpose: Accepting real payments
 - Integration Guide: `/STRIPE_SETUP_GUIDE.md`
 - Code Example: `/STRIPE_INTEGRATION_EXAMPLE.tsx`
 - Component: `/src/app/components/StripePayment.tsx`
-- Backend: `/supabase/functions/server/stripe_routes.tsx`
+- Backend: `/cloudbase/functions/server/stripe_routes.tsx`
 
 ---
 

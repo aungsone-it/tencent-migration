@@ -48,12 +48,12 @@
 - ✅ Toast notification: "✅ Vendor \"X\" has been activated and can now access the platform!"
 - ✅ Console log: "✅ Vendor {id} status successfully changed to \"active\""
 - ✅ No errors in browser console
-- ✅ No server errors in Supabase logs
+- ✅ No server errors in CloudBase/Tencent logs
 - ✅ Refresh page → Status still shows "Active"
 
 **If Errors:**
 - Check browser console for error messages
-- Check Supabase Function logs for backend errors
+- Check CloudBase/Tencent Function logs for backend errors
 - Verify vendor exists in database
 - Check network tab for failed requests
 
@@ -206,7 +206,7 @@
 ✅ Loaded {count} vendors
 ```
 
-**Expected Server Logs (Supabase Functions):**
+**Expected Server Logs (CloudBase/Tencent Functions):**
 ```
 ✅ Vendor {id} updated successfully. Status: {newStatus}
 🔄 Cleared vendor list cache after vendor update
@@ -219,7 +219,7 @@
 ### **1. Backend Not Responding**
 - **Symptom:** Infinite loading or timeout
 - **Expected:** Toast error after timeout
-- **Fix:** Check Supabase Function deployment
+- **Fix:** Check CloudBase/Tencent Function deployment
 
 ### **2. Invalid Vendor ID**
 - **Symptom:** 404 error
@@ -243,7 +243,7 @@
 ### **Before Going Live:**
 - [ ] Test all 10 scenarios above
 - [ ] Check browser console for errors
-- [ ] Check Supabase Function logs
+- [ ] Check CloudBase/Tencent Function logs
 - [ ] Verify status changes persist after page refresh
 - [ ] Test on different browsers (Chrome, Firefox, Safari)
 - [ ] Test on mobile devices
@@ -253,7 +253,7 @@
 - [ ] Test with slow network (DevTools → Network → Slow 3G)
 
 ### **After Deployment:**
-- [ ] Monitor Supabase Function logs for errors
+- [ ] Monitor CloudBase/Tencent Function logs for errors
 - [ ] Check for any user reports of issues
 - [ ] Verify performance (status changes should complete in < 2 seconds)
 - [ ] Test status changes with real vendor accounts
@@ -302,15 +302,15 @@
 
 **Step 2: Check Network Tab**
 ```
-Request URL: https://{projectId}.supabase.co/functions/v1/make-server-16010b6f/vendors/{id}
+Request URL: $CLOUDBASE_API_BASE_URL/vendors/{id}
 Method: PUT
 Status: Should be 200
 Response: { success: true, vendor: {...}, message: "..." }
 ```
 
-**Step 3: Check Supabase Logs**
+**Step 3: Check CloudBase/Tencent Logs**
 ```
-Navigate to: Supabase Dashboard → Edge Functions → server → Logs
+Navigate to: CloudBase/Tencent Dashboard → Edge Functions → server → Logs
 Look for: ✅ Vendor {id} updated successfully
 Or errors: ❌ Invalid status: {status}
 ```
@@ -332,7 +332,7 @@ Value should have: status: "{newStatus}"
 3. ✅ Correct menu items show based on current status
 4. ✅ Toast notifications appear for all actions
 5. ✅ Console shows no errors
-6. ✅ Supabase logs show successful updates
+6. ✅ CloudBase/Tencent logs show successful updates
 7. ✅ Rapid status changes don't cause race conditions
 8. ✅ Network errors are handled gracefully
 9. ✅ Invalid inputs are rejected with clear errors

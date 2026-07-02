@@ -18,7 +18,7 @@ import { Separator } from "./ui/separator";
 import { toast } from "sonner";
 import { CategorySelect } from "./CategorySelect";
 import { compressMultipleImages } from "../../utils/imageCompression";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 interface AddProductPageProps {
   onBack?: () => void;
@@ -63,10 +63,12 @@ export function AddProductPage({ onBack, onSave }: AddProductPageProps) {
       setLoadingVendors(true);
       try {
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendors`,
+          `${cloudbaseApiBaseUrl}/vendors`,
           {
             headers: {
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );

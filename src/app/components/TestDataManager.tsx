@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from './ui/button';
 import { Trash2, RefreshCw } from 'lucide-react';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { getAdminOperationHeaders } from '../../utils/api-client';
 
 export function TestDataManager() {
@@ -18,12 +18,14 @@ export function TestDataManager() {
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/admin/clear-test-data`,
+        `${cloudbaseApiBaseUrl}/admin/clear-test-data`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             ...getAdminOperationHeaders(),
           },
           body: JSON.stringify({ confirmDelete: true })

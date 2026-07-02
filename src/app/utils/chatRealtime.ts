@@ -1,7 +1,7 @@
 /**
- * Supabase Realtime **Broadcast** for chat (messages persist in Edge/KV; broadcast carries live deltas).
+ * CloudBase realtime **Broadcast** for chat (messages persist in Edge/KV; broadcast carries live deltas).
  * Wired in `FloatingChat` (marketplace + vendor storefronts) and super-admin `Chat`.
- * Enable Realtime in the Supabase Dashboard. If Realtime is off, subscribe/send no-ops gracefully;
+ * Enable Realtime in the CloudBase Dashboard. If Realtime is off, subscribe/send no-ops gracefully;
  * HTTP polling in those components remains as a slow fallback.
  */
 import { supabase } from "../contexts/AuthContext";

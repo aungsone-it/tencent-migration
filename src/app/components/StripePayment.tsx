@@ -3,6 +3,11 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Button } from './ui/button';
 import { toast } from 'sonner';
+import {
+  cloudbaseApiBaseUrl,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from '../../../utils/supabase/info';
 
 // 🔑 STRIPE PUBLISHABLE KEY (You'll replace this with your real key)
 // Get it from: https://dashboard.stripe.com/apikeys
@@ -43,20 +48,18 @@ function StripePaymentForm({ amount, onSuccess, onError, disabled }: StripePayme
     try {
       // 🔥 STEP 1: Create Payment Intent on your backend
       // Your backend will call Stripe API with your SECRET key
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error('Supabase configuration missing');
+      if (!cloudbaseApiBaseUrl) {
+        throw new Error('CloudBase API configuration missing');
       }
 
       const response = await fetch(
-        `${supabaseUrl}/functions/v1/make-server-16010b6f/create-payment-intent`,
+        `${cloudbaseApiBaseUrl}/create-payment-intent`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             amount: Math.round(amount), // Amount in smallest currency unit

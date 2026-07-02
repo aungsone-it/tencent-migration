@@ -1,4 +1,4 @@
-/** Matches `auth_routes.tsx` — synthetic Supabase email for phone-only customers. */
+/** Matches `auth_routes.tsx` — synthetic CloudBase email for phone-only customers. */
 export const PHONE_AUTH_EMAIL_DOMAIN = "phone.migoo.store";
 
 const MYANMAR_PHONE_RE = /^(\+959|09)\d{9}$/;
@@ -19,7 +19,7 @@ export function isSyntheticAuthEmail(email: string): boolean {
   return String(email || "").toLowerCase().endsWith(`@${PHONE_AUTH_EMAIL_DOMAIN}`);
 }
 
-/** Derive Supabase auth email from any phone-shaped string (lenient fallback). */
+/** Derive CloudBase auth email from any phone-shaped string (lenient fallback). */
 export function authEmailFromPhoneRaw(raw: string): string | null {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return null;
@@ -64,7 +64,7 @@ function phoneFromSyntheticAuthEmail(authEmail: string): string | null {
   return null;
 }
 
-/** Supabase Auth email for password changes / sign-in (real email or phone-derived). */
+/** CloudBase Auth email for password changes / sign-in (real email or phone-derived). */
 export function resolveCustomerAuthEmail(user: CustomerAuthUser | null | undefined): string | null {
   if (!user) return null;
 

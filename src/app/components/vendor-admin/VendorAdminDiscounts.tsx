@@ -33,7 +33,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 
 interface DiscountCode {
   id: string;
@@ -93,10 +93,12 @@ export function VendorAdminDiscounts({ vendorId, vendorName }: VendorAdminDiscou
     setLoading(true);
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/discounts/${vendorId}`,
+        `${cloudbaseApiBaseUrl}/vendor/discounts/${vendorId}`,
         {
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -197,12 +199,14 @@ export function VendorAdminDiscounts({ vendorId, vendorName }: VendorAdminDiscou
       if (editingDiscount) {
         // Update existing discount
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/discounts/${editingDiscount.id}`,
+          `${cloudbaseApiBaseUrl}/discounts/${editingDiscount.id}`,
           {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify(discountData),
           }
@@ -219,12 +223,14 @@ export function VendorAdminDiscounts({ vendorId, vendorName }: VendorAdminDiscou
       } else {
         // Create new discount
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/discounts`,
+          `${cloudbaseApiBaseUrl}/discounts`,
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify(discountData),
           }
@@ -254,11 +260,13 @@ export function VendorAdminDiscounts({ vendorId, vendorName }: VendorAdminDiscou
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/discounts/${discountId}`,
+        `${cloudbaseApiBaseUrl}/discounts/${discountId}`,
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -314,12 +322,14 @@ export function VendorAdminDiscounts({ vendorId, vendorName }: VendorAdminDiscou
     
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/discounts/${discount.id}`,
+        `${cloudbaseApiBaseUrl}/discounts/${discount.id}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ ...discount, status: newStatus }),
         }

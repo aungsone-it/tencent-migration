@@ -19,7 +19,7 @@
                ▼
 ┌─────────────────────────────────────────────┐
 │  2. Browser Downloads Each Image            │ ← STORAGE REQUEST × 699
-│     GET https://...supabase.co/storage/...  │
+│     GET https://...cloudbase.co/storage/...  │
 │     (Repeated on EVERY page load!)          │
 └─────────────────────────────────────────────┘
 
@@ -95,7 +95,7 @@ export function getCacheableImageProps(src: string) {
 **Why this works:**
 - `crossOrigin: 'anonymous'` tells browser it's safe to cache
 - `loading: 'lazy'` prevents loading off-screen images
-- Browser respects Supabase's cache headers
+- Browser respects CloudBase/Tencent's cache headers
 - Result: Images cached for 1+ year in browser
 
 ---
@@ -177,7 +177,7 @@ export async function loadProductsCached() {
 
 ---
 
-### **5. Server-Side Signed URLs** (`/supabase/functions/server/auth_routes.tsx`)
+### **5. Server-Side Signed URLs** (`/cloudbase/functions/server/auth_routes.tsx`)
 
 ```typescript
 // ✅ VERIFIED: 1 year expiry (line 123)
@@ -200,11 +200,11 @@ export async function loadProductsCached() {
 1. loadProductsCached() called
    ├─ moduleCache: CACHE MISS
    ���─ Fetches from /products API
-   ├─ Server returns: [{id: 1, image: "https://supabase.../signed-url"}]
+   ├─ Server returns: [{id: 1, image: "https://cloudbase.../signed-url"}]
    └─ Caches products in moduleCache ✅
    
 2. Browser renders product images
-   ├─ <LazyImage src="https://supabase.../signed-url" />
+   ├─ <LazyImage src="https://cloudbase.../signed-url" />
    ├─ getCacheableImageProps() adds cache attributes
    ├─ Browser downloads image
    └─ Browser caches image file ✅
@@ -221,7 +221,7 @@ Storage Requests: ~35 (only visible images loaded lazily)
    └─ Returns instantly from memory
    
 2. Browser renders product images
-   ├─ <LazyImage src="https://supabase.../signed-url" />
+   ├─ <LazyImage src="https://cloudbase.../signed-url" />
    ├─ Same URL as before
    ├─ Browser: "I have this in cache!"
    └─ Loads from disk/memory cache ✅
@@ -238,7 +238,7 @@ Storage Requests: 0
    └─ Returns instantly from memory
    
 2. Browser renders product images
-   ├─ <LazyImage src="https://supabase.../signed-url" />
+   ├─ <LazyImage src="https://cloudbase.../signed-url" />
    ├─ Browser cache still valid
    └─ Loads from disk/memory cache ✅
 
@@ -313,7 +313,7 @@ Result: 257 database requests → ~50 (80% less)
 
 ### **2. Browser Cache (Reduces Storage Requests)**
 ```
-BEFORE: Every image load = download from Supabase Storage
+BEFORE: Every image load = download from CloudBase Storage
 AFTER:  First download = cache in browser, rest = browser cache
 
 Result: 699 storage requests → ~35 (95% less)
@@ -402,7 +402,7 @@ git push origin main
 
 - **0-1 hours:** Module cache fills up
 - **1-24 hours:** Browser caches fill up
-- **After 24 hours:** Check Supabase dashboard
+- **After 24 hours:** Check CloudBase console
   - Should see **~90 requests** instead of **960**
   - **91% reduction achieved!** 🎉
 

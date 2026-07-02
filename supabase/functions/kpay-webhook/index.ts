@@ -156,7 +156,7 @@ function kpayAckSuccess(): Response {
   });
 }
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -225,7 +225,8 @@ Deno.serve(async (req: Request) => {
   const insecureTrust = text(Deno.env.get("KPAY_WEBHOOK_UAT_TRUST_NOTIFY")) === "1";
   const uatMode =
     /uat|sandbox|test/i.test(text(Deno.env.get("KPAY_ENV"))) ||
-    /uat/i.test(text(Deno.env.get("SUPABASE_URL")));
+    /uat/i.test(text(Deno.env.get("CLOUDBASE_API_BASE_URL"))) ||
+    /uat/i.test(text(Deno.env.get("TENCENT_API_BASE_URL")));
   const tradeForTrust = text(
     forSign.trade_status || forSign.tradeStatus || body.trade_status || body.tradeStatus,
   ).toUpperCase();
@@ -279,4 +280,12 @@ Deno.serve(async (req: Request) => {
   });
 
   return kpayAckSuccess();
-});
+}
+
+const denoRuntime = (globalThis as {
+  Deno?: { serve?: (handler: (req: Request) => Promise<Response>) => unknown };
+}).Deno;
+
+if (typeof denoRuntime?.serve === "function") {
+  denoRuntime.serve(handleRequest);
+}

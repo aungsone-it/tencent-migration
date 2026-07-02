@@ -19,10 +19,10 @@ import {
   X,
   Loader2,
 } from "lucide-react";
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { compressImageToFile } from "../../utils/imageCompression";
 
-// Helper function to upload image to Supabase Storage
+// Helper function to upload image to CloudBase Storage
 async function uploadImageToStorage(file: File): Promise<string> {
   try {
     console.log('📤 Uploading image to storage:', file.name);
@@ -33,17 +33,19 @@ async function uploadImageToStorage(file: File): Promise<string> {
     const fileExt = file.name.split('.').pop();
     const fileName = `description-images/${timestamp}-${randomString}.${fileExt}`;
     
-    // Upload to Supabase Storage via server endpoint
+    // Upload to CloudBase Storage via server endpoint
     const formData = new FormData();
     formData.append('file', file);
     formData.append('fileName', fileName);
     
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/upload-description-image`,
+      `${cloudbaseApiBaseUrl}/upload-description-image`,
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
         body: formData,
       }

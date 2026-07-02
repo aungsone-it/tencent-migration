@@ -2,7 +2,7 @@
 
 ## 🚨 The Problem
 
-Your Supabase dashboard shows **960 requests in just 24 hours**:
+Your CloudBase console shows **960 requests in just 24 hours**:
 
 - **Storage:** 699 requests (73%) 🚨 CRITICAL
 - **Database:** 257 requests (27%) ⚠️ HIGH  
@@ -78,7 +78,7 @@ export function getCacheableImageProps(src: string) {
 - Adds cache-friendly attributes to `<img>` tags
 - Forces browser to cache images aggressively
 - Prevents re-downloading the same image file
-- Works with Supabase Storage signed URLs
+- Works with CloudBase Storage signed URLs
 
 ---
 
@@ -220,7 +220,7 @@ useEffect(() => {
 1. Component requests image URL
 2. `getCachedImageUrl()` checks module cache
 3. **Cache Hit:** Return cached signed URL (instant, no API call)
-4. **Cache Miss:** Fetch from Supabase, cache it, return
+4. **Cache Miss:** Fetch from CloudBase/Tencent, cache it, return
 5. Browser caches the actual image file
 6. Subsequent loads: **0 API calls** ✅
 
@@ -256,7 +256,7 @@ Press `F12` to see cache logs:
 - Check vendor profiles
 - **Watch console:** Should see mostly cache hits!
 
-### 4. Check Supabase Dashboard
+### 4. Check CloudBase Console
 - Wait 24 hours
 - Check request counts
 - Should see **~90 requests instead of 960**
@@ -310,14 +310,14 @@ moduleCache.clear();
 
 ### 3. Browser Cache
 - Images are cached by browser automatically
-- Supabase signed URLs include cache headers
+- CloudBase/Tencent signed URLs include cache headers
 - No need to manually set cache-control
 
 ---
 
 ## 🎉 Success Criteria
 
-After 24 hours, your Supabase dashboard should show:
+After 24 hours, your CloudBase console should show:
 
 ✅ **Total requests: ~90** (down from 960)  
 ✅ **Storage requests: ~35** (down from 699)  
@@ -331,7 +331,7 @@ After 24 hours, your Supabase dashboard should show:
 
 ## 🚀 Next Steps
 
-1. **Monitor for 24 hours** - Check Supabase dashboard tomorrow
+1. **Monitor for 24 hours** - Check CloudBase console tomorrow
 2. **Test thoroughly** - Navigate around your app, check console logs
 3. **Optimize further** - If still seeing high requests, investigate which endpoints
 4. **Scale confidence** - Know your app can handle 1000x more users at same cost
@@ -367,7 +367,7 @@ Check network tab:
 **You'll have: ~90 requests/day** ✅  
 **Savings: 91% reduction** 🚀  
 
-**The fix is already implemented!** Just wait 24 hours and check your Supabase dashboard to see the dramatic improvement.
+**The fix is already implemented!** Just wait 24 hours and check your CloudBase console to see the dramatic improvement.
 
 ---
 

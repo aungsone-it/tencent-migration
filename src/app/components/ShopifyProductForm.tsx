@@ -14,7 +14,7 @@ import {
 } from "./ui/select";
 import { Checkbox } from "./ui/checkbox";
 import { ModernRichTextEditor as RichTextEditor } from "./ModernRichTextEditor";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 interface Variant {
   id: string;
@@ -110,10 +110,12 @@ export function ShopifyProductForm({ mode, initialData, onSave, onCancel }: Prod
       setLoadingVendors(true);
       try {
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendors`,
+          `${cloudbaseApiBaseUrl}/vendors`,
           {
             headers: {
-              'Authorization': `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );

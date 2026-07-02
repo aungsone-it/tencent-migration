@@ -2,7 +2,7 @@
  * Hard-delete objects from Supabase Storage when admin removes or replaces assets.
  * Only targets known app buckets; skips data: URLs and external http(s) hosts.
  */
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.49.8";
+import type { CloudBaseCompatClient } from "./cloudbase_compat.ts";
 
 export const OWNED_STORAGE_BUCKETS = new Set([
   "make-16010b6f-profile-images",
@@ -59,7 +59,7 @@ export function parseOwnedStorageRef(value: unknown): { bucket: string; objectPa
 }
 
 export async function deleteOwnedStorageRefs(
-  supabase: SupabaseClient,
+  supabase: CloudBaseCompatClient,
   values: unknown[]
 ): Promise<void> {
   const refs: { bucket: string; objectPath: string }[] = [];

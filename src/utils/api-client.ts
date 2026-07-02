@@ -2,7 +2,11 @@
 // REFACTORED API CLIENT WITH TYPES
 // ============================================
 
-import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import {
+  cloudbaseApiBaseUrl,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from '../../utils/supabase/info';
 import { devLog, devWarn } from '../app/utils/devLog';
 import {
   API_TIMEOUTS,
@@ -16,7 +20,7 @@ import type { ApiResponse } from '../types';
 // CONFIGURATION
 // ============================================
 
-const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f`;
+const API_BASE_URL = cloudbaseApiBaseUrl;
 
 export { API_BASE_URL };
 
@@ -133,7 +137,8 @@ async function apiRequest<T = any>(
   const actorUserId = resolveActorUserId();
   const headers = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${publicAnonKey}`,
+    ...getCloudBaseRequestHeaders(),
+    ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
     ...(actorUserId ? { "x-actor-user-id": actorUserId } : {}),
     ...getAdminOperationHeaders(),
     ...fetchOptions.headers,
@@ -215,7 +220,7 @@ async function apiRequest<T = any>(
           return {} as T;
         }
         throw new ApiError(
-          `🚨 SERVER NOT DEPLOYED YET!\n\nThe Supabase Edge Function needs to be deployed. This usually happens automatically in Figma Make.\n\n✅ SOLUTION: The server will start automatically. Please wait 10-30 seconds and try again.\n\nIf the error persists after 1 minute, the Edge Function deployment may have failed.`,
+          `Server is not deployed yet.\n\nThe Tencent CloudBase HTTP function needs to be deployed. Please wait 10-30 seconds and try again.\n\nIf the error persists after 1 minute, the CloudBase function deployment may have failed.`,
           404
         );
       }

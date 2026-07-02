@@ -7,7 +7,7 @@ The following markdown files live in the **repository root** and are **historica
 | Document | Purpose |
 |----------|---------|
 | [README.md](../README.md) | NEXA Platform overview, routes, quick start |
-| [docs/ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) | Backend, KV model, SQL read model, Realtime pulses, scaling, Supabase binding |
+| [docs/ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) | Backend, KV model, SQL read model, Realtime pulses, scaling, CloudBase/Tencent binding |
 | [docs/CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md) | Routes, hosts, component map |
 | [docs/DEPLOYMENT.md](./DEPLOYMENT.md) | Deploy checklist |
 | [docs/READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md) | Read-model validation and monitoring |

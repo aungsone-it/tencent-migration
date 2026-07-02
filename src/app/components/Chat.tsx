@@ -459,7 +459,7 @@ export function Chat({
     []
   );
 
-  // Supabase Realtime Broadcast: inbox sidebar (merge payloads to avoid list refetch) + thread messages
+  // CloudBase realtime Broadcast: inbox sidebar (merge payloads to avoid list refetch) + thread messages
   useEffect(() => {
     const scheduleFullInboxFetch = () => {
       if (inboxFetchFallbackRef.current) clearTimeout(inboxFetchFallbackRef.current);

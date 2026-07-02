@@ -1,5 +1,5 @@
-import { Hono } from "npm:hono@4";
-import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { Hono } from "hono";
+import { createClient } from "./cloudbase_compat.ts";
 import * as kv from "./kv_store.tsx";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
 import { deleteOwnedStorageRefs } from "./storage_delete_helpers.tsx";
@@ -24,8 +24,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 60000): Promise<T
 }
 
 const supabaseAdmin = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,
@@ -36,8 +36,8 @@ const supabaseAdmin = createClient(
 
 // 🔥 SEPARATE CLIENT FOR CUSTOMER AUTH (uses anon key for signInWithPassword)
 const supabaseAuth = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_ANON_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,

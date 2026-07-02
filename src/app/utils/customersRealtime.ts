@@ -71,7 +71,7 @@ export function notifyCustomerRealtimeLocal(payload: CustomerRealtimePayload): v
   }
 }
 
-/** Cross-device Supabase Realtime broadcast (storefront → open admin tabs). */
+/** Cross-device CloudBase realtime broadcast (storefront → open admin tabs). */
 export async function broadcastCustomerRealtime(
   payload: CustomerRealtimePayload
 ): Promise<void> {

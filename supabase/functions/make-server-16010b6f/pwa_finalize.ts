@@ -187,14 +187,17 @@ async function postStorefrontOrder(body: Record<string, unknown>): Promise<{
   error?: string;
   message?: string;
 }> {
-  const base = text(Deno.env.get("SUPABASE_URL"));
+  const base =
+    text(Deno.env.get("CLOUDBASE_API_BASE_URL")) ||
+    text(Deno.env.get("TENCENT_API_BASE_URL"));
   const key =
-    text(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) ||
-    text(Deno.env.get("SUPABASE_ANON_KEY"));
+    text(Deno.env.get("CLOUDBASE_SERVICE_TOKEN")) ||
+    text(Deno.env.get("TCB_SERVICE_TOKEN")) ||
+    text(Deno.env.get("CLOUDBASE_PUBLISHABLE_KEY"));
   if (!base || !key) {
-    return { ok: false, status: 500, error: "supabase_env_missing" };
+    return { ok: false, status: 500, error: "cloudbase_env_missing" };
   }
-  const url = `${base.replace(/\/$/, "")}/functions/v1/make-server-16010b6f/orders`;
+  const url = `${base.replace(/\/$/, "")}/orders`;
   const res = await fetch(url, {
     method: "POST",
     headers: {

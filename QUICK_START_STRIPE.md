@@ -47,9 +47,9 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_test_51Hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    - Name: `VITE_STRIPE_PUBLISHABLE_KEY`
    - Value: `pk_test_51Hxxxxxxxxxxxxxxxxxxx`
 
-#### **Backend Key (Supabase)**
+#### **Backend Key (CloudBase/Tencent)**
 
-1. Go to: **https://supabase.com/dashboard**
+1. Go to: **https://cloudbase.com/dashboard**
 2. Your Project → Settings → Edge Functions
 3. Scroll to **"Secrets"**
 4. Click **"Add new secret"**
@@ -124,9 +124,9 @@ Result: ❌ Not enough money
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_YOUR_KEY_HERE
 STRIPE_SECRET_KEY=sk_test_YOUR_KEY_HERE
 
-# Your existing Supabase keys (don't change these)
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+# Your existing CloudBase/Tencent keys (don't change these)
+VITE_CLOUDBASE_API_BASE_URL=https://your-api-domain.example.com/make-server-16010b6f
+VITE_CLOUDBASE_PUBLISHABLE_KEY=your-anon-key
 ```
 
 ### **2. Import in Your Checkout**
@@ -193,7 +193,7 @@ Test each step:
 ✅ Fix: Add `VITE_STRIPE_PUBLISHABLE_KEY` to `.env` file and restart app
 
 ### **"Payment gateway not configured"**
-✅ Fix: Add `STRIPE_SECRET_KEY` to Supabase Edge Function secrets
+✅ Fix: Add `STRIPE_SECRET_KEY` to CloudBase/Tencent Edge Function secrets
 
 ### **"Invalid API key"**
 ✅ Fix: Make sure you copied the FULL key (starts with `pk_test_` or `sk_test_`)

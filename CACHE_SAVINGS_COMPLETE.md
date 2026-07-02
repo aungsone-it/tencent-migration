@@ -199,7 +199,7 @@ Total: 0 requests ✅✅✅
 - Below 80% (Check if cache is working)
 
 ### **Cost Savings**
-- Based on Supabase pricing
+- Based on CloudBase/Tencent pricing
 - ~$0.00002 per edge function call
 - Displays total saved for current session
 - Resets on hard refresh (Ctrl+Shift+R)

@@ -30,7 +30,7 @@ export const RETRY_CONFIG = {
  * power users): rely on paginated admin/storefront APIs, module-cache coalescing, server-side
  * product-list cache + in-flight dedupe on the edge, and these long poll intervals — not tight loops.
  *
- * Client-side polling intervals. Long intervals keep Supabase edge, database, and
+ * Client-side polling intervals. Long intervals keep CloudBase function, database, and
  * storage API counts low for small deployments (e.g. one operator).
  * Note: each product image loaded from Storage still counts as its own request;
  * that is separate from these timers.

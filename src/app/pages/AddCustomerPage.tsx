@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import imageCompression from "browser-image-compression";
 
 export function AddCustomerPage() {
@@ -175,11 +175,13 @@ export function AddCustomerPage() {
         formDataWithImage.append("customerName", formData.name);
 
         const uploadResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/upload-image`,
+          `${cloudbaseApiBaseUrl}/customers/upload-image`,
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: formDataWithImage,
           }
@@ -205,12 +207,14 @@ export function AddCustomerPage() {
       console.log("📤 Sending customer data to backend:", customerData);
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers`,
+        `${cloudbaseApiBaseUrl}/customers`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(customerData),
         }

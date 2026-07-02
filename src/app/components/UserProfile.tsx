@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { toast } from "sonner";
 import { compressImage } from "../../utils/imageCompression";
@@ -171,7 +171,8 @@ export function UserProfile({
     try {
       const activityRes = await fetch(
         `${API_BASE_URL}/auth/staff-activity/${staffUserId}`,
-        { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+        { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
       );
       if (cancelledRef()) return;
       if (!activityRes.ok) {
@@ -214,7 +215,8 @@ export function UserProfile({
         try {
           const profileRes = await fetch(
             `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(user.id)}`,
-            { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+            { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
           );
           if (cancelled) return;
           if (profileRes.ok) {
@@ -238,7 +240,7 @@ export function UserProfile({
                   ? payload.message
                   : profileRes.statusText || "Unknown error";
 
-            // 404 = route not deployed yet or unknown path — Supabase often returns `{ error: "Not found" }`.
+            // 404 = route not deployed yet or unknown path — CloudBase may return `{ error: "Not found" }`.
             // Session seed still fills name/email/phone; avoid a noisy toast for this expected dev/prod gap.
             if (profileRes.status === 404) {
               console.warn(
@@ -271,7 +273,8 @@ export function UserProfile({
       try {
         const profileRes = await fetch(
           `${API_BASE_URL}/auth/profile/${user.id}`,
-          { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+          { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
         );
         if (cancelled) return;
         if (profileRes.ok) {
@@ -368,7 +371,9 @@ export function UserProfile({
       {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
@@ -407,7 +412,9 @@ export function UserProfile({
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -431,7 +438,9 @@ export function UserProfile({
       {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -482,7 +491,9 @@ export function UserProfile({
       {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
@@ -499,7 +510,7 @@ export function UserProfile({
             : response.statusText;
       if (response.status === 404) {
         throw new Error(
-          "Profile API not found (404). Deploy the Edge Function that includes PUT /vendor-auth/profile, or run Supabase Functions locally."
+          "Profile API not found (404). Deploy the Edge Function that includes PUT /vendor-auth/profile, or run CloudBase Functions locally."
         );
       }
       throw new Error(detail || `Failed to update profile (${response.status})`);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, Component, type ReactNode } from "react";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { 
   ArrowLeft, 
@@ -574,7 +574,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
         {
           method: "GET",
           headers: {
-            "Authorization": `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             "Content-Type": "application/json",
           },
         }
@@ -900,7 +902,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             vendorId: vendor.id,

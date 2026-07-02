@@ -1,6 +1,6 @@
 /**
  * 🔍 REQUEST ANALYZER - Debug high API request counts
- * Shows exactly where Supabase requests are coming from
+ * Shows exactly where CloudBase requests are coming from
  */
 
 import { useState, useEffect } from 'react';
@@ -35,7 +35,7 @@ export function RequestAnalyzer({ onClose }: RequestAnalyzerProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Simulate your Supabase dashboard breakdown (based on your screenshot)
+  // Simulate your CloudBase dashboard breakdown (based on your screenshot)
   const totalRequests = 960; // From your screenshot
   const breakdown: RequestBreakdown[] = [
     {
@@ -284,7 +284,7 @@ export function RequestAnalyzer({ onClose }: RequestAnalyzerProps) {
           <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-300 rounded-lg p-3">
             <div className="text-xs font-semibold text-purple-900 mb-1">🎉 Expected Results After Fix</div>
             <div className="text-sm text-purple-800">
-              Your Supabase dashboard should show <span className="font-bold">~90 total requests/day</span> instead of 960:
+              Your CloudBase dashboard should show <span className="font-bold">~90 total requests/day</span> instead of 960:
               <div className="mt-2 space-y-1 text-xs">
                 <div>• <span className="font-bold">Storage:</span> 699 → ~35 requests</div>
                 <div>• <span className="font-bold">Database:</span> 257 → ~50 requests</div>
@@ -297,7 +297,7 @@ export function RequestAnalyzer({ onClose }: RequestAnalyzerProps) {
           {/* Live Indicator */}
           <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
             <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span>Live analysis • Check Supabase dashboard in 24h to see improvement</span>
+            <span>Live analysis • Check CloudBase dashboard in 24h to see improvement</span>
           </div>
         </CardContent>
       </Card>

@@ -1,6 +1,6 @@
 // Vendor Auth Context - Vendor authentication management
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { publicAnonKey } from '../../../utils/supabase/info';
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { API_BASE_URL } from '../../utils/api-client';
 import { storeSlugFromBusinessName } from '../../utils/storeSlug';
 import {
@@ -19,7 +19,8 @@ async function fetchVendorProfileAvatarUrl(vendorId: string): Promise<string | u
   try {
     const res = await fetch(
       `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(vendorId)}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
     );
     if (!res.ok) return undefined;
     const data = (await res.json()) as { user?: { profileImageUrl?: string } };
@@ -73,7 +74,8 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
       if (!candidate?.vendorId || !candidate?.email) return "invalid";
       const response = await fetch(
         `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(candidate.vendorId)}`,
-        { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+        { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
       );
       if (!response.ok) {
         return response.status === 401 || response.status === 403 || response.status === 404
@@ -179,7 +181,9 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ email, password }),
         }
@@ -207,7 +211,8 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
         try {
           const fr = await fetch(
             `${API_BASE_URL}/vendor/storefront/${encodeURIComponent(data.vendor.id)}`,
-            { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+            { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
           );
           if (fr.ok) {
             const fd = (await fr.json()) as { settings?: { storeSlug?: string } };

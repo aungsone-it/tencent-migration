@@ -366,7 +366,7 @@ export const enTranslations: Record<string, string> = {
     'profile.roleLocked.staff': 'Role and account status are managed by an administrator. You can update your personal details above.',
     'profile.timeline': 'Account timeline',
     'profile.timeline.vendorDesc': 'Account milestones from your vendor profile: when the account was created, recent vendor portal sign-ins, and saved profile updates.',
-    'profile.timeline.staffDesc': 'Profile and sign-in from your staff record and Supabase Auth. Product changes made from the admin (create, update, delete) are listed here with timestamps. Order history is not included.',
+    'profile.timeline.staffDesc': 'Profile and sign-in from your staff record and CloudBase Auth. Product changes made from the admin (create, update, delete) are listed here with timestamps. Order history is not included.',
     'profile.timeline.vendorEmpty': 'No timeline data yet. Save your profile or sign in again to see activity.',
     'profile.timeline.staffEmpty': 'No timeline data yet. Open this profile again after the account is saved or the user signs in.',
     'profile.timeline.accountCreated': 'Account created',
@@ -374,7 +374,7 @@ export const enTranslations: Record<string, string> = {
     'profile.timeline.staffRecord': 'Staff profile record',
     'profile.timeline.lastSignIn': 'Last sign-in',
     'profile.timeline.vendorPortal': 'Vendor portal (most recent session)',
-    'profile.timeline.supabaseAuth': 'Supabase Auth (most recent session)',
+    'profile.timeline.supabaseAuth': 'CloudBase Auth (most recent session)',
     'profile.timeline.profileUpdated': 'Profile updated',
     'profile.timeline.savedChanges': 'Saved changes to this profile',
     'profile.permission.fullPlatformStore': 'Full platform & store administration',
@@ -1438,7 +1438,7 @@ export const enTranslations: Record<string, string> = {
     'auth.forgotPassword.smsSent': 'We\'ve sent an OTP code to your phone. Enter the code to reset your password.',
     'auth.forgotPassword.backToLogin': 'Back to Login',
     'auth.forgotPassword.sendReset': 'Send Reset Link',
-    'auth.forgotPassword.setupWarning': 'SMS requires Twilio setup in Supabase. Use Email instead for instant delivery.',
+    'auth.forgotPassword.setupWarning': 'SMS requires Twilio setup in CloudBase. Use Email instead for instant delivery.',
     'auth.forgotPassword.emailRecommended': 'Email OTP is ready to use! Check your inbox for the 6-digit code (may take 1-2 minutes).',
     
     // Auth - Reset Password

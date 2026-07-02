@@ -4,7 +4,7 @@
  */
 import { useState, useEffect } from "react";
 import { resolveVendorSubdomainStoreSlug } from "./vendorSubdomainHooks";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import {
   isBarePlatformApexHost,
@@ -103,7 +103,8 @@ export async function fetchVendorSlugByCustomDomain(
         `${API_BASE_URL}/vendor/by-domain?domain=${encodeURIComponent(
           h
         )}`,
-        { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+        { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
       );
       if (!res.ok) return null;
       const data = (await res.json()) as { storeSlug?: string };

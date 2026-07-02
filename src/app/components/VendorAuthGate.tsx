@@ -11,7 +11,7 @@ import {
   vendorAdminPortalMismatchMessage,
   vendorAuthMatchesAdminPortal,
 } from "../utils/vendorAdminPortalAccess";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 
 export function VendorAuthGate({ children }: { children: React.ReactNode }) {
@@ -69,7 +69,9 @@ export function VendorAuthGate({ children }: { children: React.ReactNode }) {
           `${API_BASE_URL}/vendors/by-slug/${encodeURIComponent(hostSlug)}`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );

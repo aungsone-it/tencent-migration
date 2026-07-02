@@ -131,7 +131,7 @@ Result: ✅ PASS - Filters work correctly
 
 ### **Before Caching:**
 ```
-- 20,977 Supabase requests
+- 20,977 CloudBase requests
 - 2-3s load time on every navigation
 - High API costs
 - Poor user experience
@@ -139,7 +139,7 @@ Result: ✅ PASS - Filters work correctly
 
 ### **After Caching:**
 ```
-- ~100-500 Supabase requests (99% reduction) ✅
+- ~100-500 CloudBase requests (99% reduction) ✅
 - 2-3s first load, INSTANT subsequent loads ✅
 - Minimal API costs ✅
 - Premium user experience ✅
@@ -224,7 +224,7 @@ Result: ✅ PASS - Filters work correctly
 ✅ **Premium UX delivered**
 
 Your Migoo marketplace is now running with enterprise-grade caching that will:
-- Save you 99% on Supabase costs
+- Save you 99% on backend costs
 - Provide instant navigation after first load
 - Scale to 10x more users
 - Deliver a premium professional experience
@@ -248,7 +248,7 @@ Your Migoo marketplace is now running with enterprise-grade caching that will:
 1. Hard refresh browser (Cmd+Shift+R or Ctrl+Shift+R)
 2. Clear browser cache
 3. Check console for any error messages
-4. Verify Supabase server is running
+4. Verify CloudBase/Tencent server is running
 5. Check network connectivity
 
 ### **Maintenance:**

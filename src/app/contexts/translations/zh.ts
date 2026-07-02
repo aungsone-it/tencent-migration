@@ -364,7 +364,7 @@ export const zhTranslations: Record<string, string> = {
     'profile.roleLocked.staff': '角色和账户状态由管理员管理。您可以更新上方个人资料。',
     'profile.timeline': '账户时间线',
     'profile.timeline.vendorDesc': '来自供应商资料的账户里程碑：账户创建、最近供应商后台登录以及已保存的资料更新。',
-    'profile.timeline.staffDesc': '来自员工记录和 Supabase Auth 的资料与登录记录。从管理后台进行的产品创建、更新、删除会带时间戳显示在此。订单历史不包含在内。',
+    'profile.timeline.staffDesc': '来自员工记录和 CloudBase Auth 的资料与登录记录。从管理后台进行的产品创建、更新、删除会带时间戳显示在此。订单历史不包含在内。',
     'profile.timeline.vendorEmpty': '暂无时间线数据。保存资料或重新登录后可查看活动。',
     'profile.timeline.staffEmpty': '暂无时间线数据。账户保存或用户登录后，再次打开此资料即可查看。',
     'profile.timeline.accountCreated': '账户已创建',
@@ -372,7 +372,7 @@ export const zhTranslations: Record<string, string> = {
     'profile.timeline.staffRecord': '员工资料记录',
     'profile.timeline.lastSignIn': '最后登录',
     'profile.timeline.vendorPortal': '供应商后台（最近会话）',
-    'profile.timeline.supabaseAuth': 'Supabase Auth（最近会话）',
+    'profile.timeline.supabaseAuth': 'CloudBase Auth（最近会话）',
     'profile.timeline.profileUpdated': '资料已更新',
     'profile.timeline.savedChanges': '已保存此资料的更改',
     'profile.permission.fullPlatformStore': '完整平台和店铺管理权限',
@@ -1428,7 +1428,7 @@ export const zhTranslations: Record<string, string> = {
     'auth.forgotPassword.smsSent': '我们已向您的手机发送OTP验证码。输入验证码以重置您的密码。',
     'auth.forgotPassword.backToLogin': '返回登录',
     'auth.forgotPassword.sendReset': '发送重置链接',
-    'auth.forgotPassword.setupWarning': '短信需要在Supabase中设置Twilio。请改用电子邮件以获得即时发送。',
+    'auth.forgotPassword.setupWarning': '短信需要在CloudBase中设置Twilio。请改用电子邮件以获得即时发送。',
     'auth.forgotPassword.emailRecommended': '电子邮件OTP已准备好使用！请检查您的收件箱以获取6位数代码（可能需要1-2分钟）。',
     
     // Auth - Reset Password

@@ -7,12 +7,16 @@
  * Benefits:
  * - Reduces API calls from thousands to ~100
  * - Instant navigation (no loading states after initial load)
- * - Reduces Supabase storage requests dramatically
+ * - Reduces CloudBase storage requests dramatically
  * - Premium UX with instant data access
  */
 
 import { format } from 'date-fns';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import {
+  cloudbaseApiBaseUrl,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from '../../../utils/supabase/info';
 import { SmartCache } from '../../utils/cache';
 import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
@@ -40,6 +44,16 @@ import {
   hyphenSlugFromDisplayName,
   parseSubdomainSlugMap,
 } from './subdomainSlugMap';
+
+const API_ROOT = cloudbaseApiBaseUrl;
+
+function cloudbaseHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    ...getCloudBaseRequestHeaders(),
+    ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+    ...extra,
+  };
+}
 
 interface CacheEntry<T> {
   data: T;
@@ -492,9 +506,9 @@ export const moduleCache = new ModuleCache();
 // Fetch all products from all vendors (SECURE storefront)
 export async function fetchAllProducts() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products`,
+    `${API_ROOT}/products`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
 
@@ -660,8 +674,8 @@ export async function fetchAdminProductsPage(
   const ev = normAdminExcludeVendorId(params.excludeVendorId);
   if (ev) sp.set("excludeVendorId", ev);
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products?${sp.toString()}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/products?${sp.toString()}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch admin products page: ${response.status}`);
@@ -799,8 +813,8 @@ export async function getCachedAdminProductsPage(
 /** Paginated storefront catalog (slim rows) — standard ecommerce pattern. */
 export async function fetchCatalogBootstrap(pageSize = 24) {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products?bootstrap=1&pageSize=${pageSize}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/products?bootstrap=1&pageSize=${pageSize}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch catalog bootstrap: ${response.status}`);
@@ -827,8 +841,8 @@ export async function fetchCatalogPage(params: {
   if (params.minPrice != null && !Number.isNaN(params.minPrice)) sp.set("minPrice", String(params.minPrice));
   if (params.maxPrice != null && !Number.isNaN(params.maxPrice)) sp.set("maxPrice", String(params.maxPrice));
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products?${sp.toString()}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/products?${sp.toString()}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch catalog page: ${response.status}`);
@@ -840,8 +854,8 @@ export async function fetchProductsByIds(ids: string[]) {
   if (!ids.length) return [];
   const q = encodeURIComponent(ids.slice(0, 200).join(","));
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products?ids=${q}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/products?ids=${q}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch products by ids: ${response.status}`);
@@ -882,11 +896,11 @@ export async function fetchVendorWishlistVendorPage(params: {
 }): Promise<VendorWishlistVendorPageResult> {
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 24));
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products/wishlist-vendor-page`,
+    `${API_ROOT}/products/wishlist-vendor-page`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${publicAnonKey}`,
+        ...cloudbaseHeaders(),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -914,9 +928,9 @@ export async function fetchVendorWishlistVendorPage(params: {
 // Fetch all vendors (SECURE admin)
 export async function fetchAllVendors() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendors`,
+    `${API_ROOT}/vendors`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
 
@@ -986,9 +1000,9 @@ export function notifyAdminVendorApplicationsUpdated(reason?: string): void {
 /** Super Admin orders API — full payload (supports warning + order shape for Vendor Profile). */
 export async function fetchAdminOrdersPayload(): Promise<{ orders: any[]; warning?: string }> {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/orders`,
+    `${API_ROOT}/orders`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
 
@@ -1061,8 +1075,8 @@ export async function fetchAdminOrdersPage(params: AdminOrdersPageParams): Promi
   if (params.dateTo) sp.set("dateTo", params.dateTo);
   if (params.sort) sp.set("sort", params.sort);
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/orders?${sp.toString()}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/orders?${sp.toString()}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch orders page: ${response.status}`);
@@ -1205,9 +1219,9 @@ export function enrichAdminCategoriesWithProductCounts(
 export async function fetchAdminAllCategoriesList(): Promise<any[]> {
   const [categoriesRes, products] = await Promise.all([
     fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/admin/all-categories`,
+      `${API_ROOT}/admin/all-categories`,
       {
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: cloudbaseHeaders(),
       }
     ),
     fetchAllProducts().catch(() => [] as Record<string, unknown>[]),
@@ -1231,11 +1245,11 @@ export async function fetchAdminAllCategoriesList(): Promise<any[]> {
 }
 
 export async function fetchAdminCustomersPayload(): Promise<{ customers: any[] }> {
-  const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers`, {
+  const response = await fetch(`${API_ROOT}/customers`, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${publicAnonKey}`,
+      ...cloudbaseHeaders(),
     },
   });
   const data = await response.json();
@@ -1305,12 +1319,12 @@ export async function fetchAdminCustomersPage(params: AdminCustomersPageParams):
   if (params.tier && params.tier !== "all") sp.set("tier", params.tier);
   if (params.segment && params.segment !== "all") sp.set("segment", params.segment);
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers?${sp.toString()}`,
+    `${API_ROOT}/customers?${sp.toString()}`,
     {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
+        ...cloudbaseHeaders(),
       },
     }
   );
@@ -1439,9 +1453,9 @@ export async function fetchAdminDashboardStatsRaw(filters: AdminDashboardFilters
     globalFilter: filters.globalSection,
   });
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/dashboard/stats?${params}`,
+    `${API_ROOT}/dashboard/stats?${params}`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
   if (!response.ok) {
@@ -1517,9 +1531,9 @@ export async function fetchVendorProducts(
   let response: Response | null = null;
   for (const candidate of candidates) {
     response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/products/${encodeURIComponent(candidate)}?${sp.toString()}`,
+      `${API_ROOT}/vendor/products/${encodeURIComponent(candidate)}?${sp.toString()}`,
       {
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: cloudbaseHeaders(),
       }
     );
     if (response.ok) break;
@@ -1631,9 +1645,9 @@ export async function fetchVendorCategories(vendorId: string) {
   let response: Response | null = null;
   for (const candidate of candidates) {
     response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/categories-details/${encodeURIComponent(candidate)}`,
+      `${API_ROOT}/vendor/categories-details/${encodeURIComponent(candidate)}`,
       {
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: cloudbaseHeaders(),
       }
     );
     if (response.ok) break;
@@ -1651,11 +1665,11 @@ export async function fetchVendorCategories(vendorId: string) {
 // Fetch vendor orders (vendor admin)
 export async function fetchVendorOrders(vendorId: string, bustHttpCache = false) {
   const url = new URL(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/orders/${encodeURIComponent(vendorId)}`
+    `${API_ROOT}/vendor/orders/${encodeURIComponent(vendorId)}`
   );
   if (bustHttpCache) url.searchParams.set("_", String(Date.now()));
   const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${publicAnonKey}` },
+    headers: cloudbaseHeaders(),
     cache: "no-store",
   });
 
@@ -1699,7 +1713,7 @@ export async function fetchVendorOrdersPage(
   bustHttpCache = false
 ): Promise<VendorOrdersPagePayload> {
   const url = new URL(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/orders/${encodeURIComponent(vendorId)}`
+    `${API_ROOT}/vendor/orders/${encodeURIComponent(vendorId)}`
   );
   url.searchParams.set("page", String(query.page));
   url.searchParams.set("pageSize", String(query.pageSize));
@@ -1711,7 +1725,7 @@ export async function fetchVendorOrdersPage(
   if (query.to) url.searchParams.set("to", query.to);
   if (bustHttpCache) url.searchParams.set("_", String(Date.now()));
   const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${publicAnonKey}` },
+    headers: cloudbaseHeaders(),
     cache: "no-store",
   });
   if (!response.ok) {
@@ -1731,9 +1745,9 @@ export async function fetchVendorOrdersPage(
 // Fetch categories (SECURE storefront)
 export async function fetchAllCategories() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/categories`,
+    `${API_ROOT}/categories`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
 
@@ -1748,9 +1762,9 @@ export async function fetchAllCategories() {
 // Fetch site settings (SECURE storefront)
 export async function fetchSiteSettings() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/general`,
+    `${API_ROOT}/settings/general`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
 
@@ -1763,8 +1777,8 @@ export async function fetchSiteSettings() {
 
 export async function fetchBannersApi() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/banners`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/settings/banners`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch banners: ${response.status}`);
@@ -1774,9 +1788,9 @@ export async function fetchBannersApi() {
 
 export async function fetchFeaturedCampaignsApi() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns/featured`,
+    `${API_ROOT}/campaigns/featured`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
       signal: AbortSignal.timeout(8000),
     }
   );
@@ -1788,9 +1802,9 @@ export async function fetchFeaturedCampaignsApi() {
 
 export async function fetchAppearanceSettingsApi() {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/appearance-settings`,
+    `${API_ROOT}/appearance-settings`,
     {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
       signal: AbortSignal.timeout(8000),
     }
   );
@@ -1888,8 +1902,8 @@ export const CACHE_KEYS = {
 /** Logged-in customer orders (same endpoint as VendorStoreView / Storefront profile). */
 export async function fetchCustomerOrdersList(userId: string): Promise<any[]> {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/user/${encodeURIComponent(userId)}/orders`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/user/${encodeURIComponent(userId)}/orders`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     const t = await response.text();
@@ -1907,8 +1921,8 @@ export function invalidateCustomerOrdersCache(userId: string): void {
 /** Full product JSON (GET /products/:id) — same payload Super Admin uses via productsApi.getById */
 export async function fetchProductByIdFromApi(productId: string) {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products/${encodeURIComponent(productId)}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/products/${encodeURIComponent(productId)}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch product: ${response.status}`);
@@ -1919,8 +1933,8 @@ export async function fetchProductByIdFromApi(productId: string) {
 /** Vendor admin: all products (all statuses) for one vendor */
 export async function fetchVendorProductsAdmin(vendorId: string) {
   const response = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/products-admin/${encodeURIComponent(vendorId)}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    `${API_ROOT}/vendor/products-admin/${encodeURIComponent(vendorId)}`,
+    { headers: cloudbaseHeaders() }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch vendor products (admin): ${response.status}`);
@@ -2217,7 +2231,7 @@ export function primeAdminAllProductsCache(products: unknown[]): void {
 
 /**
  * After inventory adjust in Super Admin (no refetch). Keeps session cache aligned with UI.
- * Does not hit Supabase — safe to call on every +/- or save.
+ * Does not hit CloudBase — safe to call on every +/- or save.
  */
 export function patchAdminProductInventoryInCache(
   itemId: string,
@@ -2339,7 +2353,7 @@ export function applyDeltaToAdminProductInventoryInCache(productId: string, delt
 }
 
 /**
- * Apply stock movement for order line items (deduct or restore). No Supabase calls.
+ * Apply stock movement for order line items (deduct or restore). No CloudBase calls.
  */
 export function applyOrderLineStockDeltasToAdminCache(
   items: { productId: string; quantity: number; sku?: string }[],
@@ -2452,12 +2466,12 @@ export async function fetchFinancialAnalyticsFromApi(): Promise<Record<string, u
   const timeoutId = setTimeout(() => controller.abort(), 45000);
   try {
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/finances/analytics`,
+      `${API_ROOT}/finances/analytics`,
       {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...cloudbaseHeaders(),
         },
         signal: controller.signal,
       }
@@ -2611,9 +2625,9 @@ async function fetchAuthUsersRaw(): Promise<any[]> {
   const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/users`,
+      `${API_ROOT}/auth/users`,
       {
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: cloudbaseHeaders(),
         signal: controller.signal,
       }
     );
@@ -2669,7 +2683,7 @@ export type StaffActivityFeedRow = {
 };
 
 const STAFF_ACTIVITIES_API =
-  `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/staff-activities`;
+  `${API_ROOT}/auth/staff-activities`;
 
 /** Poll interval while Activities tab is open — lightweight incremental requests only. */
 export const STAFF_ACTIVITIES_POLL_MS = 30_000;
@@ -2687,7 +2701,7 @@ function normalizeStaffActivityRows(list: unknown): StaffActivityFeedRow[] {
 
 async function fetchStaffActivitiesFull(): Promise<StaffActivityFeedRow[]> {
   const response = await fetch(STAFF_ACTIVITIES_API, {
-    headers: { Authorization: `Bearer ${publicAnonKey}` },
+    headers: cloudbaseHeaders(),
   });
   if (!response.ok) return [];
   const data = await response.json();
@@ -2700,7 +2714,7 @@ export async function fetchIncrementalStaffActivities(
   const sinceParam = encodeURIComponent(String(since || "").trim());
   if (!sinceParam) return [];
   const response = await fetch(`${STAFF_ACTIVITIES_API}?since=${sinceParam}`, {
-    headers: { Authorization: `Bearer ${publicAnonKey}` },
+    headers: cloudbaseHeaders(),
   });
   if (!response.ok) return [];
   const data = await response.json();
@@ -2737,7 +2751,7 @@ export async function clearStaffActivities(clearedByUserId: string): Promise<boo
     `${STAFF_ACTIVITIES_API}?clearedBy=${encodeURIComponent(actorId)}`,
     {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: cloudbaseHeaders(),
     }
   );
   if (!response.ok) return false;
@@ -2865,8 +2879,8 @@ export function getCacheableImageProps(src: string) {
   };
 }
 
-const SUPABASE_STORAGE_OBJECT_PUBLIC = "/storage/v1/object/public/";
-const SUPABASE_STORAGE_OBJECT_SIGNED = "/storage/v1/object/sign/";
+const LEGACY_STORAGE_OBJECT_PUBLIC = "/storage/v1/object/public/";
+const LEGACY_STORAGE_OBJECT_SIGNED = "/storage/v1/object/sign/";
 
 /** Default grid thumb width when env is unset (PageSpeed / mobile LCP). */
 const DEFAULT_GRID_THUMB_MAX = 256;
@@ -2877,7 +2891,7 @@ function resolveThumbMax(explicitMax: number | undefined, fallback: number): num
   if (explicitMax != null && Number.isFinite(explicitMax) && explicitMax >= 64 && explicitMax <= 4096) {
     return Math.round(explicitMax);
   }
-  const raw = import.meta.env.VITE_SUPABASE_THUMB_MAX;
+  const raw = import.meta.env.VITE_CLOUDBASE_THUMB_MAX;
   const fromEnv =
     raw != null && String(raw).trim() !== "" ? Number(raw) : Number.NaN;
   if (Number.isFinite(fromEnv) && fromEnv >= 64 && fromEnv <= 4096) {
@@ -2887,21 +2901,21 @@ function resolveThumbMax(explicitMax: number | undefined, fallback: number): num
 }
 
 /**
- * Rewrite Supabase Storage public URLs to the image render endpoint (smaller downloads → better LCP).
- * Uses `VITE_SUPABASE_THUMB_MAX` when set; otherwise sensible defaults per use-case.
+ * Rewrite CloudBase Storage public URLs to the image render endpoint (smaller downloads → better LCP).
+ * Uses `VITE_CLOUDBASE_THUMB_MAX` when set; otherwise sensible defaults per use-case.
  */
 export function gridDisplayImageUrl(src: string, maxWidth?: number): string {
   if (!src) return src;
   const max = resolveThumbMax(maxWidth, DEFAULT_GRID_THUMB_MAX);
   let base = src;
-  if (src.includes(SUPABASE_STORAGE_OBJECT_PUBLIC)) {
+  if (src.includes(LEGACY_STORAGE_OBJECT_PUBLIC)) {
     base = src.replace(
-      SUPABASE_STORAGE_OBJECT_PUBLIC,
+      LEGACY_STORAGE_OBJECT_PUBLIC,
       "/storage/v1/render/image/public/"
     );
-  } else if (src.includes(SUPABASE_STORAGE_OBJECT_SIGNED)) {
+  } else if (src.includes(LEGACY_STORAGE_OBJECT_SIGNED)) {
     base = src.replace(
-      SUPABASE_STORAGE_OBJECT_SIGNED,
+      LEGACY_STORAGE_OBJECT_SIGNED,
       "/storage/v1/render/image/sign/"
     );
   } else {

@@ -30,7 +30,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "./ui/tabs";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { getVendorSubdomainBase } from "../utils/vendorSubdomainBase";
 
@@ -128,7 +128,9 @@ export function VendorStorefront({ vendor, onBack, onPreviewStore }: VendorStore
         `${API_BASE_URL}/vendor/storefront/${vendor.id}`,
         {
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -155,7 +157,9 @@ export function VendorStorefront({ vendor, onBack, onPreviewStore }: VendorStore
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ settings }),
         }

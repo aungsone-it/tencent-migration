@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { X, Mail, Lock, User, Phone, Upload, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { compressImage } from '../../utils/imageCompression';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 
 interface StorefrontAuthProps {
   onBack: () => void;
@@ -195,12 +195,14 @@ export function StorefrontAuth({ onBack, onLogin, onRegister }: StorefrontAuthPr
       emailCheckTimeoutRef.current = setTimeout(async () => {
         try {
           const response = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/validate`,
+            `${cloudbaseApiBaseUrl}/auth/validate`,
             {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {})
               },
               body: JSON.stringify({ email: email.trim() })
             }
@@ -237,12 +239,14 @@ export function StorefrontAuth({ onBack, onLogin, onRegister }: StorefrontAuthPr
       phoneCheckTimeoutRef.current = setTimeout(async () => {
         try {
           const response = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/validate`,
+            `${cloudbaseApiBaseUrl}/auth/validate`,
             {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {})
               },
               body: JSON.stringify({ phone: phone.trim() })
             }

@@ -31,7 +31,7 @@ import { useChatNotification } from "../contexts/ChatNotificationContext";
 
 const MIGOO_USER_STORAGE_KEY = "migoo-user";
 
-/** Customer accounts use KV/authApi session in localStorage (not Supabase AuthContext). Read fresh — state can be stale after same-tab login. */
+/** Customer accounts use KV/authApi session in localStorage (not CloudBase AuthContext). Read fresh — state can be stale after same-tab login. */
 function hasMigooCustomerSession(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -517,7 +517,7 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     return () => setFloatingChatOpen(false);
   }, [isOpen, setFloatingChatOpen]);
 
-  // 🔒 Sync auth: other tabs + window focus; merge with Supabase-backed AuthContext user
+  // 🔒 Sync auth: other tabs + window focus; merge with CloudBase-backed AuthContext user
   useEffect(() => {
     const checkAuth = () => {
       setIsCustomerAuthenticated(hasMigooCustomerSession() || isAuthenticated);

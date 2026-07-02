@@ -41,7 +41,7 @@ import {
   invalidateAdminAllProductsCache,
   ADMIN_PRODUCTS_LIST_CHANGED_EVENT,
 } from "../../utils/module-cache";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import {
   Dialog,
   DialogContent,
@@ -541,12 +541,14 @@ export function VendorAdminProductsCRUD({
     setSavingPicker(true);
     try {
       const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products/bulk-assign-vendor`,
+        `${cloudbaseApiBaseUrl}/products/bulk-assign-vendor`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             vendorId,
@@ -694,12 +696,14 @@ export function VendorAdminProductsCRUD({
     setRemovingFromStore(true);
     try {
       const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/products/bulk-assign-vendor`,
+        `${cloudbaseApiBaseUrl}/products/bulk-assign-vendor`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             vendorId,

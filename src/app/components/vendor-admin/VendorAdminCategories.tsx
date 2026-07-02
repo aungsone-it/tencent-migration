@@ -9,7 +9,7 @@ import { Skeleton } from "../ui/skeleton";
 import { VendorAdminCategoryForm } from "./VendorAdminCategoryForm";
 import { cacheManager } from "../../utils/cacheManager";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories } from "../../utils/module-cache";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
 import { useLanguage } from "../../contexts/LanguageContext";
@@ -67,12 +67,14 @@ export function VendorAdminCategories({
   const cleanupImportedCategories = async () => {
     try {
       await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/categories/cleanup-imported`,
+        `${cloudbaseApiBaseUrl}/vendor/categories/cleanup-imported`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ vendorId }),
         }
@@ -133,10 +135,12 @@ export function VendorAdminCategories({
     try {
       console.log("🔄 Loading vendor-owned categories for vendor:", vendorId);
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/categories-details/${vendorId}`,
+        `${cloudbaseApiBaseUrl}/vendor/categories-details/${vendorId}`,
         {
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         }
       );
@@ -253,12 +257,14 @@ export function VendorAdminCategories({
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/categories/${encodeURIComponent(category.id)}`,
+        `${cloudbaseApiBaseUrl}/vendor/categories/${encodeURIComponent(category.id)}`,
         {
           method: "DELETE",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ vendorId }),
         }

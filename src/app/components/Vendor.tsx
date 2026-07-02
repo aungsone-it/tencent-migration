@@ -1,6 +1,6 @@
 // Vendor Management Component - Force rebuild
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -512,7 +512,9 @@ export function Vendor({
       const response = await fetch(`${API_BASE_URL}/vendors`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newVendor),
@@ -561,7 +563,9 @@ export function Vendor({
       const response = await fetch(`${API_BASE_URL}/vendors/${editingVendor.id}`, {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -624,7 +628,9 @@ export function Vendor({
       const response = await fetch(`${API_BASE_URL}/vendors/${vendorId}${actorQuery}`, {
         method: "DELETE",
         headers: {
-          "Authorization": `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
       });
 
@@ -683,7 +689,9 @@ export function Vendor({
         fetch(`${API_BASE_URL}/vendors/${vendorId}${actorQuery}`, {
           method: "DELETE",
           headers: {
-            "Authorization": `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
         })
       );
@@ -758,7 +766,9 @@ export function Vendor({
       const response = await fetch(`${API_BASE_URL}/vendors/${vendorId}`, {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ status: newStatus }),
@@ -873,7 +883,7 @@ export function Vendor({
     }
 
     try {
-      // Use module cache to reduce Supabase requests (forceRefresh after mutations / post-approval)
+      // Use module cache to reduce CloudBase requests (forceRefresh after mutations / post-approval)
       console.log("📦 Fetching vendors...");
       const vendors = await moduleCache.get(
         CACHE_KEYS.ADMIN_VENDORS,
@@ -887,8 +897,8 @@ export function Vendor({
     } catch (error: any) {
       if (error.message === 'Failed to fetch') {
         console.error("❌ Error fetching vendors: Cannot connect to server.");
-        console.error("   The Supabase edge function may not be deployed yet.");
-        console.error("   Please deploy the edge function at /supabase/functions/make-server-16010b6f/");
+        console.error("   The CloudBase function may not be deployed yet.");
+        console.error("   Please deploy the edge function at /cloudbase/functions/make-server-16010b6f/");
       } else {
         console.error("❌ Error fetching vendors:", error);
       }
@@ -1063,7 +1073,9 @@ export function Vendor({
               const response = await fetch(`${API_BASE_URL}/vendors`, {
                 method: "POST",
                 headers: {
-                  "Authorization": `Bearer ${publicAnonKey}`,
+                  ...getCloudBaseRequestHeaders(),
+
+                  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify(data),

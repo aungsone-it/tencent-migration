@@ -14,7 +14,7 @@ import { resolveActiveVendorSubdomainBase } from "./platformApexHost";
 import { resolveSubdomainHostLabelForStore } from "./subdomainSlugMap";
 import { buildVendorStoreHomePath, resolveVendorPathSlug } from "./vendorStorePaths";
 import { API_BASE_URL } from "../../utils/api-client";
-import { publicAnonKey } from "../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import {
   resolveActiveVendorSubdomainBase,
   resolvePrimaryPlatformApexHost,
@@ -328,7 +328,8 @@ export async function resolveVendorStorefrontHomeUrl(params: {
 
   try {
     const res = await fetch(`${API_BASE_URL}/vendor/store/${encodeURIComponent(slug)}`, {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
+      headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) },
     });
     if (res.ok) {
       const data = (await res.json()) as {

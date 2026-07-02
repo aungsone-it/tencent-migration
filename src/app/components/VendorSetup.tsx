@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ArrowLeft, Eye, EyeOff, Store, CheckCircle, Mail, Lock, AlertCircle } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { publicAnonKey } from '../../../utils/supabase/info';
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { API_BASE_URL } from '../../utils/api-client';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
@@ -52,7 +52,9 @@ export function VendorSetup() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ email }),
         }
@@ -116,7 +118,9 @@ export function VendorSetup() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ 
             email,

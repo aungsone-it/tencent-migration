@@ -73,7 +73,7 @@ import {
 } from "./ui/alert-dialog";
 import { CustomerProfile } from "./CustomerProfile";
 import { useNavigate } from "react-router";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
   getCachedAdminCustomersPage,
@@ -296,7 +296,7 @@ export function CustomersEnhanced({
     };
   }, [fetchCustomers]);
 
-  // Supabase broadcast + cross-tab: new storefront registrations appear without manual refresh.
+  // CloudBase broadcast + cross-tab: new storefront registrations appear without manual refresh.
   useEffect(() => {
     let debounce: ReturnType<typeof setTimeout> | undefined;
     const schedule = () => {
@@ -607,12 +607,14 @@ export function CustomersEnhanced({
       console.log(`🚫 Blocking customer: ${customerId}`);
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${customerId}`,
+        `${cloudbaseApiBaseUrl}/customers/${customerId}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             status: "blocked",
@@ -649,12 +651,14 @@ export function CustomersEnhanced({
   // 🔥 DELETE CUSTOMER ACTION
   const deleteCustomerOnServer = async (customerId: string): Promise<void> => {
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${customerId}?deletedBy=${encodeURIComponent(String(sessionUser?.id || ""))}`,
+      `${cloudbaseApiBaseUrl}/customers/${customerId}?deletedBy=${encodeURIComponent(String(sessionUser?.id || ""))}`,
       {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
       }
     );

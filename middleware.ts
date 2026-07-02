@@ -69,19 +69,20 @@ function readRuntimeEnv(name: string): string {
   return String(env?.[name] || "").trim();
 }
 
-function resolveSupabaseProjectRef(): string {
+function resolveCloudBaseApiBaseUrl(): string {
   return (
-    readRuntimeEnv("SUPABASE_PROJECT_REF") ||
-    readRuntimeEnv("VITE_SUPABASE_PROJECT_REF") ||
-    "lmkthofnydxxgowryjcz"
-  );
+    readRuntimeEnv("CLOUDBASE_API_BASE_URL") ||
+    readRuntimeEnv("TENCENT_API_BASE_URL") ||
+    readRuntimeEnv("VITE_CLOUDBASE_API_BASE_URL") ||
+    "/api/make-server-16010b6f"
+  ).replace(/\/+$/, "");
 }
 
-function resolveSupabaseAnonKey(): string {
+function resolveCloudBasePublishableKey(): string {
   return (
-    readRuntimeEnv("SUPABASE_ANON_KEY") ||
-    readRuntimeEnv("VITE_SUPABASE_ANON_KEY") ||
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJIUzI1NiIsInJlZiI6Imxta3Rob2ZueWR4eGdvd3J5amN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzNTQyMDUsImV4cCI6MjA4NTkzMDIwNX0.MpID6QuedE9KPzMXbWMGYPpbm98tOhUWxE7Kk7iaV_Q"
+    readRuntimeEnv("CLOUDBASE_PUBLISHABLE_KEY") ||
+    readRuntimeEnv("TCB_PUBLISHABLE_KEY") ||
+    readRuntimeEnv("VITE_CLOUDBASE_PUBLISHABLE_KEY")
   );
 }
 
@@ -108,13 +109,14 @@ export async function middleware(context: EdgeOneMiddlewareContext): Promise<Res
       }
 
       const endpoint =
-        `https://${resolveSupabaseProjectRef()}.supabase.co/functions/v1/make-server-16010b6f/vendor/custom-domain/challenge-text?hostname=${
+        `${resolveCloudBaseApiBaseUrl()}/vendor/custom-domain/challenge-text?hostname=${
           encodeURIComponent(hostname)
         }`;
+      const publishableKey = resolveCloudBasePublishableKey();
       try {
         const res = await fetch(endpoint, {
           headers: {
-            Authorization: `Bearer ${resolveSupabaseAnonKey()}`,
+            ...(publishableKey ? { Authorization: `Bearer ${publishableKey}` } : {}),
             Accept: "text/plain",
           },
         });

@@ -267,7 +267,7 @@ export function useBadgeCounts() {
 
   /**
    * Realtime bridge hookup:
-   * - `adminOrdersUpdated` comes from order mutations + Supabase live pulse bridge.
+   * - `adminOrdersUpdated` comes from order mutations + CloudBase live pulse bridge.
    * - `vendorDataUpdated` captures vendor application/admin vendor-domain changes.
    * We debounce force-refresh to avoid request bursts when many row events arrive together.
    */

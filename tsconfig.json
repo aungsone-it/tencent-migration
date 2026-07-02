@@ -26,6 +26,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "api", "middleware.ts", "utils/supabase/info.tsx"],
+  "include": ["src", "api", "middleware.ts", "utils/supabase/info.tsx", "utils/tencent/**/*.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

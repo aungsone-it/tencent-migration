@@ -1,4 +1,4 @@
-import type { Context } from "npm:hono@4";
+import type { Context } from "hono";
 
 /**
  * Guards destructive / bulk admin routes. Set `EDGE_ADMIN_OPERATION_SECRET` in Supabase

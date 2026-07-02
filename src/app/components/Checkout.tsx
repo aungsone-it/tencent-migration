@@ -1,4 +1,4 @@
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ChevronLeft,
@@ -75,7 +75,7 @@ import { normalizeCheckoutStoragePath } from "../utils/vendorStorePaths";
 import { useIsMobile } from "./ui/use-mobile";
 import { useLanguage } from "../contexts/LanguageContext";
 
-/** KV-backed customer session (authApi / migoo-user) — AuthContext only has Supabase sessions */
+/** KV-backed customer session (authApi / migoo-user) — AuthContext only has CloudBase sessions */
 function getMigooCustomerFromStorage(): {
   id: string;
   email?: string;
@@ -517,8 +517,9 @@ function buildPwaFinalizeOrderPayload(
 
 function fetchOrderByMerchantOrderId(orderId: string): Promise<Response> {
   return fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/orders/${encodeURIComponent(orderId)}`,
-    { headers: { Authorization: `Bearer ${publicAnonKey}` } },
+    `${cloudbaseApiBaseUrl}/orders/${encodeURIComponent(orderId)}`,
+    { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } },
   );
 }
 
@@ -541,12 +542,14 @@ async function createStorefrontOrderFromPwaDraft(params: {
     params.effectiveUserId,
   );
   const createResponse = await fetch(
-    `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/orders`,
+    `${cloudbaseApiBaseUrl}/orders`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
+        ...getCloudBaseRequestHeaders(),
+
+        ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
       },
       body: JSON.stringify(payload),
     },
@@ -702,7 +705,7 @@ export function Checkout({
 
   /**
    * Customer id + profile: prefer vendor `accountUser` (same as `/profile/addresses`),
-   * then Supabase session, then raw migoo-user — so `/customers/:id/addresses` matches saved addresses.
+   * then CloudBase session, then raw migoo-user — so `/customers/:id/addresses` matches saved addresses.
    */
   const effectiveUser = useMemo(() => {
     const fromVendor = resolveUserIdFromRecord(accountUser);
@@ -977,10 +980,12 @@ export function Checkout({
 
       try {
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${eu.id}/addresses`,
+          `${cloudbaseApiBaseUrl}/customers/${eu.id}/addresses`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -1037,7 +1042,7 @@ export function Checkout({
   const [kpayLoading, setKpayLoading] = useState(false);
   // True only after KBZ has actually confirmed the payment via webhook
   // (delivered to the public `kpay-webhook` Edge Function and pushed to us
-  // through Supabase Realtime). Until then the "I've Completed Payment"
+  // through CloudBase realtime). Until then the "I've Completed Payment"
   // button stays disabled.
   const [kpayWebhookConfirmed, setKpayWebhookConfirmed] = useState(false);
   const kpayAutoGenerateTriggeredRef = useRef(false);
@@ -1079,15 +1084,15 @@ export function Checkout({
     setKpayWebhookConfirmed(false);
   }, [kpaySession?.merchantOrderId]);
 
-  // Subscribe to Supabase Realtime for the kv row that the public webhook updates.
+  // Subscribe to CloudBase realtime for the kv row that the public webhook updates.
   //
   // Flow when KBZ pays:
   //   1. KBZ POSTs the success notification to our public `kpay-webhook` Edge Function
   //      (that function is deployed with --no-verify-jwt so KBZ can reach it without
-  //      a Supabase auth header).
+  //      a CloudBase auth header).
   //   2. The webhook handler upserts kv_store_16010b6f.value at key
   //      `kpay_txn:{merchantOrderId}` with status="paid".
-  //   3. Postgres broadcasts the UPDATE through the supabase_realtime publication.
+  //   3. Postgres broadcasts the UPDATE through the cloudbase_realtime publication.
   //   4. This subscription receives the new row, parses status, and flips
   //      `kpayWebhookConfirmed` to true — which enables the submit button below.
   //
@@ -1445,9 +1450,10 @@ export function Checkout({
         } else if (effectiveUser?.id) {
           // KBZ app may return to /summary without carrying merch_order_id to SPA.
           // In that case, render the latest order for this signed-in customer.
-          const orderEndpoint = `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/user/${encodeURIComponent(effectiveUser.id)}/orders`;
+          const orderEndpoint = `${cloudbaseApiBaseUrl}/user/${encodeURIComponent(effectiveUser.id)}/orders`;
           response = await fetch(orderEndpoint, {
-            headers: { Authorization: `Bearer ${publicAnonKey}` },
+            headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) },
           });
         } else if (
           pendingCtx?.draftOrder &&
@@ -1633,12 +1639,14 @@ export function Checkout({
       const code = couponCode.trim().toUpperCase();
       
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns/validate`,
+        `${cloudbaseApiBaseUrl}/campaigns/validate`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({
             code: code, // 🔧 FIX: Send uppercased code to match database
@@ -1973,7 +1981,7 @@ export function Checkout({
         setLoading(false);
         return;
       }
-      // Webhook from KBZ has confirmed the payment via Supabase Realtime,
+      // Webhook from KBZ has confirmed the payment via CloudBase realtime,
       // so we can place the order with paymentStatus: "paid".
       latestKpaySession = { ...(kpaySession || {}), status: "paid" } as any;
     } else if (paymentMethod !== "COD") {
@@ -2079,12 +2087,14 @@ export function Checkout({
 
       // Save to backend
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/orders`,
+        `${cloudbaseApiBaseUrl}/orders`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(orderData),
         }
@@ -2138,10 +2148,12 @@ export function Checkout({
           
           // Get existing addresses
           const addressResponse = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${effectiveUser.id}/addresses`,
+            `${cloudbaseApiBaseUrl}/customers/${effectiveUser.id}/addresses`,
             {
               headers: {
-                'Authorization': `Bearer ${publicAnonKey}`,
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               },
             }
           );
@@ -2165,11 +2177,13 @@ export function Checkout({
             const updatedAddresses = [...existingAddresses, newAddress];
             
             await fetch(
-              `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${effectiveUser.id}/addresses`,
+              `${cloudbaseApiBaseUrl}/customers/${effectiveUser.id}/addresses`,
               {
                 method: 'POST',
                 headers: {
-                  'Authorization': `Bearer ${publicAnonKey}`,
+                  ...getCloudBaseRequestHeaders(),
+
+                  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({ addresses: updatedAddresses }),
@@ -2190,12 +2204,14 @@ export function Checkout({
         try {
           
           const incrementResponse = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/campaigns/${appliedCoupon.campaign.id}/increment`,
+            `${cloudbaseApiBaseUrl}/campaigns/${appliedCoupon.campaign.id}/increment`,
             {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`,
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               },
               body: JSON.stringify({
                 revenue: discountAmount // Track the discount amount (how much customer saved)

@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { toast } from "sonner";
-import { publicAnonKey } from "../../../../utils/supabase/info";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { API_BASE_URL } from "../../../utils/api-client";
 import { compressImage } from "../../../utils/imageCompression";
 import { cacheManager } from "../../utils/cacheManager";
@@ -187,7 +187,9 @@ export function VendorAdminSettings({
             `${API_BASE_URL}/vendor/storefront/${vendorId}`,
             {
               headers: {
-                Authorization: `Bearer ${publicAnonKey}`,
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
               },
             }
           );
@@ -310,7 +312,9 @@ export function VendorAdminSettings({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(saveBody),
         }
@@ -340,7 +344,9 @@ export function VendorAdminSettings({
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify({
               name: saved.storeName,
@@ -447,7 +453,9 @@ export function VendorAdminSettings({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ vendorId, hostname }),
         }
@@ -456,7 +464,7 @@ export function VendorAdminSettings({
       if (!res.ok) {
         if (res.status === 404 || data.error === "Not found") {
           toast.error(
-            "Save instructions is not available on the deployed API yet. Deploy the latest Supabase Edge Function make-server-16010b6f, then try again."
+            "Save instructions is not available on the deployed API yet. Deploy the latest CloudBase Function make-server-16010b6f, then try again."
           );
           return;
         }
@@ -500,7 +508,9 @@ export function VendorAdminSettings({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ vendorId, domain }),
         }
@@ -543,7 +553,9 @@ export function VendorAdminSettings({
           method: "DELETE",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify({ vendorId }),
         }
@@ -679,7 +691,9 @@ export function VendorAdminSettings({
                           method: "POST",
                           headers: {
                             "Content-Type": "application/json",
-                            Authorization: `Bearer ${publicAnonKey}`,
+                            ...getCloudBaseRequestHeaders(),
+
+                            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                           },
                           body: JSON.stringify({
                             vendorId,
@@ -711,7 +725,8 @@ export function VendorAdminSettings({
                         fd.append("storeName", settings.storeName || vendorName || "Vendor Store");
                         const res = await fetch(`${API_BASE_URL}/settings/upload-logo`, {
                           method: "POST",
-                          headers: { Authorization: `Bearer ${publicAnonKey}` },
+                          headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) },
                           body: fd,
                         });
                         const data = (await res.json().catch(() => ({}))) as {

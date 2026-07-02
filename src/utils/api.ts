@@ -68,7 +68,7 @@ export const productsApi = {
   },
 
   /**
-   * Create a new product (`performedByUserId`: Supabase Auth UUID of acting staff — for audit timeline)
+   * Create a new product (`performedByUserId`: CloudBase Auth UUID of acting staff — for audit timeline)
    */
   create: async (data: Partial<Product> & { performedByUserId?: string }): Promise<ApiResponse<Product>> => {
     return apiClient.post<ApiResponse<Product>>('/products', data);

@@ -5,7 +5,7 @@ import { Label } from './ui/label';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ArrowLeft, Mail, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 
 interface ForgotPasswordProps {
   onBack: () => void;
@@ -25,12 +25,14 @@ export function ForgotPassword({ onBack }: ForgotPasswordProps) {
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/send-email-otp`,
+        `${cloudbaseApiBaseUrl}/auth/send-email-otp`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'apikey': publicAnonKey,
           },
           body: JSON.stringify({ email: email.trim() }),

@@ -128,7 +128,7 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Checkbox } from "./ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { useCart } from "./CartContext";
 import { CartDrawer } from "./CartDrawer";
 import { Checkout } from "./Checkout";
@@ -1817,12 +1817,14 @@ export function VendorStoreView({
           }
         }
         const res = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/vendor/audience/${vendorId}/track`,
+          `${cloudbaseApiBaseUrl}/vendor/audience/${vendorId}/track`,
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify({
               email: String(userData.email || "").trim(),
@@ -2104,10 +2106,12 @@ export function VendorStoreView({
       setLoadingAddresses(true);
       try {
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${uid}/addresses`,
+          `${cloudbaseApiBaseUrl}/customers/${uid}/addresses`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -2317,11 +2321,11 @@ export function VendorStoreView({
       }
 
       if (value.startsWith("/storage/")) {
-        return `https://${projectId}.supabase.co${value}`;
+        return `${typeof window !== "undefined" ? window.location.origin : ""}${value}`;
       }
 
       if (value.startsWith("storage/")) {
-        return `https://${projectId}.supabase.co/${value}`;
+        return `${typeof window !== "undefined" ? window.location.origin : ""}/${value}`;
       }
     }
     return "";
@@ -2437,12 +2441,14 @@ export function VendorStoreView({
       }
 
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/auth/profile/${uid}`,
+        `${cloudbaseApiBaseUrl}/auth/profile/${uid}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(payload),
         }
@@ -3442,12 +3448,14 @@ export function VendorStoreView({
 
                       try {
                         await fetch(
-                          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${addressUserId}/addresses`,
+                          `${cloudbaseApiBaseUrl}/customers/${addressUserId}/addresses`,
                           {
                             method: "POST",
                             headers: {
                               "Content-Type": "application/json",
-                              Authorization: `Bearer ${publicAnonKey}`,
+                              ...getCloudBaseRequestHeaders(),
+
+                              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                             },
                             body: JSON.stringify({ addresses: updatedAddresses }),
                           }
@@ -3596,12 +3604,14 @@ export function VendorStoreView({
                           );
                           try {
                             await fetch(
-                              `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${addressUserId}/addresses`,
+                              `${cloudbaseApiBaseUrl}/customers/${addressUserId}/addresses`,
                               {
                                 method: "POST",
                                 headers: {
                                   "Content-Type": "application/json",
-                                  Authorization: `Bearer ${publicAnonKey}`,
+                                  ...getCloudBaseRequestHeaders(),
+
+                                  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
                                 },
                                 body: JSON.stringify({ addresses: updatedAddresses }),
                               }
@@ -5393,11 +5403,13 @@ export function VendorStoreView({
       const body = JSON.stringify({ productIds: nextWishlist });
       const bodySize = new Blob([body]).size;
       void fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/wishlist/${wishlistUserId}`,
+        `${cloudbaseApiBaseUrl}/wishlist/${wishlistUserId}`,
         {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             "Content-Type": "application/json",
           },
           body,

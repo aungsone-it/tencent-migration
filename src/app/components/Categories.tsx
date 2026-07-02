@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { categoriesApi } from "../../utils/api";
 import { CategoryForm } from "./CategoryForm";
 import { useLanguage } from "../contexts/LanguageContext";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { cacheManager } from "../utils/cacheManager";
 import {
   getCachedAdminAllCategories,
@@ -103,12 +103,14 @@ export function Categories() {
 
   const deleteCategoryOnServer = async (id: string): Promise<void> => {
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/categories/${id}`,
+      `${cloudbaseApiBaseUrl}/categories/${id}`,
       {
         method: "DELETE",
         keepalive: true,
         headers: {
-          Authorization: `Bearer ${publicAnonKey}`,
+          ...getCloudBaseRequestHeaders(),
+
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
       }
     );

@@ -1,5 +1,5 @@
 import { Card } from "./ui/card";
-import { publicAnonKey } from '../../../utils/supabase/info';
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { API_BASE_URL } from '../../utils/api-client';
 
 interface VendorFormProps {
@@ -71,7 +71,9 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {})
               },
               body: JSON.stringify({ email: email.trim() })
             }
@@ -113,7 +115,9 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {})
               },
               body: JSON.stringify({ phone: phone.trim() })
             }

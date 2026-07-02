@@ -12,7 +12,7 @@ Your Migoo platform now has **professional Stripe payment integration** ready to
 - ✅ **`StripePayment.tsx`** - Stripe payment form component (ready to use!)
 - ✅ **`PaymentSettings.tsx`** - Admin settings page for payment configuration
 
-### **2. Backend (In `/supabase/functions/server/`)**
+### **2. Backend (In `/cloudbase/functions/server/`)**
 - ✅ **`stripe_routes.tsx`** - Backend endpoints for Stripe API
   - `/create-payment-intent` - Creates payment
   - `/verify-payment/:id` - Verifies payment status
@@ -50,8 +50,8 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_test_51Hxxxxxxxxxxxxxxxxxxx
 ```
 
 #### **Backend Key:**
-Add to Supabase Edge Function secrets:
-1. Supabase Dashboard → Settings → Edge Functions
+Add to CloudBase Function secrets:
+1. CloudBase Console → Settings → Edge Functions
 2. Add secret:
    - Name: `STRIPE_SECRET_KEY`
    - Value: `sk_test_51Hxxxxxxxxxxxxxxxxxxx`
@@ -254,7 +254,7 @@ Before accepting real payments:
 **Fix:** Add `VITE_STRIPE_PUBLISHABLE_KEY` to environment variables and restart app
 
 ### **Issue: "Payment gateway not configured"**
-**Fix:** Add `STRIPE_SECRET_KEY` to Supabase Edge Function secrets
+**Fix:** Add `STRIPE_SECRET_KEY` to CloudBase Function secrets
 
 ### **Issue: "Invalid API key provided"**
 **Fix:** Make sure you copied the FULL key (starts with `pk_test_` or `sk_test_`)

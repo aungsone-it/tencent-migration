@@ -43,7 +43,7 @@ import {
 } from "./ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 interface Customer {
   id: string;
@@ -190,10 +190,12 @@ export function CustomerProfile({ customer, onClose, onMessageCustomer }: Custom
         
         // Fetch activity timeline
         const response = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${customer.id}/activities`,
+          `${cloudbaseApiBaseUrl}/customers/${customer.id}/activities`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -206,10 +208,12 @@ export function CustomerProfile({ customer, onClose, onMessageCustomer }: Custom
 
         // Fetch orders
         const ordersResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${customer.id}/orders`,
+          `${cloudbaseApiBaseUrl}/customers/${customer.id}/orders`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -249,10 +253,12 @@ export function CustomerProfile({ customer, onClose, onMessageCustomer }: Custom
 
         // Fetch saved products
         const savedProductsResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${customer.id}/saved-products`,
+          `${cloudbaseApiBaseUrl}/customers/${customer.id}/saved-products`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );
@@ -277,10 +283,12 @@ export function CustomerProfile({ customer, onClose, onMessageCustomer }: Custom
 
         // Fetch shipping addresses
         const addressesResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/customers/${customer.id}/addresses`,
+          `${cloudbaseApiBaseUrl}/customers/${customer.id}/addresses`,
           {
             headers: {
-              Authorization: `Bearer ${publicAnonKey}`,
+              ...getCloudBaseRequestHeaders(),
+
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             },
           }
         );

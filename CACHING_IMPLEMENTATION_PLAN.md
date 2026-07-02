@@ -242,7 +242,7 @@ const loadOrders = async (forceRefresh = false) => {
    ✅ [MODULE CACHE HIT] storefront-products (cached at 10:30:45 AM)
    ```
 
-4. **Check Supabase dashboard** - Requests should drop dramatically
+4. **Check CloudBase console** - Requests should drop dramatically
 
 5. **Navigation should be INSTANT** - No loading spinners except first load
 

@@ -1,4 +1,5 @@
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { useEffect, useState } from 'react';
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { getAdminOperationHeaders } from '../../utils/api-client';
 
 interface DiagnosticResult {
@@ -13,14 +14,14 @@ export function ServerDiagnostics() {
   const [isRunning, setIsRunning] = useState(false);
 
   const endpoints = [
-    { name: '/health', url: `/make-server-16010b6f/health` },
-    { name: '/products', url: `/make-server-16010b6f/products` },
-    { name: '/orders', url: `/make-server-16010b6f/orders` },
-    { name: '/vendor-applications', url: `/make-server-16010b6f/vendor-applications` },
-    { name: '/categories', url: `/make-server-16010b6f/categories` },
-    { name: '/finances', url: `/make-server-16010b6f/finances` },
-    { name: '/monitoring/summary', url: `/make-server-16010b6f/monitoring/summary` },
-    { name: '/read-model/validate', url: `/make-server-16010b6f/read-model/validate` },
+    { name: '/health', url: `/health` },
+    { name: '/products', url: `/products` },
+    { name: '/orders', url: `/orders` },
+    { name: '/vendor-applications', url: `/vendor-applications` },
+    { name: '/categories', url: `/categories` },
+    { name: '/finances', url: `/finances` },
+    { name: '/monitoring/summary', url: `/monitoring/summary` },
+    { name: '/read-model/validate', url: `/read-model/validate` },
   ];
 
   const testEndpoint = async (endpoint: { name: string; url: string }): Promise<DiagnosticResult> => {
@@ -30,11 +31,13 @@ export function ServerDiagnostics() {
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1${endpoint.url}`,
+        `${cloudbaseApiBaseUrl}${endpoint.url}`,
         {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            ...getCloudBaseRequestHeaders(),
+
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'Content-Type': 'application/json',
             ...getAdminOperationHeaders(),
           },
@@ -153,7 +156,7 @@ export function ServerDiagnostics() {
 
       <div className="mt-3 pt-3 border-t border-slate-200 text-xs text-slate-600">
         <p>
-          <strong>Server:</strong> {projectId}.supabase.co
+          <strong>Server:</strong> {cloudbaseApiBaseUrl}
         </p>
         <p className="mt-1">
           {results.length === 0 && (

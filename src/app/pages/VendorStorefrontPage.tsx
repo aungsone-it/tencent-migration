@@ -6,7 +6,7 @@ import {
   getVendorSubdomainMarketplaceHomeUrl,
   isOnVendorSubdomainHost,
 } from "../utils/vendorSubdomainHooks";
-import { publicAnonKey, projectId } from "../../../utils/supabase/info";
+import { publicAnonKey, projectId, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import {
   shouldPreserveVendorStorefrontFaviconOnUnload,
@@ -309,7 +309,8 @@ export function VendorStorefrontPage() {
       try {
         const res = await fetch(
           `${API_BASE_URL}/vendor/store/${encodeURIComponent(slugToVerify)}`,
-          { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+          { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
         );
         if (cancelled) return;
         const data = (await res.json().catch(() => ({}))) as {

@@ -126,8 +126,8 @@ scp -r dist/* user@server:/var/www/html/
 
 ### What to Monitor:
 
-#### 1. **Supabase Dashboard**
-- Go to: https://supabase.com/dashboard
+#### 1. **CloudBase Console**
+- Go to: https://console.cloud.tencent.com/tcb
 - Navigate to: Edge Functions → Analytics
 - Check: Last 24 Hours
 - **Expected:** ~90 requests (down from 960)
@@ -160,7 +160,7 @@ scp -r dist/* user@server:/var/www/html/
 
 ### ✅ You'll know it's working when:
 
-1. **Supabase Request Count:**
+1. **CloudBase Request Count:**
    - Before: 960 requests/day
    - After: ~90 requests/day
    - Reduction: **91%** ✅
@@ -194,7 +194,7 @@ npm run build
 
 ### Issue: Images not loading
 **Check:**
-1. Are Supabase storage URLs accessible?
+1. Are CloudBase/Tencent storage URLs accessible?
 2. Check browser console for errors
 3. Verify signed URL generation in server
 
@@ -289,7 +289,7 @@ git push origin main  # (if using Cloudflare/auto-deploy)
 - ✅ Console shows cache hits increasing
 
 ### **After 24 Hours:**
-- ✅ Supabase dashboard shows ~90 requests (down from 960)
+- ✅ CloudBase console shows ~90 requests (down from 960)
 - ✅ Cost savings visible
 - ✅ Performance metrics improved
 

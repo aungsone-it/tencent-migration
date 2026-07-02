@@ -1,4 +1,4 @@
-import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { BRANDING } from "../../constants";
 import { applyDocumentFavicon, resetDocumentFavicon } from "./documentFavicon";
 
@@ -118,9 +118,10 @@ export async function fetchPlatformBranding(signal?: AbortSignal): Promise<Platf
   };
   try {
     const response = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-16010b6f/settings/general`,
+      `${cloudbaseApiBaseUrl}/settings/general`,
       {
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) },
         signal,
       }
     );

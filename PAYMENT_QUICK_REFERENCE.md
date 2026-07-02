@@ -77,7 +77,7 @@ import StripePayment from './components/StripePayment';
 □ Verify email
 □ Get test API keys
 □ Add VITE_STRIPE_PUBLISHABLE_KEY to .env
-□ Add STRIPE_SECRET_KEY to Supabase
+□ Add STRIPE_SECRET_KEY to CloudBase/Tencent
 □ Test with 4242 card
 □ Payment appears in dashboard
 □ Order created successfully
@@ -103,7 +103,7 @@ Customer Pays → Stripe (3.4% fee) → Your Bank (3-7 days)
 | Error | Fix |
 |-------|-----|
 | "Stripe has not loaded yet" | Add VITE_STRIPE_PUBLISHABLE_KEY |
-| "Payment gateway not configured" | Add STRIPE_SECRET_KEY to Supabase |
+| "Payment gateway not configured" | Add STRIPE_SECRET_KEY to CloudBase/Tencent |
 | "Invalid API key" | Check you copied full key |
 | Test card not working | Use 4242 4242 4242 4242 |
 
@@ -155,7 +155,7 @@ Customer Pays → Stripe (3.4% fee) → Your Bank (3-7 days)
 # 2. Add to .env:
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 
-# 3. Add to Supabase secrets:
+# 3. Add to CloudBase/Tencent secrets:
 STRIPE_SECRET_KEY=sk_test_xxx
 
 # 4. Test with:

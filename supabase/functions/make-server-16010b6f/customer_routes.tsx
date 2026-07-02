@@ -1,6 +1,6 @@
-import { Hono } from "npm:hono@4";
+import { Hono } from "hono";
 import * as kv from "./kv_store.tsx";
-import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { createClient } from "./cloudbase_compat.ts";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
 import { deleteOwnedStorageRefs } from "./storage_delete_helpers.tsx";
 import { assertDestructiveOperationAllowed } from "./admin_operation_guard.tsx";
@@ -14,8 +14,8 @@ const customerApp = new Hono();
 
 // Initialize Supabase client
 const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  undefined,
+  undefined,
   {
     auth: {
       autoRefreshToken: false,
@@ -1681,10 +1681,7 @@ customerApp.post("/customers/cleanup-corrupted", async (c) => {
     // We can't delete these without knowing their keys
     // The issue is that getByPrefix returns values, not keys
     // So we need to query the database directly
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL"),
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-    );
+    const supabase = createClient();
     
     // Get all keys that start with "customer:" and have string values
     const { data: allKeys, error: keysError } = await supabase

@@ -2,15 +2,15 @@
 
 This project deploys as:
 - static frontend bundle (`dist/`)
-- Supabase backend services (Edge Functions + DB/Auth/Storage)
+- CloudBase/Tencent backend services (Edge Functions + DB/Auth/Storage)
 
 Use this document as the single deployment reference.
 
 ## 1) Prerequisites
 
 - Node.js and npm for frontend build.
-- Supabase CLI for backend deployment.
-- Access to the target Supabase project.
+- CloudBase/Tencent CLI for backend deployment.
+- Access to the target CloudBase environment.
 
 ## 2) Frontend deployment
 
@@ -34,7 +34,7 @@ Examples:
 
 If deep links return 404, SPA fallback is misconfigured.
 
-## 3) Backend deployment (Supabase)
+## 3) Backend deployment (CloudBase/Tencent)
 
 Deploy Edge Functions:
 
@@ -42,37 +42,37 @@ Deploy Edge Functions:
 npm run deploy:edge
 ```
 
-Or full Supabase rollout (DB + functions):
+Or full CloudBase/Tencent rollout (DB + functions):
 
 ```bash
-npm run deploy:supabase
+npm run deploy:cloudbase
 ```
 
 Current active function paths include:
-- `supabase/functions/make-server-16010b6f`
-- `supabase/functions/kpay-webhook`
+- `cloudbase/functions/make-server-16010b6f`
+- `cloudbase/functions/kpay-webhook`
 
 ## 4) Environment variables
 
 Use `.env.example` for optional `VITE_*` overrides.
 
-### Supabase project binding (required)
+### CloudBase environment binding (required)
 
-Most of the app reads Supabase URL and anon key from **`utils/supabase/info.tsx`**, not from `VITE_SUPABASE_URL`. When deploying to a new Supabase project, update `projectId` and `publicAnonKey` in that file (or refactor to env-based config).
+Most of the app reads CloudBase API base URL and publishable key from **`utils/tencent/cloudbase.ts`**, not from `VITE_CLOUDBASE_API_BASE_URL`. When deploying to a new CloudBase environment, update `projectId` and `publicAnonKey` in that file (or refactor to env-based config).
 
 ### Frontend envs (`VITE_*`, optional)
 
 - `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN`
 - `VITE_VENDOR_SUBDOMAIN_SLUG_MAP`
 - `VITE_ADMIN_OPERATION_SECRET` (must match server secret for destructive admin routes and diagnostics)
-- `VITE_SUPABASE_THUMB_MAX` (image transform width)
+- `VITE_CLOUDBASE_THUMB_MAX` (image transform width)
 - `VITE_STRIPE_PUBLISHABLE_KEY` (Stripe UI only — not used in vendor checkout)
 
 Vercel Edge middleware uses **server** env (no `VITE_` prefix): `VENDOR_SUBDOMAIN_BASE_DOMAIN`, `VENDOR_SUBDOMAIN_SLUG_MAP` — see `middleware.ts`.
 
-### Supabase function secrets (server side)
+### CloudBase/Tencent function secrets (server side)
 
-Set these in Supabase project secrets when required by your enabled flows:
+Set these in CloudBase environment secrets when required by your enabled flows:
 - auth/email provider secrets (for reset email)
 - KBZPay gateway secrets and webhook verification values
 - `EDGE_ADMIN_OPERATION_SECRET` (required for protected admin operations and monitoring endpoints)
@@ -95,12 +95,12 @@ Set these in Supabase project secrets when required by your enabled flows:
 6. Verify KBZPay webhook processing in the target environment.
 7. Verify destructive admin actions require authorized secret headers.
 8. Follow `docs/READ_MODEL_ROLLOUT.md` for SQL read-model validation and monitoring checks.
-9. Monitor Supabase logs and frontend errors for at least one traffic cycle.
+9. Monitor CloudBase/Tencent logs and frontend errors for at least one traffic cycle.
 
 ## 7) Troubleshooting
 
 - **404 on refresh/deep-link**: fix SPA rewrite.
-- **Auth redirect/login mismatch**: validate Supabase Auth allowed URLs.
+- **Auth redirect/login mismatch**: validate CloudBase/Tencent Auth allowed URLs.
 - **Webhook issues**: verify function secret values and signature settings.
 - **Admin destructive routes blocked**: set and pass admin operation secret headers correctly.
 - **Monitoring endpoints blocked**: set `EDGE_ADMIN_OPERATION_SECRET`; if using the diagnostics UI, set matching `VITE_ADMIN_OPERATION_SECRET`.

@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare:cloudbase-functions": "node scripts/prepare-cloudbase-functions.mjs",
-    "deploy:functions": "npm run prepare:cloudbase-functions && npx @cloudbase/cli functions:deploy make-server-16010b6f --dir .cloudbase/functions/make-server-16010b6f && npx @cloudbase/cli functions:deploy kpay-webhook --dir .cloudbase/functions/kpay-webhook",
+    "deploy:functions": "npm run prepare:cloudbase-functions && npx tcb functions:deploy make-server-16010b6f --dir .cloudbase/functions/make-server-16010b6f && npx tcb functions:deploy kpay-webhook --dir .cloudbase/functions/kpay-webhook",
     "db:push": "node scripts/migrate-to-tencentdb.mjs",
     "deploy:cloudbase": "npm run db:push && npm run deploy:functions",
     "kpay:urls": "node scripts/show-kpay-urls.mjs",

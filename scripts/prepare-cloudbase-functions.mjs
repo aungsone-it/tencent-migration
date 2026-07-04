@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,17 +28,32 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function wrapperSource(entry, routePrefix) {
-  return `require("tsx/cjs");
-const tcb = require("@cloudbase/node-sdk");
-
-try {
-  globalThis.cloudbaseApp = tcb.init({ env: tcb.SYMBOL_DEFAULT_ENV });
-} catch {
-  // Local packaging/build verification can run outside CloudBase.
+function bundleFunction(entry, outfile) {
+  const result = spawnSync(
+    "npx",
+    [
+      "esbuild",
+      entry,
+      "--bundle",
+      "--platform=node",
+      "--target=node18",
+      "--format=cjs",
+      `--outfile=${outfile}`,
+      "--log-level=warning",
+    ],
+    {
+      cwd: root,
+      stdio: "inherit",
+    },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`esbuild failed for ${path.relative(root, entry)}`);
+  }
 }
 
-globalThis.Deno = globalThis.Deno || {
+function wrapperSource(entry, routePrefix) {
+  return `globalThis.Deno = globalThis.Deno || {
   env: {
     get(name) {
       return process.env[name];
@@ -53,6 +69,17 @@ globalThis.removeEventListener = globalThis.removeEventListener || function remo
 
 function loadModule() {
   return require(${JSON.stringify(entry)});
+}
+
+function initCloudBaseApp() {
+  if (globalThis.cloudbaseApp) return;
+  try {
+    const tcb = require("@cloudbase/node-sdk");
+    globalThis.cloudbaseApp = tcb.init({ env: tcb.SYMBOL_DEFAULT_ENV });
+  } catch (error) {
+    // The app code currently uses HTTP/TencentDB env vars directly; keep this optional.
+    console.warn("[cloudbase-wrapper] optional CloudBase SDK init skipped", error && error.message ? error.message : String(error));
+  }
 }
 
 function eventPath(event) {
@@ -122,6 +149,7 @@ async function fromResponse(response) {
 
 exports.main = async function main(event = {}, context = {}) {
   try {
+    initCloudBaseApp();
     const mod = loadModule();
     const handler = mod.handleRequest;
     if (typeof handler !== "function") {
@@ -157,9 +185,6 @@ function writeFunctionPackage(name, sourceWriter) {
     main: "index.js",
     dependencies: {
       "@cloudbase/node-sdk": "^3.1.0",
-      hono: "^4.10.0",
-      tsx: "^4.21.0",
-      ws: "^8.18.3",
     },
   });
   sourceWriter(dest);
@@ -167,18 +192,20 @@ function writeFunctionPackage(name, sourceWriter) {
 
 writeFunctionPackage("make-server-16010b6f", (dest) => {
   copyDir(makeSource, path.join(dest, "src"));
+  bundleFunction(path.join(makeSource, "index.tsx"), path.join(dest, "app.cjs"));
   fs.writeFileSync(
     path.join(dest, "index.js"),
-    wrapperSource("./src/index.tsx", "/make-server-16010b6f"),
+    wrapperSource("./app.cjs", "/make-server-16010b6f"),
   );
 });
 
 writeFunctionPackage("kpay-webhook", (dest) => {
   copyDir(webhookSource, path.join(dest, "src"));
   copyDir(makeSource, path.join(dest, "make-server-16010b6f"));
+  bundleFunction(path.join(webhookSource, "index.ts"), path.join(dest, "app.cjs"));
   fs.writeFileSync(
     path.join(dest, "index.js"),
-    wrapperSource("./src/index.ts", ""),
+    wrapperSource("./app.cjs", ""),
   );
 });
 

@@ -15,6 +15,7 @@ import {
   writePlatformBrandingCache,
   normalizePlatformStoreName,
 } from "../utils/platformBranding";
+import { logoDisplayImageUrl } from "../utils/module-cache";
 
 // Use placeholder images for production deployment
 const spidermanAvatar = "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix";
@@ -315,7 +316,7 @@ export function SideNav({
           <div className="relative">
             {storeLogo ? (
               <img
-                src={storeLogo}
+                src={logoDisplayImageUrl(storeLogo)}
                 alt={`${storeName} Logo`}
                 className="w-10 h-10 object-cover rounded-md"
                 onError={(e) => {

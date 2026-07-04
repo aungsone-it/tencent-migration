@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
+import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
 import { toast } from "sonner";
 import { compressImage } from "../../utils/imageCompression";
 import { useAuth } from "../contexts/AuthContext";
@@ -56,12 +57,14 @@ function dicebearAvatar(email: string) {
 }
 
 function displayAvatarUrl(u: any, variant: "staff" | "vendor" = "staff"): string {
-  if (u?.profileImageUrl && String(u.profileImageUrl).startsWith("http")) {
-    return u.profileImageUrl;
+  if (u?.profileImageUrl) {
+    const resolved = resolveCloudBaseMediaUrl(String(u.profileImageUrl));
+    if (resolved.startsWith("http") || resolved.startsWith("data:")) return resolved;
   }
   if (variant !== "vendor") {
-    if (u?.avatar && String(u.avatar).startsWith("http")) {
-      return u.avatar;
+    if (u?.avatar) {
+      const resolved = resolveCloudBaseMediaUrl(String(u.avatar));
+      if (resolved.startsWith("http") || resolved.startsWith("data:")) return resolved;
     }
   }
   if (u?.avatar && String(u.avatar).startsWith("data:image")) {

@@ -210,7 +210,7 @@ export async function kvCreateSignedUrl(
 
   const exp = Math.floor(Date.now() / 1000) + Math.max(60, expiresIn);
   const sig = signStorageToken(bucket, path, exp);
-  const base = publicStorageApiBaseUrl();
+  const base = publicStorageApiBaseUrl().replace(/\/+$/, "");
   const qs = new URLSearchParams({
     bucket,
     path,

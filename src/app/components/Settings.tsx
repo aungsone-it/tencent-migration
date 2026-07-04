@@ -78,6 +78,7 @@ import {
   invalidateStaffActivitiesCache,
   STAFF_ACTIVITIES_POLL_MS,
   type StaffActivityFeedRow,
+  logoDisplayImageUrl,
 } from "../utils/module-cache";
 import {
   readPersistedJson,
@@ -1209,7 +1210,7 @@ export function Settings() {
                     ) : storeLogoPreview ? (
                       <>
                         <img
-                          src={storeLogoPreview}
+                          src={logoDisplayImageUrl(storeLogoPreview)}
                           alt={t('settings.general.storeLogo')}
                           className="w-full h-full object-cover rounded-md"
                         />
@@ -1504,7 +1505,7 @@ export function Settings() {
                     <div className="w-48 h-48 bg-slate-100 rounded-lg flex items-center justify-center overflow-hidden border-2 border-slate-200">
                       {storeLogoPreview ? (
                         <img
-                          src={storeLogoPreview}
+                          src={logoDisplayImageUrl(storeLogoPreview)}
                           alt={t('settings.general.storeLogo')}
                           className="w-full h-full object-contain"
                         />

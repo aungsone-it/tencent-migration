@@ -4,6 +4,7 @@ import { createClient } from "./cloudbase_compat.ts";
 import * as kv from "./kv_store.tsx";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
 import { deleteOwnedStorageRefs } from "./storage_delete_helpers.tsx";
+import { absolutizeStorageObjectUrl } from "./storage_url_helpers.tsx";
 import {
   appendStaffActivity,
   clearAllStaffActivities,
@@ -366,7 +367,7 @@ async function getSignedImageUrl(filePath: string): Promise<string | null> {
       return null;
     }
 
-    return data.signedUrl;
+    return data.signedUrl ? absolutizeStorageObjectUrl(data.signedUrl) : null;
   } catch (error) {
     console.error("❌ Error getting signed URL:", error);
     return null;

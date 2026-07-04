@@ -27,6 +27,7 @@ import {
 } from "./kpay_routes.tsx";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
 import { kvGetObject, verifyStorageToken } from "./kv_storage_backend.ts";
+import { absolutizeStorageObjectUrl, resolveClientImageUrl } from "./storage_url_helpers.tsx";
 import {
   collectProductImageRefs,
   deleteOwnedStorageRefs,
@@ -842,6 +843,7 @@ app.get("/make-server-16010b6f/storage/object", async (c) => {
       headers: {
         "Content-Type": obj.contentType,
         "Cache-Control": "public, max-age=31536000, immutable",
+        "Access-Control-Allow-Origin": "*",
       },
     });
   } catch (error) {
@@ -876,8 +878,13 @@ app.get("/make-server-16010b6f/settings/general", async (c) => {
         storeLogo: "",
       });
     }
+
+    const out = { ...(settings as Record<string, unknown>) };
+    if (typeof out.storeLogo === "string" && out.storeLogo.trim()) {
+      out.storeLogo = await resolveClientImageUrl(supabase, out.storeLogo);
+    }
     
-    return c.json(settings);
+    return c.json(out);
   } catch (error: any) {
     console.error("Error loading general settings:", error);
     // Return default settings on timeout/error to prevent UI breaking
@@ -1076,7 +1083,7 @@ app.post("/make-server-16010b6f/settings/upload-logo", async (c) => {
     
     return c.json({
       success: true,
-      imageUrl: urlData.signedUrl,
+      imageUrl: absolutizeStorageObjectUrl(urlData.signedUrl),
       fileName: fileName,
       size: `${fileSizeKB.toFixed(2)} KB`,
     });
@@ -1185,7 +1192,7 @@ app.post("/make-server-16010b6f/settings/upload-banner", async (c) => {
     
     return c.json({
       success: true,
-      imageUrl: urlData.signedUrl,
+      imageUrl: absolutizeStorageObjectUrl(urlData.signedUrl),
       fileName: fileName,
       size: `${fileSizeKB.toFixed(2)} KB`,
     });
@@ -1606,7 +1613,7 @@ async function getSignedImageUrl(filePath: string): Promise<string | null> {
       return null;
     }
 
-    const url = data.signedUrl;
+    const url = absolutizeStorageObjectUrl(data.signedUrl);
     if (signedImageUrlMemo.size >= SIGNED_IMAGE_URL_MEMO_MAX) {
       const first = signedImageUrlMemo.keys().next().value as string | undefined;
       if (first !== undefined) signedImageUrlMemo.delete(first);
@@ -11169,7 +11176,7 @@ app.post("/make-server-16010b6f/vendor/storefront/upload-logo", async (c) => {
 
     return c.json({
       success: true,
-      imageUrl: urlData.signedUrl,
+      imageUrl: absolutizeStorageObjectUrl(urlData.signedUrl),
       objectPath,
     });
   } catch (error: unknown) {

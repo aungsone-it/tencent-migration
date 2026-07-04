@@ -17,6 +17,7 @@ import {
   cloudbasePublishableKey,
   getCloudBaseRequestHeaders,
 } from '../../../utils/supabase/info';
+import { resolveCloudBaseMediaUrl } from '../../../utils/tencent/storageMediaUrl';
 import { SmartCache } from '../../utils/cache';
 import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
@@ -2906,20 +2907,21 @@ function resolveThumbMax(explicitMax: number | undefined, fallback: number): num
  */
 export function gridDisplayImageUrl(src: string, maxWidth?: number): string {
   if (!src) return src;
+  const resolved = resolveCloudBaseMediaUrl(src);
   const max = resolveThumbMax(maxWidth, DEFAULT_GRID_THUMB_MAX);
-  let base = src;
-  if (src.includes(LEGACY_STORAGE_OBJECT_PUBLIC)) {
-    base = src.replace(
+  let base = resolved;
+  if (resolved.includes(LEGACY_STORAGE_OBJECT_PUBLIC)) {
+    base = resolved.replace(
       LEGACY_STORAGE_OBJECT_PUBLIC,
       "/storage/v1/render/image/public/"
     );
-  } else if (src.includes(LEGACY_STORAGE_OBJECT_SIGNED)) {
-    base = src.replace(
+  } else if (resolved.includes(LEGACY_STORAGE_OBJECT_SIGNED)) {
+    base = resolved.replace(
       LEGACY_STORAGE_OBJECT_SIGNED,
       "/storage/v1/render/image/sign/"
     );
   } else {
-    return src;
+    return resolved;
   }
   const joiner = base.includes("?") ? "&" : "?";
   return `${base}${joiner}width=${max}&height=${max}&resize=cover&quality=70`;

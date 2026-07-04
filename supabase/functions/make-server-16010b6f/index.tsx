@@ -26,6 +26,7 @@ import {
   getKPayResolvedEndpointUrls,
 } from "./kpay_routes.tsx";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
+import { kvGetObject, verifyStorageToken } from "./kv_storage_backend.ts";
 import {
   collectProductImageRefs,
   deleteOwnedStorageRefs,
@@ -306,7 +307,17 @@ function invalidateDashboardCache(): void {
 app.use("*", cors({
   origin: "*",
   allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowHeaders: ["Content-Type", "Authorization", "apikey", "x-client-info", "x-actor-user-id"],
+  allowHeaders: [
+    "Content-Type",
+    "Authorization",
+    "apikey",
+    "x-client-info",
+    "x-actor-user-id",
+    "x-cloudbase-env-id",
+    "x-cloudbase-region",
+    "x-cloudbase-publishable-key",
+    "x-admin-operation-secret",
+  ],
   exposeHeaders: ["Content-Length"],
   maxAge: 86400,
   credentials: false,
@@ -806,6 +817,36 @@ app.get("/make-server-16010b6f/read-model/validate", async (c) => {
   } catch (error) {
     console.error("❌ Read-model validation error:", error);
     return c.json({ status: "error", error: String(error) }, 500);
+  }
+});
+
+// Serve KV-backed storage objects via signed URLs (TencentDB fallback when TCB Storage is not configured).
+app.get("/make-server-16010b6f/storage/object", async (c) => {
+  try {
+    const bucket = String(c.req.query("bucket") || "").trim();
+    const path = String(c.req.query("path") || "").trim();
+    const exp = Number(c.req.query("exp") || 0);
+    const sig = String(c.req.query("sig") || "").trim();
+    if (!bucket || !path || !sig) {
+      return c.json({ error: "Missing storage parameters" }, 400);
+    }
+    if (!verifyStorageToken(bucket, path, exp, sig)) {
+      return c.json({ error: "Invalid or expired storage URL" }, 403);
+    }
+    const obj = await kvGetObject(bucket, path);
+    if (!obj) {
+      return c.json({ error: "Object not found" }, 404);
+    }
+    return new Response(obj.bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": obj.contentType,
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  } catch (error) {
+    console.error("❌ Storage object serve error:", error);
+    return c.json({ error: "Failed to load storage object" }, 500);
   }
 });
 

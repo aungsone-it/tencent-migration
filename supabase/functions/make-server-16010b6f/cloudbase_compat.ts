@@ -1,3 +1,12 @@
+import {
+  kvCreateBucket,
+  kvCreateSignedUrl,
+  kvListBuckets,
+  kvRemove,
+  kvStorageAvailable,
+  kvUpload,
+} from "./kv_storage_backend.ts";
+
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 type ClientOptions = {
@@ -512,19 +521,49 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
     storage: {
       async listBuckets() {
         const base = cloudbaseStorageBaseUrl();
-        if (!base) return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+        if (!base) {
+          if (!kvStorageAvailable()) {
+            return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+          }
+          try {
+            const data = await kvListBuckets();
+            return { data, error: null };
+          } catch (error) {
+            return errorResult(error instanceof Error ? error.message : String(error));
+          }
+        }
         return postJson(`${base}/buckets/list`, {});
       },
       async createBucket(name: string, opts?: Record<string, unknown>) {
         const base = cloudbaseStorageBaseUrl();
-        if (!base) return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+        if (!base) {
+          if (!kvStorageAvailable()) {
+            return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+          }
+          try {
+            await kvCreateBucket(name, opts);
+            return { data: { name }, error: null };
+          } catch (error) {
+            return errorResult(error instanceof Error ? error.message : String(error));
+          }
+        }
         return postJson(`${base}/buckets/create`, { name, ...opts });
       },
       from(bucket: string) {
         return {
           async upload(path: string, fileBody: BodyInit | ArrayBuffer | Uint8Array | string, opts?: Record<string, unknown>) {
             const base = cloudbaseStorageBaseUrl();
-            if (!base) return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+            if (!base) {
+              if (!kvStorageAvailable()) {
+                return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+              }
+              try {
+                const data = await kvUpload(bucket, path, fileBody, opts);
+                return { data, error: null };
+              } catch (error) {
+                return errorResult(error instanceof Error ? error.message : String(error));
+              }
+            }
             const res = await fetch(`${base}/objects/${encodeURIComponent(bucket)}/${path}`, {
               method: "PUT",
               headers: authHeaders({
@@ -537,7 +576,17 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
           },
           async createSignedUrl(path: string, expiresIn: number) {
             const base = cloudbaseStorageBaseUrl();
-            if (!base) return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+            if (!base) {
+              if (!kvStorageAvailable()) {
+                return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+              }
+              try {
+                const data = await kvCreateSignedUrl(bucket, path, expiresIn);
+                return { data, error: null };
+              } catch (error) {
+                return errorResult(error instanceof Error ? error.message : String(error));
+              }
+            }
             return postJson(`${base}/objects/signed-url`, { bucket, path, expiresIn });
           },
           getPublicUrl(path: string) {
@@ -546,7 +595,17 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
           },
           async remove(paths: string[]) {
             const base = cloudbaseStorageBaseUrl();
-            if (!base) return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+            if (!base) {
+              if (!kvStorageAvailable()) {
+                return errorResult("CLOUDBASE_STORAGE_API_BASE_URL is not configured");
+              }
+              try {
+                await kvRemove(bucket, paths);
+                return { data: null, error: null };
+              } catch (error) {
+                return errorResult(error instanceof Error ? error.message : String(error));
+              }
+            }
             return postJson(`${base}/objects/remove`, { bucket, paths });
           },
         };

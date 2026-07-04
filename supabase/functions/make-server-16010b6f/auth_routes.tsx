@@ -262,6 +262,49 @@ async function resolveCustomerLoginEmail(
   return { email: trimmed };
 }
 
+// Helper function to upload profile image to storage (multipart file)
+async function uploadProfileImageFile(userId: string, imageFile: File): Promise<string | null> {
+  try {
+    await ensureBucket(supabaseAdmin, PROFILE_IMAGES_BUCKET, {
+      public: false,
+      fileSizeLimit: 524288,
+    });
+
+    const MAX_PROFILE_BYTES = 524288;
+    if (imageFile.size > MAX_PROFILE_BYTES) {
+      console.error(`❌ Profile image too large: ${imageFile.size} bytes (max ${MAX_PROFILE_BYTES})`);
+      return null;
+    }
+
+    const name = imageFile.name || "profile.jpg";
+    const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() : "jpg";
+    const imageType = ext === "jpg" ? "jpeg" : ext || "jpeg";
+    const filename = `${userId}_${Date.now()}.${imageType}`;
+    const filePath = `profile-images/${filename}`;
+
+    const arrayBuffer = await imageFile.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    const { error } = await supabaseAdmin.storage
+      .from(PROFILE_IMAGES_BUCKET)
+      .upload(filePath, bytes, {
+        contentType: imageFile.type || `image/${imageType}`,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error("❌ Error uploading profile image file:", error);
+      return null;
+    }
+
+    console.log(`✅ Profile image uploaded: ${filePath}`);
+    return filePath;
+  } catch (error) {
+    console.error("❌ Error processing profile image file:", error);
+    return null;
+  }
+}
+
 // Helper function to upload profile image to Supabase Storage
 async function uploadProfileImage(userId: string, imageDataUrl: string): Promise<string | null> {
   try {
@@ -845,6 +888,72 @@ authApp.get("/users", async (c) => {
   } catch (error: any) {
     console.error("Get users error:", error);
     return c.json({ error: error.message }, 500);
+  }
+});
+
+// ============================================
+// UPLOAD PROFILE IMAGE (multipart — avoids JSON body size limits)
+// ============================================
+authApp.post("/user/:userId/profile-image", async (c) => {
+  try {
+    const userId = c.req.param("userId");
+    const profile = await kv.get(`auth:user:${userId}`);
+    if (!profile) {
+      return c.json({ error: "User not found" }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const imageFile = formData.get("image") as File | null;
+    if (!imageFile || typeof imageFile.arrayBuffer !== "function") {
+      return c.json({ error: "No image file provided" }, 400);
+    }
+
+    const fileSizeKB = imageFile.size / 1024;
+    if (fileSizeKB > 600) {
+      return c.json({ error: "Image file too large. Maximum size is 500KB" }, 400);
+    }
+
+    const uploadedPath = await uploadProfileImageFile(userId, imageFile);
+    if (!uploadedPath) {
+      return c.json({ error: "Failed to upload profile image" }, 500);
+    }
+
+    const p = profile as Record<string, unknown> & { profileImage?: string };
+    const prevImg = typeof p.profileImage === "string" ? p.profileImage.trim() : "";
+    const updatedProfile: Record<string, unknown> = {
+      ...p,
+      profileImage: uploadedPath,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await kv.set(`auth:user:${userId}`, updatedProfile);
+    if (typeof updatedProfile.email === "string" && updatedProfile.email.trim()) {
+      const emailKey = updatedProfile.email.trim().toLowerCase();
+      await kv.set(`user:${emailKey}`, {
+        ...updatedProfile,
+        password: (p as { password?: unknown }).password,
+      });
+      await kv.set(`userId:${userId}`, { email: emailKey });
+    }
+
+    if (prevImg && prevImg !== uploadedPath) {
+      await deleteOwnedStorageRefs(supabaseAdmin, [prevImg]);
+    }
+
+    const signedUrl = await getSignedImageUrl(uploadedPath);
+    if (signedUrl) {
+      updatedProfile.profileImageUrl = signedUrl;
+    }
+
+    return c.json({
+      success: true,
+      profileImage: uploadedPath,
+      profileImageUrl: signedUrl,
+      user: updatedProfile,
+    });
+  } catch (error: any) {
+    console.error("❌ Profile image upload error:", error);
+    return c.json({ error: error.message || "Failed to upload profile image" }, 500);
   }
 });
 

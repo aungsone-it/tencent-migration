@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import nodeCrypto from "node:crypto";
 import { createClient } from "./cloudbase_compat.ts";
 import * as kv from "./kv_store.tsx";
 import { ensureBucket } from "./storage_bucket_helpers.tsx";
@@ -526,6 +527,7 @@ authApp.get("/email-health", async (c) => {
 authApp.post("/setup", async (c) => {
   try {
     const { name, email, password, phone } = await c.req.json();
+    const emailLower = String(email || "").trim().toLowerCase();
 
     // Check if super admin already exists
     const existing = await kv.get("auth:super-admin-created");
@@ -533,45 +535,42 @@ authApp.post("/setup", async (c) => {
       return c.json({ error: "Super admin already exists" }, 400);
     }
 
-    // Create user in Supabase Auth
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true, // Auto-confirm since email server not configured
-      user_metadata: {
-        name,
-        phone: phone || "",
-        role: "store-owner",
-      },
-    });
-
-    if (error || !data.user) {
-      console.error("Error creating super admin:", error);
-      return c.json({ error: error?.message || "Failed to create user" }, 500);
+    if (!name || !emailLower || !password) {
+      return c.json({ error: "Name, email, and password are required" }, 400);
     }
 
-    // Store user profile in KV
-    await kv.set(`auth:user:${data.user.id}`, {
-      id: data.user.id,
-      email,
+    const userId =
+      typeof nodeCrypto.randomUUID === "function"
+        ? nodeCrypto.randomUUID()
+        : `user_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const createdAt = new Date().toISOString();
+    const userRecord = {
+      id: userId,
+      email: emailLower,
       name,
       phone: phone || "",
       role: "store-owner",
       tempPassword: false,
-      createdAt: new Date().toISOString(),
-    });
+      password,
+      createdAt,
+    };
+
+    // Store user profile in KV
+    await kv.set(`user:${emailLower}`, userRecord);
+    await kv.set(`userId:${userId}`, { email: emailLower });
+    await kv.set(`auth:user:${userId}`, userRecord);
 
     // Add super admin to users list
     const usersList = (await kv.get("auth:users-list")) || [];
-    usersList.push(data.user.id);
+    usersList.push(userId);
     await kv.set("auth:users-list", usersList);
 
     // Mark super admin as created
     await kv.set("auth:super-admin-created", true);
 
-    console.log(`✅ Super admin created: ${email}`);
+    console.log(`✅ Super admin created: ${emailLower}`);
 
-    return c.json({ success: true, userId: data.user.id });
+    return c.json({ success: true, userId });
   } catch (error: any) {
     console.error("Setup error:", error);
     return c.json({ error: error.message || "Setup failed" }, 500);
@@ -823,19 +822,15 @@ authApp.post("/create-user", async (c) => {
 // ============================================
 authApp.get("/users", async (c) => {
   try {
-    const validAuthIds = await listSupabaseAuthUserIds();
-    await pruneOrphanedStaffProfiles(validAuthIds);
-
     const userIds = (await withTimeout(kv.get("auth:users-list"), 30000)) || [];
     const users = [];
 
     for (const userId of userIds) {
       const id = String(userId);
-      if (!validAuthIds.has(id)) continue;
-
       const profile = await withTimeout(kv.get(`auth:user:${id}`), 30000);
       if (profile && typeof profile === "object") {
         const safe = { ...(profile as Record<string, unknown>) };
+        delete (safe as { password?: unknown }).password;
         delete (safe as { tempPassword?: unknown }).tempPassword;
         const path = typeof safe.profileImage === "string" ? safe.profileImage.trim() : "";
         if (path) {
@@ -912,56 +907,18 @@ authApp.put("/user/:userId", async (c) => {
 
     const hasNewImageData =
       profileImage && typeof profileImage === "string" && profileImage.startsWith("data:image/");
+    const imagePayloadTooLarge =
+      hasNewImageData && typeof profileImage === "string" && profileImage.length > 450_000;
     const shouldClearImage = removeProfileImage === true && !hasNewImageData;
 
     let uploadedPath: string | null = null;
-    if (hasNewImageData) {
+    if (hasNewImageData && imagePayloadTooLarge) {
+      console.warn("Profile image payload too large for Cloud Function; skipping image update");
+    } else if (hasNewImageData) {
       uploadedPath = await uploadProfileImage(userId, profileImage);
     }
 
     console.log(`🔄 Updating user ${userId}:`, { name, email, phone, role, shouldClearImage });
-
-    const supabaseUpdates: Record<string, unknown> = {};
-    if (email && email !== p.email) {
-      supabaseUpdates.email = email;
-      console.log(`📧 Email will be updated to: ${email}`);
-    }
-
-    const needsAuthMetaUpdate =
-      shouldClearImage ||
-      !!uploadedPath ||
-      (name !== undefined && name !== p.name) ||
-      (phone !== undefined && phone !== p.phone) ||
-      (role !== undefined && role !== p.role) ||
-      (storeId !== undefined && storeId !== p.storeId);
-
-    if (Object.keys(supabaseUpdates).length > 0 || needsAuthMetaUpdate) {
-      const { data: guData, error: guErr } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (guErr || !guData?.user) {
-        console.error("❌ getUserById failed:", guErr);
-        return c.json({ error: guErr?.message || "User lookup failed" }, 500);
-      }
-      const merged: Record<string, unknown> = { ...(guData.user.user_metadata || {}) };
-      if (name !== undefined) merged.name = name;
-      if (phone !== undefined) merged.phone = phone;
-      if (role !== undefined && String(role).trim() !== "") merged.role = role;
-      if (storeId !== undefined) merged.storeId = storeId;
-      if (shouldClearImage) {
-        delete merged.profileImage;
-      } else if (uploadedPath) {
-        merged.profileImage = uploadedPath;
-      }
-
-      const updatePayload: Record<string, unknown> = { ...supabaseUpdates, user_metadata: merged };
-      console.log(`🔄 Updating Supabase Auth (merged metadata)`);
-
-      const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, updatePayload);
-      if (error) {
-        console.error("❌ Error updating Supabase Auth:", error);
-        return c.json({ error: error.message }, 500);
-      }
-      console.log(`✅ Supabase Auth updated successfully`);
-    }
 
     const updatedProfile: Record<string, unknown> = {
       ...p,
@@ -991,6 +948,11 @@ authApp.put("/user/:userId", async (c) => {
     }
 
     await kv.set(`auth:user:${userId}`, updatedProfile);
+    if (typeof updatedProfile.email === "string" && updatedProfile.email.trim()) {
+      const emailKey = updatedProfile.email.trim().toLowerCase();
+      await kv.set(`user:${emailKey}`, { ...updatedProfile, password: (p as { password?: unknown }).password });
+      await kv.set(`userId:${userId}`, { email: emailKey });
+    }
     console.log(`✅ KV profile updated successfully`);
 
     const prevImg = typeof p.profileImage === "string" ? p.profileImage.trim() : "";
@@ -1487,6 +1449,21 @@ authApp.post("/login", async (c) => {
 
     if (!email || !password) {
       return c.json({ error: "Email or phone and password are required" }, 400);
+    }
+
+    const emailLower = String(email || "").trim().toLowerCase();
+    const staffUser = await kv.get(`user:${emailLower}`).catch(() => null);
+    if (staffUser && typeof staffUser === "object") {
+      if ((staffUser as any).password !== password) {
+        return c.json({ error: "Invalid email or password" }, 401);
+      }
+      const { password: _password, ...safeUser } = staffUser as Record<string, unknown>;
+      return c.json({
+        success: true,
+        user: safeUser,
+        accessToken: "tencent-kv-session",
+        message: "Login successful",
+      });
     }
 
     const resolved = await resolveCustomerLoginEmail(email);

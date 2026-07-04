@@ -62,6 +62,7 @@ const RESERVED_SUBDOMAINS = new Set([
 type EdgeOneMiddlewareContext = {
   request?: Request;
   next?: () => Response | Promise<Response>;
+  rewrite?: (url: string) => Response | Promise<Response>;
 };
 
 function readRuntimeEnv(name: string): string {
@@ -137,6 +138,20 @@ export async function middleware(context: EdgeOneMiddlewareContext): Promise<Res
   }
 
   if (typeof context?.next === "function") {
+    const request = context.request;
+    if (request) {
+      const url = new URL(request.url);
+      const pathname = url.pathname;
+      const lastSegment = pathname.split("/").pop() || "";
+      const isStaticAsset =
+        pathname.startsWith("/assets/") ||
+        /\.(js|css|map|svg|png|jpe?g|gif|webp|ico|woff2?|txt|json|xml|webmanifest)$/i.test(
+          lastSegment,
+        );
+      if (!isStaticAsset && pathname !== "/index.html" && typeof context.rewrite === "function") {
+        return context.rewrite("/index.html");
+      }
+    }
     return await context.next();
   }
   return new Response(null, { status: 204 });

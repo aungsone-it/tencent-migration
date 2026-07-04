@@ -112,6 +112,13 @@ export function getReservedPlatformApexDomains(): Set<string> {
     String(import.meta.env.VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN || "").trim()
   );
   if (primary) reserved.add(primary);
+  // When EdgeOne build env is missing, treat the live bare apex as marketplace (not vendor custom domain).
+  if (typeof window !== "undefined") {
+    const host = normalizeHostname(window.location.hostname);
+    if (host && isBarePlatformApexHost(host)) {
+      reserved.add(stripWwwHost(host));
+    }
+  }
   return reserved;
 }
 

@@ -42,6 +42,22 @@ const inlinePublicHeadScriptsPlugin = () => ({
   },
 });
 
+/** Injects CloudBase runtime config for pre-React head scripts on EdgeOne/static hosts. */
+const injectCloudBaseRuntimeConfigPlugin = () => ({
+  name: 'inject-cloudbase-runtime-config',
+  transformIndexHtml(html: string) {
+    const env = process.env;
+    const payload = {
+      NEXA_CLOUDBASE_API_BASE_URL: String(env.VITE_CLOUDBASE_API_BASE_URL || '').trim(),
+      NEXA_CLOUDBASE_PUBLISHABLE_KEY: String(env.VITE_CLOUDBASE_PUBLISHABLE_KEY || '').trim(),
+      NEXA_CLOUDBASE_ENV_ID: String(env.VITE_CLOUDBASE_ENV_ID || '').trim(),
+      NEXA_CLOUDBASE_REGION: String(env.VITE_CLOUDBASE_REGION || '').trim(),
+    };
+    const script = `<script>window.NEXA_CLOUDBASE_API_BASE_URL=${JSON.stringify(payload.NEXA_CLOUDBASE_API_BASE_URL)};window.NEXA_CLOUDBASE_PUBLISHABLE_KEY=${JSON.stringify(payload.NEXA_CLOUDBASE_PUBLISHABLE_KEY)};window.NEXA_CLOUDBASE_ENV_ID=${JSON.stringify(payload.NEXA_CLOUDBASE_ENV_ID)};window.NEXA_CLOUDBASE_REGION=${JSON.stringify(payload.NEXA_CLOUDBASE_REGION)};</script>`;
+    return html.replace('<head>', `<head>\n    ${script}`);
+  },
+});
+
 export default defineConfig(() => {
   return {
   // Do not use `define` for import.meta.env.VITE_* — it overrides Vite's env injection
@@ -53,6 +69,7 @@ export default defineConfig(() => {
     tailwindcss(),
     figmaAssetPlugin(),
     inlinePublicHeadScriptsPlugin(),
+    injectCloudBaseRuntimeConfigPlugin(),
   ],
   resolve: {
     alias: {

@@ -61,6 +61,9 @@ export class ErrorBoundary extends Component<Props, State> {
       const onPaymentReturnPath =
         typeof window !== "undefined" &&
         ErrorBoundary.isPaymentReturnPath(window.location.pathname);
+      const showDebug =
+        typeof window !== "undefined" &&
+        (import.meta.env.DEV || /(?:^|[?&])debug=1(?:&|$)/.test(window.location.search));
       if (onPaymentReturnPath) {
         // Keep payment return UX clean: avoid flashing the generic error card while one-shot auto-recovery reload runs.
         return <div className="min-h-screen bg-white" />;
@@ -85,6 +88,11 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-lg text-slate-600 mb-8 max-w-lg mx-auto">
               We encountered an unexpected error. Don't worry, our team has been notified and we're working on it.
             </p>
+            {showDebug && this.state.error ? (
+              <pre className="mb-8 max-w-xl mx-auto text-left text-xs bg-slate-100 border border-slate-200 rounded-lg p-4 overflow-x-auto text-slate-800">
+                {this.state.error.message}
+              </pre>
+            ) : null}
 
             {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">

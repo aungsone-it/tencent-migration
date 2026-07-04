@@ -12,8 +12,82 @@ import {
   isValidStaffActorId,
 } from "./staff_activity_helpers.tsx";
 import { queueCustomerReadModelSync } from "./read_model.ts";
+import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 
 const authApp = new Hono();
+
+type StaffKvUser = Record<string, unknown> & {
+  id?: string;
+  email?: string;
+  password?: string;
+  role?: string;
+};
+
+async function findStaffUserByEmail(emailLower: string): Promise<StaffKvUser | null> {
+  const normalized = String(emailLower || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  const direct = await kv.get(`user:${normalized}`);
+  if (direct && typeof direct === "object") return direct as StaffKvUser;
+
+  const usersList = await kv.get("auth:users-list");
+  if (Array.isArray(usersList)) {
+    for (const uid of usersList) {
+      if (typeof uid !== "string" || !uid.trim()) continue;
+      const profile = await kv.get(`auth:user:${uid}`);
+      if (
+        profile &&
+        typeof profile === "object" &&
+        String((profile as StaffKvUser).email || "").trim().toLowerCase() === normalized
+      ) {
+        return profile as StaffKvUser;
+      }
+    }
+  }
+  return null;
+}
+
+async function persistStaffUserRecord(user: StaffKvUser): Promise<void> {
+  const userId = String(user.id || "").trim();
+  const emailLower = String(user.email || "").trim().toLowerCase();
+  if (userId) await kv.set(`auth:user:${userId}`, user);
+  if (emailLower) {
+    await kv.set(`user:${emailLower}`, user);
+    if (userId) await kv.set(`userId:${userId}`, { email: emailLower });
+  }
+}
+
+async function setStaffPassword(user: StaffKvUser, plainPassword: string, tempPassword = false): Promise<void> {
+  const hashed = await hashPasswordPlain(plainPassword);
+  await persistStaffUserRecord({
+    ...user,
+    password: hashed,
+    tempPassword,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function tryStaffLogin(
+  email: string,
+  password: string,
+): Promise<{ user: Record<string, unknown> } | { error: string } | null> {
+  const emailLower = String(email || "").trim().toLowerCase();
+  const staffUser = await findStaffUserByEmail(emailLower);
+  if (!staffUser?.id) return null;
+
+  const ok = await verifyPasswordPlain(password, staffUser.password);
+  if (!ok) {
+    return { error: "Invalid email or password" };
+  }
+
+  if (typeof staffUser.password === "string" && !isPasswordHashFormat(staffUser.password)) {
+    await setStaffPassword(staffUser, password, Boolean(staffUser.tempPassword));
+  }
+
+  const refreshed = (await findStaffUserByEmail(emailLower)) || staffUser;
+  const { password: _password, ...safeUser } = refreshed;
+  return { user: safeUser };
+}
 
 // Helper function to wrap operations with timeout
 async function withTimeout<T>(promise: Promise<T>, timeoutMs = 60000): Promise<T> {
@@ -595,7 +669,7 @@ authApp.post("/setup", async (c) => {
       phone: phone || "",
       role: "store-owner",
       tempPassword: false,
-      password,
+      password: await hashPasswordPlain(password),
       createdAt,
     };
 
@@ -723,6 +797,37 @@ authApp.get("/profile/:userId", async (c) => {
 });
 
 // ============================================
+// UPDATE PASSWORD (logged-in staff, KV auth)
+// ============================================
+authApp.post("/update-password", async (c) => {
+  try {
+    const { userId, password } = await c.req.json();
+    if (!userId || !password) {
+      return c.json({ error: "userId and password are required" }, 400);
+    }
+
+    const profile = await kv.get(`auth:user:${userId}`);
+    if (!profile || typeof profile !== "object") {
+      return c.json({ error: "User not found" }, 404);
+    }
+
+    await setStaffPassword(profile as StaffKvUser, String(password), false);
+
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(String(userId), {
+      password: String(password),
+    });
+    if (error) {
+      console.warn("Supabase Auth password update skipped:", error.message);
+    }
+
+    return c.json({ success: true });
+  } catch (error: any) {
+    console.error("Update password error:", error);
+    return c.json({ error: error.message || "Failed to update password" }, 500);
+  }
+});
+
+// ============================================
 // UPDATE TEMP PASSWORD FLAG
 // ============================================
 authApp.post("/update-temp-password", async (c) => {
@@ -738,6 +843,13 @@ authApp.post("/update-temp-password", async (c) => {
       ...profile,
       tempPassword: false,
     });
+    const emailLower = String((profile as StaffKvUser).email || "").trim().toLowerCase();
+    if (emailLower) {
+      const emailRecord = await kv.get(`user:${emailLower}`);
+      if (emailRecord && typeof emailRecord === "object") {
+        await kv.set(`user:${emailLower}`, { ...emailRecord, tempPassword: false });
+      }
+    }
 
     return c.json({ success: true });
   } catch (error: any) {
@@ -1227,24 +1339,19 @@ authApp.post("/reset-password/:userId", async (c) => {
     // Generate new temp password
     const tempPassword = generatePassword();
 
-    // Update password in Supabase
+    await setStaffPassword(profile as StaffKvUser, tempPassword, true);
+
+    // Best-effort Supabase Auth sync when configured
     const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
       password: tempPassword,
     });
-
     if (error) {
-      console.error("Error resetting password:", error);
-      return c.json({ error: error.message }, 500);
+      console.warn("Supabase Auth password reset skipped:", error.message);
     }
 
-    // Mark as temp password
-    await kv.set(`auth:user:${userId}`, {
-      ...profile,
-      tempPassword: true,
-      updatedAt: new Date().toISOString(),
-    });
+    const updatedProfile = await kv.get(`auth:user:${userId}`);
 
-    console.log(`✅ Password reset for: ${profile.email}`);
+    console.log(`✅ Password reset for: ${(profile as StaffKvUser).email}`);
     await appendStaffActivity(resetBy || undefined, {
       type: "password_reset",
       action: "Password reset",
@@ -1278,25 +1385,33 @@ authApp.post("/send-email-otp", async (c) => {
 
     console.log(`📧 Generating OTP for email: ${email}`);
 
-    // Check if user exists in Supabase Auth
-    const { data: authUsers, error: userError } = await supabaseAdmin.auth.admin.listUsers();
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const staffUser = await findStaffUserByEmail(normalizedEmail);
 
-    if (userError) {
-      console.error("Error listing users:", userError);
-      return c.json({ error: "Failed to check user" }, 500);
+    let userId = staffUser?.id ? String(staffUser.id) : "";
+
+    if (!userId) {
+      // Fallback: Supabase Auth users (storefront customers with auth accounts)
+      const { data: authUsers, error: userError } = await supabaseAdmin.auth.admin.listUsers();
+      if (userError) {
+        console.error("Error listing users:", userError);
+        return c.json({
+          error:
+            "No account found for this email. If you are a staff member, ask your admin to reset your password from Settings → Users.",
+        }, 404);
+      }
+      const user = authUsers.users.find((u) => u.email?.toLowerCase() === normalizedEmail);
+      if (!user) {
+        console.log(`❌ No user found with email: ${email}`);
+        return c.json({
+          error:
+            "This email is not registered. Use the email from admin setup, or contact your administrator.",
+        }, 404);
+      }
+      userId = user.id;
     }
 
-    // Find user by email (case-insensitive)
-    const user = authUsers.users.find(u => u.email?.toLowerCase() === email.toLowerCase());
-
-    if (!user) {
-      console.log(`❌ No user found with email: ${email}`);
-      return c.json({ 
-        error: "This email is not registered in the system. Please contact your administrator or use the email you registered with.",
-      }, 404);
-    }
-
-    console.log(`✅ User found: ${user.id} (${email})`);
+    console.log(`✅ User found: ${userId} (${email})`);
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -1306,7 +1421,7 @@ authApp.post("/send-email-otp", async (c) => {
     await kv.set(`otp:email:${email.toLowerCase()}`, {
       code: otp,
       expiresAt,
-      userId: user.id,
+      userId: userId,
       createdAt: new Date().toISOString(),
     });
 
@@ -1320,7 +1435,7 @@ authApp.post("/send-email-otp", async (c) => {
       const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
 
       if (!resendApiKey) {
-        console.error("❌ RESEND_API_KEY not configured");
+        console.warn("RESEND_API_KEY not configured — OTP stored; enable ALLOW_DEBUG_OTP for dev");
         if (allowDebugOtp) {
           return c.json({
             success: true,
@@ -1329,8 +1444,10 @@ authApp.post("/send-email-otp", async (c) => {
           });
         }
         return c.json({
-          error: "Password reset email is not configured. Please contact support.",
-        }, 503);
+          success: true,
+          message:
+            "If this email is registered, a reset code was generated. Email delivery is not configured — set RESEND_API_KEY on the Cloud Function, or ask an admin to reset your password.",
+        });
       }
 
       if (!resendFromEmail) {
@@ -1491,7 +1608,18 @@ authApp.post("/verify-otp-and-reset", async (c) => {
 
     console.log(`✅ OTP verified for: ${normalizedEmail}`);
 
-    // Update password in Supabase
+    const staffProfile = await kv.get(`auth:user:${storedOtpData.userId}`);
+    if (staffProfile && typeof staffProfile === "object") {
+      await setStaffPassword(staffProfile as StaffKvUser, newPassword, false);
+      await kv.del(`otp:email:${normalizedEmail}`);
+      console.log(`✅ KV staff password updated for: ${normalizedEmail}`);
+      return c.json({
+        success: true,
+        message: "Password updated successfully",
+      });
+    }
+
+    // Fallback: Supabase Auth account
     const { error } = await supabaseAdmin.auth.admin.updateUserById(
       storedOtpData.userId,
       { password: newPassword }
@@ -1562,15 +1690,14 @@ authApp.post("/login", async (c) => {
     }
 
     const emailLower = String(email || "").trim().toLowerCase();
-    const staffUser = await kv.get(`user:${emailLower}`).catch(() => null);
-    if (staffUser && typeof staffUser === "object") {
-      if ((staffUser as any).password !== password) {
-        return c.json({ error: "Invalid email or password" }, 401);
-      }
-      const { password: _password, ...safeUser } = staffUser as Record<string, unknown>;
+    const staffResult = await tryStaffLogin(email, password);
+    if (staffResult && "error" in staffResult) {
+      return c.json({ error: staffResult.error }, 401);
+    }
+    if (staffResult && "user" in staffResult) {
       return c.json({
         success: true,
-        user: safeUser,
+        user: staffResult.user,
         accessToken: "tencent-kv-session",
         message: "Login successful",
       });
@@ -1592,6 +1719,10 @@ authApp.post("/login", async (c) => {
 
     if (error) {
       console.error(`❌ Login failed for ${email}:`, error.message);
+      const msg = String(error.message || "");
+      if (msg.includes("invalid_username_or_password") || msg.includes("Invalid login credentials")) {
+        return c.json({ error: "Invalid email or password" }, 401);
+      }
       return c.json({ error: error.message }, 401);
     }
 

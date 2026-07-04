@@ -186,10 +186,16 @@ npm test
 | `npm run dev` | Start Vite dev server |
 | `npm run build` | Production build |
 | `npm test` | Run Vitest |
-| `npm run deploy:edge` | Deploy CloudBase/Tencent Edge Functions only |
-| `npm run db:push` | Push CloudBase/Tencent DB migrations |
+| `npm run setup:tcb-first` | Schema-only DB push (if configured) + package CloudBase functions for console upload |
+| `npm run smoke:tcb` | Smoke-test `/health` and frontend env vars |
+| `npm run import:supabase` | Later: copy Supabase Postgres data into TencentDB |
+| `npm run deploy:functions` | Deploy CloudBase functions via CLI (`tcb`) |
+| `npm run db:push` | Push DB migrations (+ optional Supabase data copy) |
+| `npm run db:schema` | Schema-only migration (`SKIP_DATA_COPY=1`) |
 | `npm run deploy:cloudbase` | DB push + functions deploy |
 | `npm run validate:read-model` | Validate KV ↔ SQL read-model counts (requires env secrets) |
+
+**TCB-first console setup:** see [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md).
 
 ## Environment
 
@@ -227,6 +233,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MO
 |-----|----------|
 | [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) | **Backend truth:** KV model, SQL read model, Realtime pulses, auth, CloudBase/Tencent Pro limits, scaling |
 | [docs/CODE_REVIEW_AND_ROUTING.md](docs/CODE_REVIEW_AND_ROUTING.md) | Routes, hosts, component map |
+| [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) | **TCB-first setup:** empty DB, console function deploy, EdgeOne, import Supabase later |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and env setup |
 | [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) | Read-model deploy validation and monitoring |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |

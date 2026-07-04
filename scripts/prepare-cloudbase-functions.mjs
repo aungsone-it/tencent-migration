@@ -121,12 +121,26 @@ async function fromResponse(response) {
 }
 
 exports.main = async function main(event = {}, context = {}) {
-  const mod = loadModule();
-  const handler = mod.handleRequest;
-  if (typeof handler !== "function") {
-    return { statusCode: 500, body: "CloudBase handler export missing" };
+  try {
+    const mod = loadModule();
+    const handler = mod.handleRequest;
+    if (typeof handler !== "function") {
+      return { statusCode: 500, body: "CloudBase handler export missing" };
+    }
+    return fromResponse(await handler(await toRequest(event, context)));
+  } catch (error) {
+    const message = error && error.stack ? error.stack : String(error);
+    console.error("[cloudbase-wrapper] invocation failed", message);
+    return {
+      statusCode: 500,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: "CLOUDBASE_WRAPPER_ERROR",
+        message: error && error.message ? error.message : String(error),
+      }),
+      isBase64Encoded: false,
+    };
   }
-  return fromResponse(await handler(await toRequest(event, context)));
 };
 `;
 }
@@ -140,7 +154,7 @@ function writeFunctionPackage(name, sourceWriter) {
     version: "0.0.0",
     private: true,
     type: "commonjs",
-    main: "index.cjs",
+    main: "index.js",
     dependencies: {
       "@cloudbase/node-sdk": "^3.1.0",
       hono: "^4.10.0",
@@ -154,7 +168,7 @@ function writeFunctionPackage(name, sourceWriter) {
 writeFunctionPackage("make-server-16010b6f", (dest) => {
   copyDir(makeSource, path.join(dest, "src"));
   fs.writeFileSync(
-    path.join(dest, "index.cjs"),
+    path.join(dest, "index.js"),
     wrapperSource("./src/index.tsx", "/make-server-16010b6f"),
   );
 });
@@ -163,7 +177,7 @@ writeFunctionPackage("kpay-webhook", (dest) => {
   copyDir(webhookSource, path.join(dest, "src"));
   copyDir(makeSource, path.join(dest, "make-server-16010b6f"));
   fs.writeFileSync(
-    path.join(dest, "index.cjs"),
+    path.join(dest, "index.js"),
     wrapperSource("./src/index.ts", ""),
   );
 });

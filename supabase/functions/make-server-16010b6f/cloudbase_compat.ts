@@ -27,21 +27,54 @@ function firstEnv(...names: string[]): string {
   return "";
 }
 
+function cloudbaseEnvId(): string {
+  return firstEnv("CLOUDBASE_ENV_ID", "TCB_ENV_ID", "VITE_CLOUDBASE_ENV_ID");
+}
+
+function cloudbaseRegion(): string {
+  return firstEnv("CLOUDBASE_REGION", "TCB_REGION", "VITE_CLOUDBASE_REGION");
+}
+
+function usesIntlGateway(): boolean {
+  if (firstEnv("CLOUDBASE_INTL_GATEWAY", "TCB_INTL_GATEWAY") === "1") return true;
+  const region = cloudbaseRegion().toLowerCase();
+  return region.includes("singapore") || region.startsWith("ap-singapore");
+}
+
+function cloudbaseGatewayBase(): string {
+  const explicit = firstEnv("CLOUDBASE_GATEWAY_URL", "TCB_GATEWAY_URL");
+  if (explicit) return explicit;
+  const envId = cloudbaseEnvId();
+  if (!envId) return "";
+  const host = usesIntlGateway()
+    ? `${envId}.api.intl.tcloudbasegateway.com`
+    : `${envId}.api.tcloudbasegateway.com`;
+  return `https://${host}`;
+}
+
 function serviceToken(): string {
   return firstEnv(
     "CLOUDBASE_SERVICE_TOKEN",
     "TCB_SERVICE_TOKEN",
     "TENCENT_POSTGREST_SERVICE_KEY",
     "POSTGREST_SERVICE_KEY",
+    "CLOUDBASE_PUBLISHABLE_KEY",
+    "TCB_PUBLISHABLE_KEY",
   );
 }
 
 function postgrestBaseUrl(): string {
-  return firstEnv("TENCENT_POSTGREST_URL", "TENCENTDB_REST_URL", "POSTGREST_URL");
+  return (
+    firstEnv("TENCENT_POSTGREST_URL", "TENCENTDB_REST_URL", "POSTGREST_URL") ||
+    (cloudbaseGatewayBase() ? `${cloudbaseGatewayBase()}/v1/rdb/rest` : "")
+  );
 }
 
 function cloudbaseAuthBaseUrl(): string {
-  return firstEnv("CLOUDBASE_AUTH_API_BASE_URL", "TCB_AUTH_API_BASE_URL");
+  return (
+    firstEnv("CLOUDBASE_AUTH_API_BASE_URL", "TCB_AUTH_API_BASE_URL") ||
+    (cloudbaseGatewayBase() ? `${cloudbaseGatewayBase()}/auth/v1` : "")
+  );
 }
 
 function cloudbaseStorageBaseUrl(): string {
@@ -236,7 +269,32 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
       async signInWithPassword(credentials: { email: string; password: string }) {
         const base = cloudbaseAuthBaseUrl();
         if (!base) return errorResult("CLOUDBASE_AUTH_API_BASE_URL is not configured");
-        return postJson(`${base}/signin/password`, credentials);
+        const username = String(credentials.email || "").trim();
+        const password = String(credentials.password || "");
+        const result = await postJson<{
+          access_token?: string;
+          refresh_token?: string;
+          sub?: string;
+          expires_in?: number;
+        }>(`${base}/signin`, { username, password });
+        if (result.error || !result.data?.access_token) return result;
+        const userId = String(result.data.sub || "");
+        return {
+          data: {
+            user: {
+              id: userId,
+              email: username,
+              created_at: new Date().toISOString(),
+            },
+            session: {
+              access_token: result.data.access_token,
+              refresh_token: result.data.refresh_token,
+              expires_in: result.data.expires_in,
+              user: { id: userId, email: username },
+            },
+          },
+          error: null,
+        };
       },
       admin: {
         async createUser(payload: Record<string, unknown>) {

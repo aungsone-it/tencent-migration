@@ -38,6 +38,7 @@ function bundleFunction(entry, outfile) {
       "--platform=node",
       "--target=node18",
       "--format=cjs",
+      "--external:pg",
       `--outfile=${outfile}`,
       "--log-level=warning",
     ],
@@ -185,6 +186,7 @@ function writeFunctionPackage(name, sourceWriter) {
     main: "index.js",
     dependencies: {
       "@cloudbase/node-sdk": "^3.1.0",
+      pg: "^8.16.3",
     },
   });
   sourceWriter(dest);

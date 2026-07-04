@@ -242,16 +242,19 @@ export async function rpcStorefrontCatalog(opts: {
   maxPrice?: number | null;
 }): Promise<Record<string, unknown> | null> {
   try {
-    const { data, error } = await supabaseClient.rpc("rpc_storefront_catalog", {
-      p_kind: opts.kind,
-      p_page: opts.page,
-      p_page_size: opts.pageSize,
-      p_category: opts.category ?? null,
-      p_q: opts.q ?? null,
-      p_sort: opts.sort ?? "featured",
-      p_min_price: opts.minPrice ?? null,
-      p_max_price: opts.maxPrice ?? null,
-    });
+    const { data, error } = await withTimeout(
+      supabaseClient.rpc("rpc_storefront_catalog", {
+        p_kind: opts.kind,
+        p_page: opts.page,
+        p_page_size: opts.pageSize,
+        p_category: opts.category ?? null,
+        p_q: opts.q ?? null,
+        p_sort: opts.sort ?? "featured",
+        p_min_price: opts.minPrice ?? null,
+        p_max_price: opts.maxPrice ?? null,
+      }),
+      8000
+    );
     if (error) {
       console.warn("rpc_storefront_catalog:", error.message);
       return null;

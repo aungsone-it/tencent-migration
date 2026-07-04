@@ -3677,9 +3677,9 @@ async function ensureProductsListResponse(): Promise<{ products: any[]; total: n
     let productsData;
     try {
       productsData = await withRetry(
-        () => withTimeout(kv.getByPrefix("product:"), 30000),
-        5,
-        1500
+        () => withTimeout(kv.getByPrefix("product:"), 8000),
+        1,
+        500
       );
     } catch (timeoutError) {
       console.error("⚠️ Database query failed - returning empty array");
@@ -6365,9 +6365,9 @@ app.get("/make-server-16010b6f/categories", async (c) => {
     let categoriesData;
     try {
       categoriesData = await withRetry(
-        () => withTimeout(kv.getByPrefix("category:"), 30000), // Increased from 10s to 30s
-        5, // Increased retries to 5
-        1500 // Increased delay to 1500ms
+        () => withTimeout(kv.getByPrefix("category:"), 8000),
+        1,
+        500
       );
     } catch (timeoutError) {
       console.error("⚠️ Database query failed - returning empty array");

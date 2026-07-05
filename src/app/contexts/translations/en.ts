@@ -608,6 +608,7 @@ export const enTranslations: Record<string, string> = {
     'vendorAdmin.settings.hostname': 'Hostname',
     'vendorAdmin.settings.verified': 'Verified',
     'vendorAdmin.settings.verifiedHostingVercel': 'once DNS and Vercel include this host.',
+    'vendorAdmin.settings.verifiedDnsReminder': 'Verified only confirms domain ownership (TXT). If opening your domain shows a Hostinger/registrar parking page, DNS still points to the wrong place—update CNAME/A at your DNS provider for the exact hostname above (www vs apex are different). Do not use cname.vercel-dns.com on Tencent/EdgeOne; use the CNAME EdgeOne shows after adding this host.',
     'vendorAdmin.settings.verifiedHostingEdgeOne': 'once DNS and EdgeOne include this host.',
     'vendorAdmin.settings.pending': 'Pending',
     'vendorAdmin.settings.saveInstructions': 'Save instructions',

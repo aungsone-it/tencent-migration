@@ -112,13 +112,6 @@ export function getReservedPlatformApexDomains(): Set<string> {
     String(import.meta.env.VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN || "").trim()
   );
   if (primary) reserved.add(primary);
-  // When EdgeOne build env is missing, treat the live bare apex as marketplace (not vendor custom domain).
-  if (typeof window !== "undefined") {
-    const host = normalizeHostname(window.location.hostname);
-    if (host && isBarePlatformApexHost(host)) {
-      reserved.add(stripWwwHost(host));
-    }
-  }
   return reserved;
 }
 
@@ -130,16 +123,15 @@ export function isReservedPlatformApexHost(host: string): boolean {
 
 /**
  * True when the host should show marketplace landing at `/` (sync heuristic).
- * Claimable bare apex hosts may still resolve to a vendor store after `/vendor/by-domain`.
+ * Reserved platform apex (e.g. nexa-apex.online) only — claimable bare apex hosts
+ * may resolve to a vendor store after `/vendor/by-domain`.
  */
 export function isMarketplaceApexHost(hostname?: string): boolean {
   const host = normalizeHostname(
     hostname ?? (typeof window !== "undefined" ? window.location.hostname : "")
   );
   if (!host) return false;
-  if (isReservedPlatformApexHost(host)) return true;
-  if (isBarePlatformApexHost(host)) return true;
-  return false;
+  return isReservedPlatformApexHost(host);
 }
 
 /** Primary platform apex for KPay unified return and subdomain URLs (current host, then env). */

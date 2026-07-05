@@ -11493,7 +11493,7 @@ function isReservedPlatformApexHostname(hostname: string): boolean {
 
 function isEdgeOneDeploymentBackend(): boolean {
   const platform = String(Deno.env.get("DEPLOYMENT_PLATFORM") || "").trim().toLowerCase();
-  return platform === "edgeone" || platform === "tencent";
+  return platform === "edgeone" || platform === "tencent" || platform === "tencent-cloudbase";
 }
 
 function deploymentPlatformName(): "edgeone" | "vercel" {

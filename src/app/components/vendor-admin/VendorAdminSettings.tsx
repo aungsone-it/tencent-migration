@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { API_BASE_URL } from "../../../utils/api-client";
 import { compressImage } from "../../../utils/imageCompression";
+import { copyToClipboard as copyTextToClipboard } from "../../utils/clipboard";
 import { cacheManager } from "../../utils/cacheManager";
 import { invalidateVendorStorefrontCatalogCache } from "../../utils/module-cache";
 import { notifyStorefrontPolicyUpdated, subscribeStorefrontPolicyUpdates } from "../../utils/storefrontPolicyRealtime";
@@ -431,10 +432,10 @@ export function VendorAdminSettings({
   };
 
   const copyToClipboard = async (label: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
       toast.success(tr("vendorAdmin.settings.copied", { label }));
-    } catch {
+    } else {
       toast.error(t("vendorAdmin.settings.couldNotCopy"));
     }
   };
@@ -941,15 +942,20 @@ export function VendorAdminSettings({
               className="bg-white border-slate-200 font-mono text-sm"
             />
             {settings.domainStatus === "verified" && settings.customDomain && (
-              <p className="text-xs text-emerald-700 mt-2">
-                <strong>{t("vendorAdmin.settings.verified")}</strong> — store is served at{" "}
-                <span className="font-mono">https://{settings.customDomain}</span>{" "}
-                {t(
-                  onEdgeOne
-                    ? "vendorAdmin.settings.verifiedHostingEdgeOne"
-                    : "vendorAdmin.settings.verifiedHostingVercel"
-                )}
-              </p>
+              <>
+                <p className="text-xs text-emerald-700 mt-2">
+                  <strong>{t("vendorAdmin.settings.verified")}</strong> — store is served at{" "}
+                  <span className="font-mono">https://{settings.customDomain}</span>{" "}
+                  {t(
+                    onEdgeOne
+                      ? "vendorAdmin.settings.verifiedHostingEdgeOne"
+                      : "vendorAdmin.settings.verifiedHostingVercel"
+                  )}
+                </p>
+                <p className="text-xs text-amber-800 mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                  {t("vendorAdmin.settings.verifiedDnsReminder")}
+                </p>
+              </>
             )}
             {settings.domainStatus === "pending" && (
               <p className="text-xs text-amber-700 mt-2">

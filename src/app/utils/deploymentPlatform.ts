@@ -8,12 +8,12 @@ export function isEdgeOneDeployment(hostname?: string): boolean {
   const platform = String(import.meta.env.VITE_DEPLOYMENT_PLATFORM || "")
     .trim()
     .toLowerCase();
-  return platform === "edgeone" || platform === "tencent";
+  return platform === "edgeone" || platform === "tencent" || platform === "tencent-cloudbase";
 }
 
 export function isEdgeOnePlatformValue(platform?: string): boolean {
   const normalized = String(platform || "").trim().toLowerCase();
-  return normalized === "edgeone" || normalized === "tencent";
+  return normalized === "edgeone" || normalized === "tencent" || normalized === "tencent-cloudbase";
 }
 
 /** CNAME shown in vendor custom-domain instructions (API value wins when explicit). */

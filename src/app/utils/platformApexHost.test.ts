@@ -32,9 +32,15 @@ describe("platformApexHost", () => {
     expect(isBarePlatformApexHost("localhost")).toBe(false);
   });
 
-  it("treats unclaimed bare apex as marketplace", () => {
-    expect(isMarketplaceApexHost("newbrand.com")).toBe(true);
-    expect(isMarketplaceApexHost("www.newbrand.com")).toBe(true);
+  it("treats unclaimed bare apex as marketplace only after by-domain miss", () => {
+    expect(isMarketplaceApexHost("newbrand.com")).toBe(false);
+    expect(isMarketplaceApexHost("www.newbrand.com")).toBe(false);
+  });
+
+  it("treats env primary apex as marketplace", () => {
+    env.VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN = "nexa-apex.online";
+    expect(isMarketplaceApexHost("nexa-apex.online")).toBe(true);
+    expect(isMarketplaceApexHost("walwal.online")).toBe(false);
   });
 
   it("marks env primary apex as reserved", () => {

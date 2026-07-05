@@ -1,38 +1,21 @@
 /** PBKDF2-SHA256 password storage for legacy KV users (not Supabase Auth). */
 
+import crypto from "node:crypto";
+
 const ITERATIONS = 100_000;
 const PREFIX = "pbkdf2_sha256";
 
-function b64urlEncode(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function b64urlEncode(bytes: Uint8Array | Buffer): string {
+  return Buffer.from(bytes).toString("base64url");
 }
 
-function b64urlDecode(s: string): Uint8Array {
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+function b64urlDecode(s: string): Buffer {
+  return Buffer.from(s, "base64url");
 }
 
 export async function hashPasswordPlain(plain: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const enc = new TextEncoder().encode(plain);
-  const key = await crypto.subtle.importKey("raw", enc, "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: ITERATIONS,
-      hash: "SHA-256",
-    },
-    key,
-    256,
-  );
-  const hash = new Uint8Array(bits);
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.pbkdf2Sync(plain, salt, ITERATIONS, 32, "sha256");
   return `${PREFIX}$${ITERATIONS}$${b64urlEncode(salt)}$${b64urlEncode(hash)}`;
 }
 
@@ -63,21 +46,7 @@ export async function verifyPasswordPlain(plain: string, stored: unknown): Promi
   if (!Number.isFinite(iter) || iter < 10_000) return false;
   const salt = b64urlDecode(parts[2]!);
   const expectedHash = b64urlDecode(parts[3]!);
-  const enc = new TextEncoder().encode(plain);
-  const key = await crypto.subtle.importKey("raw", enc, "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: iter,
-      hash: "SHA-256",
-    },
-    key,
-    256,
-  );
-  const got = new Uint8Array(bits);
+  const got = crypto.pbkdf2Sync(plain, salt, iter, expectedHash.length, "sha256");
   if (got.length !== expectedHash.length) return false;
-  let diff = 0;
-  for (let i = 0; i < got.length; i++) diff |= got[i]! ^ expectedHash[i]!;
-  return diff === 0;
+  return crypto.timingSafeEqual(got, expectedHash);
 }

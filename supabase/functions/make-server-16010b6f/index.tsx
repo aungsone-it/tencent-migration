@@ -838,7 +838,11 @@ app.get("/make-server-16010b6f/storage/object", async (c) => {
     if (!obj) {
       return c.json({ error: "Object not found" }, 404);
     }
-    return new Response(obj.bytes, {
+    const body = obj.bytes.buffer.slice(
+      obj.bytes.byteOffset,
+      obj.bytes.byteOffset + obj.bytes.byteLength,
+    );
+    return new Response(body, {
       status: 200,
       headers: {
         "Content-Type": obj.contentType,

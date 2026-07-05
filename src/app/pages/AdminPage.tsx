@@ -22,6 +22,7 @@ import { usePlatformBranding } from "../hooks/usePlatformBranding";
 import { buildSuperAdminDocumentTitle } from "../utils/superAdminDocumentTitle";
 import { SmartCache } from "../../utils/cache";
 import { moduleCache, CACHE_KEYS } from "../utils/module-cache";
+import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
 import {
   peekPendingOrdersDigestSourceMs,
   peekPendingVendorApplicationsDigestSourceMs,
@@ -317,7 +318,11 @@ export function AdminPage() {
       role: authUser.role as User["role"],
       phone: authUser.phone ?? prev.phone,
       profileImageUrl: str("profileImageUrl") ?? prev.profileImageUrl,
-      avatar: str("profileImageUrl") ?? str("avatar") ?? prev.avatar,
+      avatar: (() => {
+        const raw = str("profileImageUrl") ?? str("avatar") ?? prev.profileImageUrl ?? prev.avatar ?? "";
+        const resolved = resolveCloudBaseMediaUrl(String(raw));
+        return resolved.startsWith("http") || resolved.startsWith("data:") ? resolved : raw;
+      })(),
       bio: str("bio") ?? prev.bio,
       location: str("location") ?? prev.location,
       addressLine1: str("addressLine1") ?? prev.addressLine1,

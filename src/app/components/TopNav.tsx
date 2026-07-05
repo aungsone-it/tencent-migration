@@ -17,6 +17,7 @@ import { notificationsApi } from "../../utils/api";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
 
 interface TopNavProps {
   currentUser: any;
@@ -548,7 +549,13 @@ export function TopNav({
                 <Button variant="ghost" size="sm" className="gap-2">
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-red-600 flex-shrink-0">
                     <img 
-                      src={currentUser.avatar}
+                      src={(() => {
+                        const raw = String(currentUser.profileImageUrl || currentUser.avatar || "");
+                        const resolved = resolveCloudBaseMediaUrl(raw);
+                        return resolved.startsWith("http") || resolved.startsWith("data:")
+                          ? resolved
+                          : raw;
+                      })()}
                       alt={t("profile.title.view")}
                       className="w-full h-full object-cover"
                     />

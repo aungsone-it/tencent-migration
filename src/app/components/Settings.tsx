@@ -90,6 +90,7 @@ import {
   subscribeStorefrontPolicyUpdates,
 } from "../utils/storefrontPolicyRealtime";
 import { compressImage } from "../../utils/imageCompression";
+import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
 
 interface SettingsTab {
   id: string;
@@ -263,6 +264,9 @@ export function Settings() {
     (data: any[]) => {
       const transformedUsers = data.map((u: any) => {
         const fallback = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(u.email || "user")}`;
+        const resolved = resolveCloudBaseMediaUrl(String(u.profileImageUrl || u.avatar || ""));
+        const avatar =
+          resolved.startsWith("http") || resolved.startsWith("data:") ? resolved : fallback;
         return {
           id: u.id,
           name: u.name,
@@ -272,7 +276,7 @@ export function Settings() {
           storeId: u.storeId || "",
           status: u.status || "active",
           profileImageUrl: u.profileImageUrl,
-          avatar: u.profileImageUrl || fallback,
+          avatar,
           lastActive: u.createdAt
             ? new Date(u.createdAt).toLocaleDateString()
             : new Date().toLocaleDateString(),

@@ -140,6 +140,24 @@ async function fromResponse(response) {
   response.headers.forEach((value, key) => {
     headers[key] = value;
   });
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  const isBinary =
+    contentType.startsWith("image/") ||
+    contentType.startsWith("application/octet-stream") ||
+    contentType.startsWith("video/") ||
+    contentType.startsWith("audio/") ||
+    contentType.startsWith("font/");
+
+  if (isBinary) {
+    const buf = Buffer.from(await response.arrayBuffer());
+    return {
+      statusCode: response.status,
+      headers,
+      body: buf.toString("base64"),
+      isBase64Encoded: true,
+    };
+  }
+
   return {
     statusCode: response.status,
     headers,

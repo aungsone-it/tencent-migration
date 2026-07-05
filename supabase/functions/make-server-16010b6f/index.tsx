@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import nodeCrypto from "node:crypto";
 import * as kv from "./kv_store.tsx";
 import { createClient } from "./cloudbase_compat.ts";
 import authApp from "./auth_routes.tsx";
@@ -11438,6 +11439,17 @@ app.get("/make-server-16010b6f/vendor/storefront/:vendorId", async (c) => {
 
 // --- Custom domain: DNS TXT (Cloudflare DoH) + KV custom_domain_host:* ---
 
+/** Verification token — must not use global `crypto` (undefined on Tencent SCF). */
+function newDomainVerificationToken(): string {
+  if (typeof nodeCrypto.randomUUID === "function") {
+    return nodeCrypto.randomUUID();
+  }
+  if (typeof nodeCrypto.randomBytes === "function") {
+    return nodeCrypto.randomBytes(16).toString("hex");
+  }
+  return `migoo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 function normalizeVendorHostnameInput(input: string): string | null {
   if (!input || typeof input !== "string") return null;
   let s = input
@@ -11695,7 +11707,7 @@ app.post("/make-server-16010b6f/vendor/custom-domain/prepare", async (c) => {
       return c.json({ error: "This domain is already connected to another store" }, 409);
     }
 
-    const token = crypto.randomUUID();
+    const token = newDomainVerificationToken();
     const txtName = `_migoo-verify.${normalized}`;
     const txtValue = `migoo-verify=${token}`;
 

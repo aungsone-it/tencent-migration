@@ -468,7 +468,14 @@ export function VendorAdminSettings({
           );
           return;
         }
-        toast.error(typeof data.error === "string" ? data.error : "Could not save domain instructions");
+        const errMsg = typeof data.error === "string" ? data.error : "";
+        if (/crypto is not defined/i.test(errMsg)) {
+          toast.error(
+            "Custom domain API needs redeploy. Upload .cloudbase/dist/make-server-16010b6f.zip to CloudBase, then try Save instructions again."
+          );
+          return;
+        }
+        toast.error(errMsg || "Could not save domain instructions");
         return;
       }
       setDomainHints({

@@ -1512,6 +1512,48 @@ async function uploadProfileImage(userId: string, imageDataUrl: string): Promise
   }
 }
 
+/** Multipart file upload — avoids CloudBase JSON body size limits on vendor/staff profile saves. */
+async function uploadProfileImageFile(userId: string, imageFile: File): Promise<string | null> {
+  try {
+    const PROFILE_IMAGES_BUCKET = "make-16010b6f-profile-images";
+    await ensureBucket(supabase, PROFILE_IMAGES_BUCKET, {
+      public: false,
+      fileSizeLimit: 524288,
+    });
+
+    const MAX_PROFILE_BYTES = 524288;
+    if (imageFile.size > MAX_PROFILE_BYTES) {
+      console.error(`❌ Profile image too large: ${imageFile.size} bytes (max ${MAX_PROFILE_BYTES})`);
+      return null;
+    }
+
+    const name = imageFile.name || "profile.jpg";
+    const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() : "jpg";
+    const imageType = ext === "jpg" ? "jpeg" : ext || "jpeg";
+    const filename = `${userId}_${Date.now()}.${imageType}`;
+    const filePath = `profile-images/${filename}`;
+
+    const bytes = new Uint8Array(await imageFile.arrayBuffer());
+    const { error } = await supabase.storage
+      .from(PROFILE_IMAGES_BUCKET)
+      .upload(filePath, bytes, {
+        contentType: imageFile.type || `image/${imageType}`,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error("❌ Error uploading profile image file:", error);
+      return null;
+    }
+
+    console.log(`✅ Profile image uploaded: ${filePath}`);
+    return filePath;
+  } catch (error) {
+    console.error("❌ Error processing profile image file:", error);
+    return null;
+  }
+}
+
 /** Per-isolate memo: GET /customers and auth profile paths repeat createSignedUrl for the same paths. */
 const signedImageUrlMemo = new Map<string, { url: string; expiresAt: number }>();
 const SIGNED_IMAGE_URL_MEMO_TTL_MS = 55 * 60 * 1000;
@@ -3239,6 +3281,61 @@ app.get("/make-server-16010b6f/vendor-auth/profile/:vendorId", async (c) => {
   }
 });
 
+app.post("/make-server-16010b6f/vendor-auth/profile/:vendorId/profile-image", async (c) => {
+  try {
+    const vendorId = c.req.param("vendorId");
+    if (!vendorId?.trim()) {
+      return c.json({ error: "vendorId required" }, 400);
+    }
+
+    const existing = await withTimeout(kv.get(`vendor:${vendorId}`), 5000);
+    if (!existing || typeof existing !== "object") {
+      return c.json({ error: "Vendor not found" }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const imageFile = formData.get("image") as File | null;
+    if (!imageFile || typeof imageFile.arrayBuffer !== "function") {
+      return c.json({ error: "No image file provided" }, 400);
+    }
+
+    if (imageFile.size / 1024 > 600) {
+      return c.json({ error: "Image file too large. Maximum size is 500KB" }, 400);
+    }
+
+    const uploadedPath = await uploadProfileImageFile(vendorId, imageFile);
+    if (!uploadedPath) {
+      return c.json({ error: "Failed to upload profile image" }, 500);
+    }
+
+    const ev = existing as Record<string, unknown>;
+    const prevProfileImg =
+      typeof ev.profileImage === "string" ? String(ev.profileImage).trim() : "";
+
+    const next: Record<string, unknown> = {
+      ...ev,
+      profileImage: uploadedPath,
+      updatedAt: new Date().toISOString(),
+    };
+    if (typeof next.avatar === "string" && /^https?:\/\//i.test(String(next.avatar).trim())) {
+      delete next.avatar;
+    }
+
+    await withTimeout(kv.set(`vendor:${vendorId}`, next), 5000);
+    queueVendorReadModelSync(vendorId, next);
+
+    if (prevProfileImg && prevProfileImg !== uploadedPath) {
+      await deleteOwnedStorageRefs(supabase, [prevProfileImg]);
+    }
+
+    const user = await buildVendorAuthProfileUser(next);
+    return c.json({ success: true, user, profileImageUrl: user.profileImageUrl });
+  } catch (error: any) {
+    console.error("❌ [VendorAuth] POST profile-image:", error);
+    return c.json({ error: error.message || "Failed to upload profile image" }, 500);
+  }
+});
+
 app.put("/make-server-16010b6f/vendor-auth/profile/:vendorId", async (c) => {
   try {
     const vendorId = c.req.param("vendorId");
@@ -3279,6 +3376,15 @@ app.put("/make-server-16010b6f/vendor-auth/profile/:vendorId", async (c) => {
         await deleteOwnedStorageRefs(supabase, [prevProfileImg]);
       }
     } else if (typeof body.profileImage === "string" && body.profileImage.length > 0) {
+      if (body.profileImage.length > 450_000) {
+        return c.json(
+          {
+            error:
+              "Profile image payload too large. Save again after selecting the photo — the app will upload it separately.",
+          },
+          413,
+        );
+      }
       const uploaded = await uploadProfileImage(vendorId, body.profileImage);
       if (uploaded) {
         profileImagePath = uploaded;
@@ -3327,8 +3433,11 @@ app.put("/make-server-16010b6f/vendor-auth/profile/:vendorId", async (c) => {
             ? String(next.name).trim()
             : "VN";
       next.avatar = label.substring(0, 2).toUpperCase();
-    } else if (profileImagePath && typeof next.avatar === "string" && next.avatar.startsWith("http")) {
-      /* keep */
+    } else if (profileImagePath) {
+      // Account photo is stored in `profileImage` only — clear legacy http `avatar` (often storefront logo).
+      if (typeof next.avatar === "string" && /^https?:\/\//i.test(next.avatar.trim())) {
+        delete next.avatar;
+      }
     }
 
     await withTimeout(kv.set(`vendor:${vendorId}`, next), 5000);
@@ -8448,14 +8557,6 @@ app.put("/make-server-16010b6f/vendors/:id", async (c) => {
       const rawA = body.avatar;
       (updatedVendor as any).avatar =
         typeof rawA === "string" ? rawA : rawA === null || rawA === "" ? "" : (updatedVendor as any).avatar || "";
-      const isImageLike =
-        typeof rawA === "string" &&
-        (/^https?:\/\//i.test(rawA) ||
-          rawA.startsWith("data:image/") ||
-          rawA.startsWith("blob:"));
-      if (isImageLike) {
-        (updatedVendor as any).logo = rawA;
-      }
     }
 
     if (avatarFieldTouched && logoFieldTouched) {
@@ -8464,7 +8565,7 @@ app.put("/make-server-16010b6f/vendors/:id", async (c) => {
         typeof rawA === "string" ? rawA : rawA === null || rawA === "" ? "" : (updatedVendor as any).avatar || "";
     }
 
-    const logoTouched = logoFieldTouched || avatarFieldTouched;
+    const logoTouched = logoFieldTouched;
 
     await withTimeout(kv.set(`vendor:${id}`, updatedVendor), 5000);
     queueVendorReadModelSync(id, updatedVendor);

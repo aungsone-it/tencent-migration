@@ -11,7 +11,7 @@ export function isRenderableImageSrc(src: string | undefined | null): boolean {
   return false;
 }
 
-/** Prefer a renderable `primary` logo; otherwise use `fallback` if renderable; else empty. */
+/** Prefer a renderable `primary` logo; optional `fallback` only for another storefront logo source (never account avatar). */
 export function pickStoreLogo(
   primary: string | undefined | null,
   fallback: string | undefined | null

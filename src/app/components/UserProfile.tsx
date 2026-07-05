@@ -506,10 +506,42 @@ export function UserProfile({
       country: editedUser.country ?? "",
       bio: editedUser.bio ?? "",
     };
-    if (avatarFile) {
-      payload.profileImage = avatarFile;
-    } else if (avatarMarkedForRemoval) {
+    if (avatarMarkedForRemoval) {
       payload.removeProfileImage = true;
+    }
+
+    const authHeaders = {
+      ...getCloudBaseRequestHeaders(),
+      ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+    };
+
+    if (avatarFile && typeof avatarFile === "string" && avatarFile.startsWith("data:image/")) {
+      const match = avatarFile.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) throw new Error("Invalid profile image data");
+      const mime = match[1];
+      const binary = atob(match[2]);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+      const formData = new FormData();
+      formData.append("image", new Blob([bytes], { type: mime }), `profile.${ext}`);
+
+      const uploadRes = await fetch(
+        `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(user.id)}/profile-image`,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: formData,
+        },
+      );
+      if (!uploadRes.ok) {
+        const errorData = await uploadRes.json().catch(() => ({ error: uploadRes.statusText }));
+        throw new Error(
+          typeof errorData.error === "string"
+            ? errorData.error
+            : `Failed to upload profile image: ${uploadRes.statusText}`,
+        );
+      }
     }
 
     const response = await fetch(
@@ -517,9 +549,7 @@ export function UserProfile({
       {
         method: "PUT",
         headers: {
-          ...getCloudBaseRequestHeaders(),
-
-          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+          ...authHeaders,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),

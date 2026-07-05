@@ -173,7 +173,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [vendorLogo, setVendorLogo] = useState<string>(() =>
-    pickStoreLogo(initialStorefrontCache?.logo, vendor.avatar)
+    pickStoreLogo(initialStorefrontCache?.logo, "")
   );
   /** Canonical storefront label + slug from KV (drives sidebar + URLs after rename). */
   const [storefrontSnapshot, setStorefrontSnapshot] = useState<{
@@ -275,10 +275,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
         storeName: String(s.storeName || vendor.storeName || vendor.name || "Vendor Store"),
         storeSlug: String(s.storeSlug || vendor.storeSlug || ""),
       });
-      const nextLogo = pickStoreLogo(
-        typeof s.logo === "string" ? s.logo : "",
-        vendor.avatar
-      );
+      const nextLogo = pickStoreLogo(typeof s.logo === "string" ? s.logo : "", "");
       setVendorLogo(nextLogo);
       writeStorefrontSnapshotCache(vendor.id, {
         storeName: String(s.storeName || vendor.storeName || vendor.name || "Vendor Store"),
@@ -288,7 +285,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
     } catch (error) {
       console.error("Failed to load vendor storefront snapshot:", error);
     }
-  }, [vendor.id, vendor.name, vendor.storeName, vendor.storeSlug, vendor.avatar]);
+  }, [vendor.id, vendor.name, vendor.storeName, vendor.storeSlug]);
 
   useEffect(() => {
     void loadStorefrontSnapshot();

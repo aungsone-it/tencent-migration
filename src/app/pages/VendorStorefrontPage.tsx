@@ -308,15 +308,15 @@ export function VendorStorefrontPage() {
     void (async () => {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/vendor/store/${encodeURIComponent(slugToVerify)}`,
+          `${API_BASE_URL}/vendors/by-slug/${encodeURIComponent(slugToVerify)}`,
           { headers: { ...getCloudBaseRequestHeaders(),
  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
         );
         if (cancelled) return;
         const data = (await res.json().catch(() => ({}))) as {
-          settings?: {
+          vendor?: {
+            id?: string;
             storeSlug?: string;
-            vendorId?: string;
             storeName?: string;
             contactEmail?: string;
             address?: string;
@@ -325,22 +325,27 @@ export function VendorStorefrontPage() {
           };
           storeUnavailable?: boolean;
         };
-        const settings = data?.settings;
+        if (data?.storeUnavailable) {
+          setVendorExistence("not_found");
+          setCanonicalStoreSlug(null);
+          return;
+        }
+        const vendor = data?.vendor;
         const hasVendor =
           res.ok &&
-          settings != null &&
-          typeof settings === "object" &&
-          Boolean(settings.vendorId || settings.storeSlug);
+          vendor != null &&
+          typeof vendor === "object" &&
+          Boolean(vendor.id || vendor.storeSlug);
         if (!hasVendor) {
           setVendorExistence("not_found");
           setCanonicalStoreSlug(null);
           return;
         }
         const slug =
-          typeof settings.storeSlug === "string" && settings.storeSlug.trim()
-            ? settings.storeSlug.trim()
+          typeof vendor.storeSlug === "string" && vendor.storeSlug.trim()
+            ? vendor.storeSlug.trim()
             : slugToVerify;
-        seedStorefrontPolicyCacheFromVendorSettings(slug, settings);
+        seedStorefrontPolicyCacheFromVendorSettings(slug, vendor);
         setCanonicalStoreSlug(slug);
         writeVendorSlugVerified(slugToVerify);
         setVendorExistence("found");

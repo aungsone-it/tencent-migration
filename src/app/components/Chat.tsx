@@ -4,11 +4,9 @@ import imageCompression from "browser-image-compression";
 import {
   MessageSquare,
   Send,
-  Paperclip,
   Star,
   Trash2,
   Image as ImageIcon,
-  Smile,
   Check,
   CheckCheck,
   Clock,
@@ -29,7 +27,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { chatApi } from "../../utils/api";
 import { conversationBucketKeyClient, canonicalChatThreadId, mainStoreConversationIdFromEmail, mergeConversationsByCustomerVendorClient } from "../../utils/chatConversation";
 import {
@@ -45,7 +42,6 @@ import { getCachedAdminVendorsForProductList } from "../utils/module-cache";
 import { buildVendorDisplayLookup, resolveChatVendorLabel } from "../utils/vendorDisplay";
 
 import { toast } from "sonner";
-import { EmojiPicker, type EmojiClickData } from "./EmojiPickerLazy";
 import { useLanguage } from "../contexts/LanguageContext";
 
 interface Message {
@@ -343,7 +339,7 @@ export function Chat({
   const pollingIntervalRef = useRef<number | null>(null);
   const loadConversationsRef = useRef<() => Promise<void>>(async () => {});
   const inboxFetchFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const inboxLoadGenRef = useRef(0);
   const docVisible = useDocumentVisible();
   const [vendorLookup, setVendorLookup] = useState<Record<string, string>>({});
   const selectedConversationRef = useRef<string | null>(selectedConversation);
@@ -381,26 +377,35 @@ export function Chat({
   }, []);
 
   const loadConversations = async (mode: ChatInboxLoadMode = "refresh") => {
+    const loadGen = ++inboxLoadGenRef.current;
     try {
       if (mode === "initial" || mode === "refresh") {
         setLoading(true);
       }
       const response = await chatApi.getConversations();
+      if (loadGen !== inboxLoadGenRef.current) return;
       if (response.conversations && Array.isArray(response.conversations)) {
-        let merged = normalizeAdminInboxList(response.conversations as Conversation[]);
+        let fromApi = normalizeAdminInboxList(response.conversations as Conversation[]);
         const sel = selectedConversationRef.current;
-        merged = preserveSelectedConversationInList(merged, conversationsRef.current, sel);
+        fromApi = preserveSelectedConversationInList(fromApi, conversationsRef.current, sel);
         if (handoffPinnedConversationRef.current) {
-          merged = preserveSelectedConversationInList(
-            merged,
+          fromApi = preserveSelectedConversationInList(
+            fromApi,
             [handoffPinnedConversationRef.current],
             sel
           );
         }
-        chatAdminInboxCache = merged;
-        setConversations(merged);
+        const prev = conversationsRef.current;
+        let next = fromApi;
+        if (fromApi.length === 0 && prev.length > 0) {
+          next = prev;
+        } else if (prev.length > 0) {
+          next = normalizeAdminInboxList([...fromApi, ...prev]);
+        }
+        chatAdminInboxCache = next;
+        setConversations(next);
         if (sel) {
-          const row = findConversationRow(merged, sel, handoffPinnedConversationRef.current);
+          const row = findConversationRow(next, sel, handoffPinnedConversationRef.current);
           if (row && row.id !== sel) {
             setSelectedConversation(row.id);
           }
@@ -408,7 +413,7 @@ export function Chat({
             handoffPinnedConversationRef.current = null;
           }
         }
-        const totalUnread = response.conversations.reduce(
+        const totalUnread = next.reduce(
           (sum: number, conv: Conversation) => sum + (Number(conv.unread) || 0),
           0
         );
@@ -419,7 +424,7 @@ export function Chat({
     } catch (error) {
       console.error("Failed to load conversations:", error);
     } finally {
-      if (mode !== "silent") {
+      if (loadGen === inboxLoadGenRef.current && mode !== "silent") {
         setLoading(false);
       }
     }
@@ -520,7 +525,7 @@ export function Chat({
       inboxFetchFallbackRef.current = window.setTimeout(() => {
         inboxFetchFallbackRef.current = null;
         void loadConversationsRef.current();
-      }, 1600);
+      }, 400);
     };
 
     return subscribeAdminInbox((payload) => {
@@ -600,6 +605,7 @@ export function Chat({
       const next = normalizeAdminInboxList(result.next);
       chatAdminInboxCache = next;
       const totalUnread = next.reduce((sum, c) => sum + (Number(c.unread) || 0), 0);
+      setLoading(false);
       setConversations(next);
       queueMicrotask(() =>
         window.dispatchEvent(
@@ -607,6 +613,18 @@ export function Chat({
         )
       );
     });
+  }, []);
+
+  // Badge hook updates before inbox list — refetch when unread arrives but sidebar is still empty.
+  useEffect(() => {
+    const onUnread = (event: Event) => {
+      const total = Number((event as CustomEvent<{ total?: number }>).detail?.total) || 0;
+      if (total > 0 && conversationsRef.current.length === 0) {
+        void loadConversations("silent");
+      }
+    };
+    window.addEventListener("admin-chat-unread-updated", onUnread);
+    return () => window.removeEventListener("admin-chat-unread-updated", onUnread);
   }, []);
 
   useEffect(() => {
@@ -853,9 +871,7 @@ export function Chat({
       if (selectedConversation) {
         loadMessages(selectedConversation, true, "auto"); // messages only; unread handled on open / send
       }
-    }, selectedConversation
-      ? POLLING_INTERVALS_MS.CHAT_ACTIVE_THREAD_POLL
-      : POLLING_INTERVALS_MS.CHAT_HTTP_FALLBACK);
+    }, POLLING_INTERVALS_MS.ADMIN_CHAT_INBOX_POLL);
   };
 
   const stopPolling = () => {
@@ -946,7 +962,7 @@ export function Chat({
   };
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversation) return;
+    if ((!messageInput.trim() && !selectedImage) || !selectedConversation) return;
 
     const selectedConv = findConversationRow(
       conversations,
@@ -1193,11 +1209,6 @@ export function Chat({
   useEffect(() => {
     chatAdminSelectedConversationCache = selectedConversation;
   }, [selectedConversation]);
-
-  const handleEmojiClick = (emoji: EmojiClickData) => {
-    setMessageInput((prev) => prev + emoji.emoji);
-    setShowEmojiPicker(false);
-  };
 
   const applyConversationPatch = (ids: string[], patch: Partial<Conversation>) => {
     const idSet = new Set(ids.filter(Boolean));
@@ -1530,7 +1541,9 @@ export function Chat({
                               style={{ maxHeight: '300px' }}
                             />
                           )}
-                          <p className="text-sm leading-relaxed break-words">{message.text}</p>
+                          {message.text ? (
+                            <p className="text-sm leading-relaxed break-words">{message.text}</p>
+                          ) : null}
                         </div>
                         <div
                           className={`flex items-center gap-1 mt-1 ${
@@ -1601,9 +1614,6 @@ export function Chat({
               )}
 
               <div className="flex items-end gap-3">
-                <Button variant="ghost" size="icon" className="flex-shrink-0">
-                  <Paperclip className="w-5 h-5" />
-                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1633,23 +1643,9 @@ export function Chat({
                     disabled={sending || uploadingImage}
                   />
                 </div>
-                <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" className="flex-shrink-0">
-                      <Smile className="w-5 h-5" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-full p-0 border-0" side="top" align="end">
-                    <EmojiPicker 
-                      onEmojiClick={handleEmojiClick}
-                      width={350}
-                      height={450}
-                    />
-                  </PopoverContent>
-                </Popover>
                 <Button
                   onClick={handleSendMessage}
-                  disabled={!messageInput.trim() || sending || uploadingImage}
+                  disabled={(!messageInput.trim() && !selectedImage) || sending || uploadingImage}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white flex-shrink-0 rounded-xl"
                 >
                   {sending ? (

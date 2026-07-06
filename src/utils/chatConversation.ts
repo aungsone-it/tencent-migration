@@ -137,3 +137,18 @@ export function mergeConversationsByCustomerVendorClient<T extends ConversationM
       aliasConversationIds: Array.isArray(__ids) ? __ids.filter(Boolean) : undefined,
     }));
 }
+
+/** Strip data URLs / oversized values — chat POST must stay small (CloudBase body limits). */
+export function sanitizeOptionalHttpUrl(value: unknown, maxLen = 4096): string | undefined {
+  const s = String(value ?? "").trim();
+  if (!s || s.startsWith("data:")) return undefined;
+  if (!s.startsWith("http://") && !s.startsWith("https://")) return undefined;
+  return s.length <= maxLen ? s : undefined;
+}
+
+/** Image-only messages need non-empty text on older deployed APIs. */
+export function chatMessageTextForSend(text: unknown, imageUrl?: string): string {
+  const trimmed = String(text ?? "").trim();
+  if (trimmed) return trimmed;
+  return imageUrl ? "Image" : "";
+}

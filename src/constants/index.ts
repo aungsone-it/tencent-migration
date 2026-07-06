@@ -68,6 +68,8 @@ export const POLLING_INTERVALS_MS = {
   CHAT_HTTP_FALLBACK: 45 * 60 * 1000,
   /** Open thread / expanded panel — safety net when Realtime is tab-local (BroadcastChannel). */
   CHAT_ACTIVE_THREAD_POLL: 5 * 1000,
+  /** Admin Chat sidebar — keep inbox list fresh while the page is open. */
+  ADMIN_CHAT_INBOX_POLL: 5 * 1000,
   /** When chat is closed or minimized — light poll so admin replies still bump unread if Realtime lags. */
   CHAT_HTTP_FALLBACK_DOCKET: 15 * 1000,
   /** When Marketing campaign auto-refresh is enabled. */

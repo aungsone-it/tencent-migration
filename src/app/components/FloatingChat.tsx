@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { MessageCircle, X, Send, Paperclip, Smile, Image as ImageIcon, Loader2, Headset, MessageCircleMore, Lock } from "lucide-react";
+import { MessageCircle, X, Send, Image as ImageIcon, Loader2, Headset, MessageCircleMore, Lock } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
 import { chatApi } from "../../utils/api";
+import { ApiError } from "../../utils/api-client";
 import {
   CHAT_LOCAL_STORAGE_DEBOUNCE_MS,
   CHAT_SCROLL_DEBOUNCE_MS,
@@ -22,8 +23,6 @@ import {
   subscribeCustomerChatBroadcast,
 } from "../utils/chatRealtime";
 import imageCompression from "browser-image-compression";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { EmojiPicker, type EmojiClickData } from "./EmojiPickerLazy";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
 import { canonicalChatThreadId } from "../../utils/chatConversation";
@@ -195,7 +194,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // Align thread id with Edge canonical keys (slug vs internal id — fixes history + admin realtime).
   useEffect(() => {
@@ -214,7 +212,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   const lsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollingIntervalRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const lastMessageIdRef = useRef<string | null>(null);
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
@@ -596,8 +593,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
 
     // Add to UI immediately
     setMessages(prev => [...prev, newMessage]);
-    setMessageInput("");
-    setSelectedImage(null);
 
     // Send to server
     try {
@@ -613,6 +608,8 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
       })) as { success?: boolean; message?: Message };
 
       if (response?.message) {
+        setMessageInput("");
+        setSelectedImage(null);
         const canonicalId = String(
           (response.message as { conversationId?: unknown }).conversationId || ""
         ).trim();
@@ -646,9 +643,18 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
           unreadBump: true,
           message: response.message,
         });
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+        toast.error("Failed to send message");
       }
     } catch (error) {
       console.error("Failed to send message:", error);
+      setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+      const description =
+        error instanceof ApiError && error.message
+          ? error.message
+          : "Check your connection and try again.";
+      toast.error("Failed to send message", { description });
     }
   };
 
@@ -721,33 +727,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  };
-
-  const handleAttachmentSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!hasActiveChatSession(vendorId, isAuthenticated)) {
-      toast.error("Please sign in to use chat");
-      setShowSignInDialog(true);
-      return;
-    }
-
-    if (file.type.startsWith('image/')) {
-      handleImageSelect(e);
-    } else {
-      toast.error("Currently only image attachments are supported", {
-        description: "PDF and document support coming soon!"
-      });
-    }
-
-    if (attachmentInputRef.current) {
-      attachmentInputRef.current.value = '';
-    }
-  };
-
-  const handleEmojiClick = (emojiData: EmojiClickData) => {
-    setMessageInput(prev => prev + emojiData.emoji);
-    setShowEmojiPicker(false);
   };
 
   const cancelImageSelection = () => {
@@ -949,13 +928,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
                 className="hidden"
                 onChange={handleImageSelect}
               />
-              <input
-                ref={attachmentInputRef}
-                type="file"
-                accept="*/*"
-                className="hidden"
-                onChange={handleAttachmentSelect}
-              />
 
               {selectedImage && (
                 <div className="mb-2 flex items-center gap-2 p-2 bg-slate-100 rounded-lg">
@@ -991,15 +963,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
                       variant="ghost"
                       size="sm"
                       className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700"
-                      onClick={() => attachmentInputRef.current?.click()}
-                      title="Attach file"
-                    >
-                      <Paperclip className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700"
                       onClick={() => fileInputRef.current?.click()}
                       title="Upload image"
                     >
@@ -1009,29 +972,12 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
                         <ImageIcon className="w-4 h-4" />
                       )}
                     </Button>
-                    <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700"
-                          title="Add emoji"
-                        >
-                          <Smile className="w-4 h-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-full p-0 border-0" side="top" align="end">
-                        <EmojiPicker 
-                          onEmojiClick={handleEmojiClick}
-                          width={320}
-                          height={400}
-                        />
-                      </PopoverContent>
-                    </Popover>
                   </div>
                   <Button
                     onClick={handleSendMessage}
-                    disabled={!messageInput.trim() && !selectedImage}
+                    disabled={
+                      uploadingImage || (!messageInput.trim() && !selectedImage)
+                    }
                     className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 h-9 px-4 rounded-xl flex items-center gap-2 shrink-0"
                   >
                     <Send className="w-4 h-4" />

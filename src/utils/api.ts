@@ -5,6 +5,7 @@
 
 import { API_TIMEOUTS } from '../constants';
 import { apiClient, API_BASE_URL } from './api-client';
+import { chatMessageTextForSend, sanitizeOptionalHttpUrl } from './chatConversation';
 import {
   projectId,
   publicAnonKey,
@@ -738,7 +739,19 @@ export const chatApi = {
     vendorSource?: string;
     customerProfileImage?: string;
   }) => {
-    return apiClient.post('/chat/messages', data);
+    const imageUrl = sanitizeOptionalHttpUrl(data.imageUrl);
+    const customerProfileImage = sanitizeOptionalHttpUrl(data.customerProfileImage);
+    const text = chatMessageTextForSend(data.text, imageUrl);
+    return apiClient.post(
+      '/chat/messages',
+      {
+        ...data,
+        text,
+        imageUrl,
+        customerProfileImage,
+      },
+      { timeout: API_TIMEOUTS.CHAT }
+    );
   },
 
   /**
@@ -766,11 +779,15 @@ export const chatApi = {
    * Upload image for chat
    */
   uploadImage: async (imageData: string, fileName: string, conversationId?: string) => {
-    return apiClient.post('/chat/upload-image', {
-      imageData,
-      fileName,
-      conversationId,
-    });
+    return apiClient.post(
+      '/chat/upload-image',
+      {
+        imageData,
+        fileName,
+        conversationId,
+      },
+      { timeout: API_TIMEOUTS.FILE_UPLOAD }
+    );
   },
   
   // Export credentials for direct API calls

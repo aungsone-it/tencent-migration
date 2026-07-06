@@ -10542,9 +10542,25 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
     const body = await c.req.json();
     const { conversationId, text, sender, senderName, customerEmail, imageUrl, vendorId, customerProfileImage } = body;
 
-    if (!text || !sender || !senderName) {
+    const trimmedText = String(text ?? "").trim();
+    const resolvedImageUrl = String(imageUrl ?? "").trim();
+    const hasImage =
+      Boolean(resolvedImageUrl) &&
+      !resolvedImageUrl.startsWith("data:") &&
+      (resolvedImageUrl.startsWith("http://") || resolvedImageUrl.startsWith("https://"));
+    const resolvedProfileImage = String(customerProfileImage ?? "").trim();
+    const safeProfileImage =
+      resolvedProfileImage &&
+      !resolvedProfileImage.startsWith("data:") &&
+      (resolvedProfileImage.startsWith("http://") || resolvedProfileImage.startsWith("https://"))
+        ? resolvedProfileImage.slice(0, 4096)
+        : undefined;
+
+    if ((!trimmedText && !hasImage) || !sender || !senderName) {
       return c.json({ error: "Missing required fields" }, 400);
     }
+
+    const lastMessagePreview = trimmedText || (hasImage ? "Image" : "—");
 
     const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const timestamp = new Date().toISOString();
@@ -10634,12 +10650,12 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
     const message = {
       id: messageId,
       conversationId: canonicalConversationId,
-      text,
+      text: trimmedText,
       sender,
       senderName,
       timestamp,
       status: "sent",
-      imageUrl: imageUrl || undefined,
+      imageUrl: hasImage ? resolvedImageUrl : undefined,
     };
 
     await withTimeout(
@@ -10658,7 +10674,12 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
 
     let resolvedCustomerName = "";
     let resolvedCustomerEmail = (customerEmail || existingConv?.customerEmail || "").trim();
-    let resolvedCustomerImage = (customerProfileImage || bodyCustomerProfileImage || existingConv?.customerProfileImage || "").trim();
+    let resolvedCustomerImage = (
+      safeProfileImage ||
+      (body as any).customerProfileImage ||
+      existingConv?.customerProfileImage ||
+      ""
+    ).trim();
 
     if (sender === "customer") {
       resolvedCustomerName = (senderName || existingConv?.customerName || "").trim();
@@ -10699,7 +10720,7 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
       customerName: resolvedCustomerName,
       customerEmail: resolvedCustomerEmail,
       customerProfileImage: resolvedCustomerImage,
-      lastMessage: text,
+      lastMessage: lastMessagePreview,
       timestamp,
       unread: nextUnread,
       status: "online",
@@ -10735,7 +10756,7 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
         const peerUnread = Number(peer?.unread) || 0;
         const peerConv = {
           ...peer,
-          lastMessage: text,
+          lastMessage: lastMessagePreview,
           timestamp,
           unread: peerUnread + 1,
           customerName: resolvedCustomerName || peer?.customerName,

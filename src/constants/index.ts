@@ -60,12 +60,14 @@ export const POLLING_INTERVALS_MS = {
   BADGE_COUNTS_CACHE_FRESH: 12 * 60 * 1000,
   /** Admin-only: safety-net poll when Realtime pulse is unavailable (cross-device). */
   ADMIN_VENDOR_APPLICATIONS_BADGE_POLL: 15 * 1000,
+  /** Admin chat sidebar / bell badge — fast poll when Chat panel is not mounted. */
+  ADMIN_CHAT_BADGE_POLL: 15 * 1000,
   TOP_NAV_NOTIFICATIONS: 15 * 60 * 1000,
   VENDOR_PORTAL_NOTIFICATIONS: 15 * 60 * 1000,
   /** Rare safety net only — admin + floating chat use Realtime broadcast for live deltas. */
   CHAT_HTTP_FALLBACK: 45 * 60 * 1000,
   /** When chat is closed or minimized — light poll so admin replies still bump unread if Realtime lags. */
-  CHAT_HTTP_FALLBACK_DOCKET: 30 * 1000,
+  CHAT_HTTP_FALLBACK_DOCKET: 15 * 1000,
   /** When Marketing campaign auto-refresh is enabled. */
   MARKETING_CAMPAIGNS: 10 * 60 * 1000,
 } as const;

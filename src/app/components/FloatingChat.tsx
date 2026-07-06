@@ -345,7 +345,11 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
       if (visTimer) clearTimeout(visTimer);
       visTimer = window.setTimeout(() => {
         visTimer = null;
-        void loadMessages(true);
+        if (isOpenRef.current) {
+          void loadMessages(true);
+        } else {
+          void pollForNewMessages();
+        }
       }, 800);
     };
     document.addEventListener("visibilitychange", onVis);

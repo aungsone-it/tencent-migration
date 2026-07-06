@@ -14,6 +14,7 @@ import {
 import { PENDING_ORDER_STATUSES, POLLING_INTERVALS_MS } from '../../constants';
 import { SmartCache } from '../../utils/cache';
 import { badgeCircuitBreaker } from '../../utils/circuit-breaker';
+import { subscribeAdminInbox } from '../utils/chatRealtime';
 import type { BadgeCounts } from '../../types';
 
 const INITIAL_BADGE_COUNTS: BadgeCounts = {
@@ -57,6 +58,11 @@ export function useBadgeCounts() {
       setBadgeCounts((prev) => {
         const updated = { ...prev, chat: unreadChats };
         SmartCache.set('badge_counts', updated);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('admin-chat-unread-updated', { detail: { total: unreadChats } })
+          );
+        }
         return updated;
       });
       badgeCircuitBreaker.recordSuccess();
@@ -248,8 +254,6 @@ export function useBadgeCounts() {
     return () => clearInterval(interval);
   }, [loadBadgeCounts]);
 
-  /** Chat-only polling removed: loadBadgeCounts already loads chat; use `admin-chat-unread-updated` for instant UI. */
-
   /** Instant badge sync when Chat panel polls conversations (same tab). */
   useEffect(() => {
     const onChatUnread = (ev: Event) => {
@@ -264,6 +268,67 @@ export function useBadgeCounts() {
     window.addEventListener('admin-chat-unread-updated', onChatUnread);
     return () => window.removeEventListener('admin-chat-unread-updated', onChatUnread);
   }, []);
+
+  /** Live chat badge while admin is on any page (not only when Chat panel is mounted). */
+  useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const queueChatRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void refreshChatBadgeOnly();
+      }, 280);
+    };
+
+    const unsub = subscribeAdminInbox((payload) => {
+      if (payload.clearedAll) {
+        setBadgeCounts((prev) => {
+          const updated = { ...prev, chat: 0 };
+          SmartCache.set('badge_counts', updated);
+          window.dispatchEvent(
+            new CustomEvent('admin-chat-unread-updated', { detail: { total: 0 } })
+          );
+          return updated;
+        });
+        return;
+      }
+      if (
+        payload.unreadBump ||
+        payload.conversationId ||
+        payload.removedConversationIds?.length ||
+        payload.t
+      ) {
+        queueChatRefresh();
+      }
+    });
+
+    return () => {
+      unsub();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [refreshChatBadgeOnly]);
+
+  /** Fast safety-net poll for chat badge (Realtime can miss cross-tab / CloudBase migration). */
+  useEffect(() => {
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void refreshChatBadgeOnly();
+    };
+    void tick();
+    const id = window.setInterval(tick, POLLING_INTERVALS_MS.ADMIN_CHAT_BADGE_POLL);
+    return () => clearInterval(id);
+  }, [refreshChatBadgeOnly]);
+
+  /** Refresh chat badge when admin tab becomes visible again. */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshChatBadgeOnly();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [refreshChatBadgeOnly]);
 
   /**
    * Realtime bridge hookup:

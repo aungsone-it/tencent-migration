@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { loadEnvFile } from "./load-env.mjs";
+
+loadEnvFile();
 
 const API_BASE_URL = (
   process.env.CLOUDBASE_API_BASE_URL ||

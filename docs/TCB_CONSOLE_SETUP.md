@@ -74,15 +74,47 @@ Minimum:
 - **Authentication** → enable username/password login
 - **Cloud Storage** → create/default bucket for uploads
 
+### 5. KBZPay (KPay) secrets
+
+Copy **`KPAY_*`** values from Supabase → **Project Settings → Edge Functions → Secrets** (same names). Paste them into **Cloud Function → Environment variables** for `make-server-16010b6f`.
+
+**Two values must change for TCB** (do not copy the Supabase URLs verbatim):
+
+| Variable | TCB value |
+|----------|-----------|
+| `KPAY_NOTIFY_URL` | Public URL of the **`kpay-webhook`** function (see Phase 3 gateway route below). KBZ POSTs here with no JWT — signature is verified in the handler. |
+| `KPAY_PWA_FRONTEND_RETURN_URL` | Unified apex summary page, e.g. `https://walwal.online/summary` |
+
+**Minimum set on `make-server-16010b6f`:**
+
+- `KPAY_PROXY_BASE_URL`, `KPAY_APPID`, `KPAY_MERCH_CODE`, `KPAY_SIGN_KEY`
+- `KPAY_NOTIFY_URL`, `KPAY_PWA_FRONTEND_RETURN_URL`
+- `KPAY_ENV` (`prod` or `uat`)
+- Any proxy/ISV/PWA/refund secrets you already use on Supabase (see [`cloudbase/function-env.template.env`](../cloudbase/function-env.template.env))
+
+**On `kpay-webhook`**, set the same **database / CloudBase** vars as the main function (`CLOUDBASE_ENV_ID`, `TENCENT_POSTGREST_SERVICE_KEY`, etc.) plus **`KPAY_SIGN_KEY`** (must match make-server).
+
+After saving env vars, verify gateway config:
+
+```bash
+npm run kpay:urls
+```
+
+You should see non-empty `proxyBase`, `qrCreate`, and `orderQuery`. A checkout test confirms end-to-end.
+
 ---
 
 ## Phase 3 — HTTP Gateway
 
 1. TCB console → **HTTP Gateway**
-2. Create route:
+2. Create route for the main API:
    - Resource: Cloud Function `make-server-16010b6f`
    - Path: `/make-server-16010b6f` (or use default function invoke URL)
-3. Copy the public URL
+3. Create a **second public route** for KBZPay webhooks:
+   - Resource: Cloud Function `kpay-webhook`
+   - Path: `/kpay-webhook`
+   - Must allow unauthenticated POST from KBZ (no Bearer token required)
+4. Copy the public URL for make-server; set `KPAY_NOTIFY_URL` to the kpay-webhook URL from step 3
 
 Your API base URL:
 

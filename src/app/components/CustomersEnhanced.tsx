@@ -89,6 +89,7 @@ import { toast } from "sonner";
 import { MIGOO_USER_SESSION_CHANGED_EVENT } from "../../constants";
 import { useLanguage } from "../contexts/LanguageContext";
 import { broadcastCustomerRealtime, subscribeCustomerRealtime } from "../utils/customersRealtime";
+import { resolveCustomerChatContact, type CustomerChatContact } from "../utils/resolveCustomerChatContact";
 import { useAuth } from "../contexts/AuthContext";
 
 interface Customer {
@@ -125,7 +126,7 @@ const normalizeAdminCustomers = (raw: any[]): Customer[] => {
   });
 };
 
-type ChatHandoffCustomer = { name: string; email: string; avatar?: string };
+type ChatHandoffCustomer = CustomerChatContact;
 
 function MmkInline({ value, className }: { value: number; className?: string }) {
   const n = Math.round(Number(value) || 0);
@@ -590,15 +591,19 @@ export function CustomersEnhanced({
     }
   };
 
-  const handleOpenChatWithCustomer = (customer: Customer) => {
-    if (!onOpenChatWithCustomer) return;
-    const email = (customer.email || "").trim();
-    if (!email) return;
-    onOpenChatWithCustomer({
-      name: customer.name || "Customer",
-      email,
-      avatar: customer.avatar || undefined,
-    });
+  const handleOpenChatWithCustomer = async (customer: Customer): Promise<boolean> => {
+    if (!onOpenChatWithCustomer) return false;
+
+    const contact = await resolveCustomerChatContact(customer);
+    if (!contact?.email) {
+      toast.error(t("customerIntel.noEmailForMessage"), {
+        description: "Link an email to this customer or start a chat from the Chat section.",
+      });
+      return false;
+    }
+
+    onOpenChatWithCustomer(contact);
+    return true;
   };
 
   // 🔥 BLOCK CUSTOMER ACTION
@@ -821,9 +826,9 @@ export function CustomersEnhanced({
         onClose={() => setViewingCustomer(null)}
         onMessageCustomer={
           onOpenChatWithCustomer
-            ? () => {
-                handleOpenChatWithCustomer(viewingCustomer);
-                setViewingCustomer(null);
+            ? async () => {
+                const ok = await handleOpenChatWithCustomer(viewingCustomer);
+                if (ok) setViewingCustomer(null);
               }
             : undefined
         }
@@ -1128,8 +1133,7 @@ export function CustomersEnhanced({
                             </DropdownMenuItem>
                             {onOpenChatWithCustomer && (
                               <DropdownMenuItem
-                                onClick={() => handleOpenChatWithCustomer(customer)}
-                                disabled={!(customer.email || "").trim()}
+                                onClick={() => void handleOpenChatWithCustomer(customer)}
                               >
                                 <MessageSquare className="w-4 h-4 mr-2" />
                                 {t("customerIntel.sendMessage")}

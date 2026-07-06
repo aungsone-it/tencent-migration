@@ -8,19 +8,17 @@ import { AuthModal } from "./AuthModal";
 import { VendorStorefrontFullSkeleton } from "./SkeletonLoaders";
 import { useAuth } from "../contexts/AuthContext";
 import { authApi } from "../../utils/api";
+import {
+  buildCustomerSessionFromAuthResponse,
+  readNormalizedMigooUserFromStorage,
+  STOREFRONT_STAFF_BLOCKED_MESSAGE,
+} from "../utils/customerAuthIdentity";
 import { MIGOO_USER_SESSION_CHANGED_EVENT, notifyMigooUserSessionChanged } from "../../constants";
 import { hasKpaySummaryReturnContext } from "../utils/vendorCheckoutPaths";
 
 function readMigooCustomer(): { id: string } | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem("migoo-user");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { id?: string };
-    return parsed?.id ? { id: parsed.id } : null;
-  } catch {
-    return null;
-  }
+  const user = readNormalizedMigooUserFromStorage();
+  return user?.id && typeof user.id === "string" ? { id: user.id } : null;
 }
 
 export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode }) {
@@ -80,7 +78,14 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
     setIsAuthLoading(true);
     try {
       const response = await authApi.login(authForm.email, authForm.password);
-      localStorage.setItem("migoo-user", JSON.stringify(response.user));
+      const sessionUser = buildCustomerSessionFromAuthResponse(
+        response.user as Record<string, unknown>,
+        { loginIdentifier: authForm.email.trim() }
+      );
+      if (!sessionUser) {
+        throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
+      }
+      localStorage.setItem("migoo-user", JSON.stringify(sessionUser));
       notifyMigooUserSessionChanged();
       setMigooUser(readMigooCustomer());
       toast.success(`Welcome back, ${response.user.name || response.user.email}!`);
@@ -107,7 +112,14 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
         authForm.phone.trim(),
         profileImage,
       );
-      localStorage.setItem("migoo-user", JSON.stringify(response.user));
+      const sessionUser = buildCustomerSessionFromAuthResponse(
+        response.user as Record<string, unknown>,
+        { phone: authForm.phone.trim(), loginIdentifier: authForm.phone.trim() }
+      );
+      if (!sessionUser) {
+        throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
+      }
+      localStorage.setItem("migoo-user", JSON.stringify(sessionUser));
       notifyMigooUserSessionChanged();
       setMigooUser(readMigooCustomer());
       toast.success("Account created successfully!");

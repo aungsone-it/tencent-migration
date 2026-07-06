@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { CHAT_SCROLL_DEBOUNCE_MS, POLLING_INTERVALS_MS } from "../../constants";
 import imageCompression from "browser-image-compression";
 import {
@@ -31,13 +31,13 @@ import {
 } from "./ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { chatApi } from "../../utils/api";
-import { conversationBucketKeyClient, canonicalChatThreadId, mainStoreConversationIdFromEmail } from "../../utils/chatConversation";
+import { conversationBucketKeyClient, canonicalChatThreadId, mainStoreConversationIdFromEmail, mergeConversationsByCustomerVendorClient } from "../../utils/chatConversation";
 import {
   broadcastConversationMessage,
   broadcastCustomerChatMessage,
   broadcastInboxPing,
   subscribeAdminInbox,
-  subscribeConversationBroadcast,
+  subscribeConversationBroadcastMulti,
   type InboxBroadcastPayload,
 } from "../utils/chatRealtime";
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
@@ -78,6 +78,7 @@ export interface ChatInitialCustomer {
   email: string;
   name: string;
   avatar?: string;
+  customerId?: string;
 }
 
 function isGeneratedChatAvatarUrl(url: string): boolean {
@@ -89,6 +90,11 @@ function isGeneratedChatAvatarUrl(url: string): boolean {
     u.includes("robohash.org") ||
     u.includes("avatar.vercel.sh")
   );
+}
+
+/** Dedupe same customer/vendor rows + unify avatars (matches server GET /chat/conversations). */
+function normalizeAdminInboxList(conversations: Conversation[]): Conversation[] {
+  return mergeConversationsByCustomerVendorClient(mergeConversationAvatarsByEmail(conversations));
 }
 
 /** Same email can have multiple threads; show one profile photo — newest activity wins (matches server merge). */
@@ -133,7 +139,7 @@ function preserveSelectedConversationInList(
   if (next.some((c) => conversationRowMatchesId(c, selectedId))) return next;
   const pinned = sources.find((c) => conversationRowMatchesId(c, selectedId));
   if (!pinned) return next;
-  return mergeConversationAvatarsByEmail([pinned, ...next]);
+  return normalizeAdminInboxList([pinned, ...next]);
 }
 
 function findConversationRow(
@@ -214,7 +220,7 @@ function mergeInboxFromPayload(
       vendorId: payload.vendorId,
       vendorSource: payload.vendorSource,
     };
-    return { kind: "merged", next: [row, ...prev] };
+    return { kind: "merged", next: normalizeAdminInboxList([row, ...prev]) };
   }
 
   const cur = prev[idx];
@@ -238,7 +244,53 @@ function mergeInboxFromPayload(
   };
 
   const rest = prev.filter((_, i) => i !== idx);
-  return { kind: "merged", next: [updated, ...rest] };
+  return { kind: "merged", next: normalizeAdminInboxList([updated, ...rest]) };
+}
+
+function resolveConversationChannelIds(
+  prev: Conversation[],
+  selectedId: string | null
+): string[] {
+  if (!selectedId) return [];
+  const row = prev.find((c) => conversationRowMatchesId(c, selectedId));
+  const ids = new Set<string>([selectedId]);
+  if (row?.id) ids.add(row.id);
+  for (const alias of row?.aliasConversationIds ?? []) {
+    const a = String(alias || "").trim();
+    if (a) ids.add(a);
+  }
+  return [...ids];
+}
+
+function payloadMatchesActiveThread(
+  prev: Conversation[],
+  payload: InboxBroadcastPayload,
+  activeThreadId: string | null
+): boolean {
+  const cid = String(payload.conversationId || "").trim();
+  if (!activeThreadId) return false;
+  if (cid && (activeThreadId === cid || prev.some((c) => conversationRowMatchesId(c, activeThreadId) && conversationRowMatchesId(c, cid)))) {
+    return true;
+  }
+  const email = String(payload.customerEmail || "").trim();
+  if (!email) return false;
+  const payloadBucket = conversationBucketKeyClient({
+    customerEmail: email,
+    vendorId: payload.vendorId,
+    vendorSource: payload.vendorSource,
+    id: cid,
+  });
+  const activeRow = prev.find((c) => conversationRowMatchesId(c, activeThreadId));
+  return Boolean(activeRow && conversationBucketKeyClient(activeRow) === payloadBucket);
+}
+
+function appendUniqueMessage(prev: Message[], incoming: Message): Message[] {
+  const id = String(incoming.id ?? "");
+  if (!id || prev.some((p) => p.id === id)) return prev;
+  const next = [...prev, incoming];
+  return next.sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
 }
 
 /** Inbox survives super-admin section switches (Chat unmounts off `AdminPage` when you leave). */
@@ -277,9 +329,7 @@ export function Chat({
   );
   const [messageInput, setMessageInput] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>(() =>
-    chatAdminInboxCache?.length
-      ? mergeConversationAvatarsByEmail([...chatAdminInboxCache])
-      : []
+    chatAdminInboxCache?.length ? normalizeAdminInboxList([...chatAdminInboxCache]) : []
   );
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(() => !(chatAdminInboxCache && chatAdminInboxCache.length > 0));
@@ -300,6 +350,10 @@ export function Chat({
   selectedConversationRef.current = selectedConversation;
   const conversationsRef = useRef<Conversation[]>(conversations);
   conversationsRef.current = conversations;
+  const activeThreadChannelKey = useMemo(() => {
+    if (!selectedConversation) return "";
+    return resolveConversationChannelIds(conversations, selectedConversation).sort().join("|");
+  }, [selectedConversation, conversations]);
   const handoffPinnedConversationRef = useRef<Conversation | null>(null);
   const messagesLoadInFlightRef = useRef<Set<string>>(new Set());
 
@@ -333,7 +387,7 @@ export function Chat({
       }
       const response = await chatApi.getConversations();
       if (response.conversations && Array.isArray(response.conversations)) {
-        let merged = mergeConversationAvatarsByEmail(response.conversations as Conversation[]);
+        let merged = normalizeAdminInboxList(response.conversations as Conversation[]);
         const sel = selectedConversationRef.current;
         merged = preserveSelectedConversationInList(merged, conversationsRef.current, sel);
         if (handoffPinnedConversationRef.current) {
@@ -424,7 +478,7 @@ export function Chat({
                     ? { ...conv, unread: 0 }
                     : conv
                 );
-                chatAdminInboxCache = mergeConversationAvatarsByEmail(next);
+                chatAdminInboxCache = normalizeAdminInboxList(next);
                 const totalUnread = next.reduce(
                   (sum, c) => sum + (Number(c.unread) || 0),
                   0
@@ -496,7 +550,7 @@ export function Chat({
           if ((c.aliasConversationIds || []).some((a) => remove.has(String(a)))) return false;
           return true;
         });
-        const merged = mergeConversationAvatarsByEmail(nextRaw);
+        const merged = normalizeAdminInboxList(nextRaw);
         chatAdminInboxCache = merged;
         const stillHasSelection =
           sel == null ||
@@ -523,11 +577,27 @@ export function Chat({
         selectedConversationRef.current
       );
       if (result.kind === "fetch") {
+        void loadConversationsRef.current();
         scheduleFullInboxFetch();
         return;
       }
 
-      const next = mergeConversationAvatarsByEmail(result.next);
+      const liveRaw = payload.message;
+      if (liveRaw && typeof liveRaw === "object" && !Array.isArray(liveRaw)) {
+        const liveMsg = liveRaw as Message;
+        const sel = selectedConversationRef.current;
+        if (payloadMatchesActiveThread(conversationsRef.current, payload, sel)) {
+          const cacheKey =
+            resolveConversationChannelIds(conversationsRef.current, sel)[0] ?? sel;
+          setMessages((prev) => {
+            const sorted = appendUniqueMessage(prev, liveMsg);
+            if (cacheKey) chatAdminMessagesCache.set(cacheKey, sorted);
+            return sorted;
+          });
+        }
+      }
+
+      const next = normalizeAdminInboxList(result.next);
       chatAdminInboxCache = next;
       const totalUnread = next.reduce((sum, c) => sum + (Number(c.unread) || 0), 0);
       setConversations(next);
@@ -540,30 +610,17 @@ export function Chat({
   }, []);
 
   useEffect(() => {
-    if (!selectedConversation) return;
-    const resolveCanonicalId = (sel: string | null) => {
-      if (!sel) return null;
-      const row = conversationsRef.current.find(
-        (c) =>
-          c.id === sel ||
-          (Array.isArray(c.aliasConversationIds) && c.aliasConversationIds.includes(sel))
-      );
-      return row?.id ?? sel;
-    };
-    const channelId = resolveCanonicalId(selectedConversation);
-    if (!channelId) return;
-    return subscribeConversationBroadcast(channelId, (msg) => {
+    if (!activeThreadChannelKey) return;
+    const channelIds = activeThreadChannelKey.split("|").filter(Boolean);
+    if (channelIds.length === 0) return;
+
+    const appendLiveMessage = (msg: Record<string, unknown>) => {
       const m = msg as unknown as Message;
       const sel = selectedConversationRef.current;
-      const cacheKey = resolveCanonicalId(sel) ?? sel;
+      const cacheKey =
+        resolveConversationChannelIds(conversationsRef.current, sel)[0] ?? sel;
       setMessages((prev) => {
-        const id = String(m.id ?? "");
-        if (!id || prev.some((p) => p.id === id)) return prev;
-        const next = [...prev, m];
-        const sorted = next.sort(
-          (a, b) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
+        const sorted = appendUniqueMessage(prev, m);
         if (cacheKey) chatAdminMessagesCache.set(cacheKey, sorted);
         return sorted;
       });
@@ -573,12 +630,7 @@ export function Chat({
         (m.imageUrl ? "Image" : "—");
       setConversations((prev) => {
         const next = prev.map((c) => {
-          const match =
-            sel != null &&
-            (c.id === sel ||
-              c.id === cacheKey ||
-              (Array.isArray(c.aliasConversationIds) &&
-                (c.aliasConversationIds.includes(sel) || c.aliasConversationIds.includes(String(cacheKey)))));
+          const match = sel != null && conversationRowMatchesId(c, sel);
           if (!match) return c;
           return {
             ...c,
@@ -586,11 +638,13 @@ export function Chat({
             timestamp: m.timestamp,
           };
         });
-        chatAdminInboxCache = mergeConversationAvatarsByEmail(next);
-        return mergeConversationAvatarsByEmail(next);
+        chatAdminInboxCache = normalizeAdminInboxList(next);
+        return normalizeAdminInboxList(next);
       });
-    });
-  }, [selectedConversation]);
+    };
+
+    return subscribeConversationBroadcastMulti(channelIds, appendLiveMessage);
+  }, [activeThreadChannelKey]);
 
   // Auto-scroll: debounce bursts; use instant scroll for long threads (less layout thrash)
   useEffect(() => {
@@ -612,7 +666,7 @@ export function Chat({
     if (initialCustomer?.email?.trim()) return;
     if (chatAdminInboxCache && chatAdminInboxCache.length > 0) {
       const sel = selectedConversationRef.current;
-      let list = mergeConversationAvatarsByEmail([...chatAdminInboxCache]);
+      let list = normalizeAdminInboxList([...chatAdminInboxCache]);
       list = preserveSelectedConversationInList(list, conversationsRef.current, sel);
       if (handoffPinnedConversationRef.current) {
         list = preserveSelectedConversationInList(
@@ -697,7 +751,9 @@ export function Chat({
           (c) =>
             c.id === convId ||
             (c.customerEmail &&
-              c.customerEmail.toLowerCase() === email.toLowerCase())
+              c.customerEmail.toLowerCase() === email.toLowerCase()) ||
+            (name &&
+              (c.customerName || "").trim().toLowerCase() === name.toLowerCase())
         );
 
         let syntheticRow: Conversation | null = null;
@@ -717,7 +773,7 @@ export function Chat({
           list = raw;
         }
 
-        const mergedHandoff = mergeConversationAvatarsByEmail(list as Conversation[]);
+        const mergedHandoff = normalizeAdminInboxList(list as Conversation[]);
         chatAdminInboxCache = mergedHandoff;
         setConversations(mergedHandoff);
         setLoading(false);
@@ -797,7 +853,9 @@ export function Chat({
       if (selectedConversation) {
         loadMessages(selectedConversation, true, "auto"); // messages only; unread handled on open / send
       }
-    }, POLLING_INTERVALS_MS.CHAT_HTTP_FALLBACK); // fallback if Realtime is off
+    }, selectedConversation
+      ? POLLING_INTERVALS_MS.CHAT_ACTIVE_THREAD_POLL
+      : POLLING_INTERVALS_MS.CHAT_HTTP_FALLBACK);
   };
 
   const stopPolling = () => {
@@ -950,7 +1008,7 @@ export function Chat({
           );
 
         setConversations((prev) => {
-          const next = mergeConversationAvatarsByEmail(patchCustomer(prev));
+          const next = normalizeAdminInboxList(patchCustomer(prev));
           chatAdminInboxCache = next;
           const totalUnread = next.reduce((sum, c) => sum + (Number(c.unread) || 0), 0);
           queueMicrotask(() =>
@@ -984,6 +1042,7 @@ export function Chat({
           vendorId: selectedConv.vendorId,
           vendorSource: selectedConv.vendorSource,
           unreadBump: false,
+          message: response.message,
         });
       }
     } catch (error) {

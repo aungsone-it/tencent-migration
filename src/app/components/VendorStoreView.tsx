@@ -51,6 +51,8 @@ import { notifyStorefrontCustomerRegistered, subscribeCustomerRealtime } from ".
 import {
   applyCustomerProfileMerge,
   buildCustomerSessionFromAuthResponse,
+  isStorefrontCustomerSession,
+  STOREFRONT_STAFF_BLOCKED_MESSAGE,
   formatUserPhoneDisplay,
   getCustomerDisplayEmail,
   getCustomerProfileSubtitle,
@@ -257,12 +259,15 @@ function isVendorProfileProtectedRoute(
 }
 
 function hasVendorCustomerSession(user: unknown): boolean {
-  if (resolveUserIdFromRecord(user)) return true;
+  if (user && typeof user === "object" && isStorefrontCustomerSession(user as Record<string, unknown>)) {
+    return true;
+  }
   if (typeof window === "undefined") return false;
   try {
     const raw = localStorage.getItem("migoo-user");
     if (!raw) return false;
-    return !!resolveUserIdFromRecord(JSON.parse(raw));
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return isStorefrontCustomerSession(parsed);
   } catch {
     return false;
   }
@@ -1880,10 +1885,13 @@ export function VendorStoreView({
           return;
         }
         const normalized = normalizeCustomerSessionUser({ ...parsed, id: uid });
-        if (normalized) {
-          setUser(normalized);
-          persistMigooUserSession(normalized);
+        if (!normalized || !isStorefrontCustomerSession(normalized)) {
+          localStorage.removeItem('migoo-user');
+          setUser(null);
+          return;
         }
+        setUser(normalized);
+        persistMigooUserSession(normalized);
       } catch (error) {
         console.error('Error parsing stored user:', error);
         localStorage.removeItem('migoo-user');
@@ -1957,6 +1965,12 @@ export function VendorStoreView({
         normalizeCustomerSessionUser({ ...(parsedUser as Record<string, unknown>), id: uid }) ??
         ({ ...(parsedUser as object), id: uid } as Record<string, unknown>);
       const updatedUser = applyServerProfileMerge(localBase, freshProfile);
+      if (!isStorefrontCustomerSession(updatedUser)) {
+        setUser(null);
+        localStorage.removeItem("migoo-user");
+        notifyMigooUserSessionChanged();
+        return;
+      }
       setUser(updatedUser);
       persistMigooUserSession(updatedUser);
       vendorProfileAmbientLastRef.current = Date.now();
@@ -2237,7 +2251,9 @@ export function VendorStoreView({
         userData as Record<string, unknown>,
         { loginIdentifier: authForm.email.trim() }
       );
-      if (!sessionUser) throw new Error("Login failed");
+      if (!sessionUser) {
+        throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
+      }
       setUser(sessionUser);
       persistMigooUserSession(sessionUser);
       notifyMigooUserSessionChanged();
@@ -2275,7 +2291,9 @@ export function VendorStoreView({
         userData as Record<string, unknown>,
         { phone: authForm.phone.trim(), loginIdentifier: authForm.phone.trim() }
       );
-      if (!sessionUser) throw new Error("Registration failed");
+      if (!sessionUser) {
+        throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
+      }
       setUser(sessionUser);
       persistMigooUserSession(sessionUser);
       notifyMigooUserSessionChanged();

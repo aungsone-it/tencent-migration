@@ -18,7 +18,7 @@ import {
   broadcastConversationMessage,
   broadcastCustomerChatMessage,
   broadcastInboxPing,
-  subscribeConversationBroadcast,
+  subscribeConversationBroadcastMulti,
   subscribeCustomerChatBroadcast,
 } from "../utils/chatRealtime";
 import imageCompression from "browser-image-compression";
@@ -383,7 +383,7 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
 
     const intervalMs = !isOpen
         ? POLLING_INTERVALS_MS.CHAT_HTTP_FALLBACK_DOCKET
-        : POLLING_INTERVALS_MS.CHAT_HTTP_FALLBACK;
+        : POLLING_INTERVALS_MS.CHAT_ACTIVE_THREAD_POLL;
 
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
@@ -412,18 +412,21 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   // Realtime: admin replies on this thread id + account-wide channel (all vendor tabs).
   useEffect(() => {
     if (!conversationId) return;
-    const unsubs: Array<() => void> = [
-      subscribeConversationBroadcast(conversationId, appendAdminMessage),
-    ];
+    const unsubs: Array<() => void> = [];
+    const threadIds = new Set<string>([conversationId]);
 
     const email = (customerEmail || "").trim();
+    if (email) {
+      const mainThreadId = canonicalChatThreadId(email, vendorId);
+      if (mainThreadId) threadIds.add(mainThreadId);
+    }
+
+    unsubs.push(
+      subscribeConversationBroadcastMulti([...threadIds], appendAdminMessage)
+    );
+
     if (email && hasActiveChatSession(vendorId, isAuthenticated)) {
       unsubs.push(subscribeCustomerChatBroadcast(email, appendAdminMessage));
-
-      const mainThreadId = canonicalChatThreadId(email);
-      if (mainThreadId && mainThreadId !== conversationId) {
-        unsubs.push(subscribeConversationBroadcast(mainThreadId, appendAdminMessage));
-      }
     }
 
     return () => {
@@ -627,6 +630,9 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
         const preview =
           messageText.trim() ||
           (imageUrl ? "Image" : "—");
+        const msgVendorSource = String(
+          (response.message as { vendorSource?: unknown }).vendorSource || ""
+        ).trim();
         void broadcastInboxPing({
           t: Date.now(),
           conversationId: broadcastId,
@@ -636,7 +642,9 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
           customerName: actualCustomerName,
           customerProfileImage: customerProfileImage || undefined,
           vendorId: vendorId ? String(vendorId) : undefined,
+          vendorSource: msgVendorSource || undefined,
           unreadBump: true,
+          message: response.message,
         });
       }
     } catch (error) {

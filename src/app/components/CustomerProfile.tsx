@@ -122,7 +122,7 @@ interface CustomerProfileProps {
   customer: Customer;
   onClose: () => void;
   /** Super admin: jump to Chat and open this customer's thread */
-  onMessageCustomer?: () => void;
+  onMessageCustomer?: () => void | Promise<void>;
 }
 
 /** KV / API data is not always typed; avoid runtime crashes on .trim / .toFixed / .substring */
@@ -161,6 +161,7 @@ function formatOrderDate(d: unknown): string {
 
 export function CustomerProfile({ customer, onClose, onMessageCustomer }: CustomerProfileProps) {
   const [activeTab, setActiveTab] = useState("overview");
+  const [openingChat, setOpeningChat] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
@@ -552,21 +553,22 @@ export function CustomerProfile({ customer, onClose, onMessageCustomer }: Custom
             <Button
               type="button"
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white gap-2"
+              disabled={!onMessageCustomer || openingChat}
               onClick={() => {
-                if (!onMessageCustomer) return;
-                const email = safeStr(customer.email).trim();
-                if (!email) {
-                  toast.error("No email on file", {
-                    description: "Add an email to this customer before sending a message.",
-                  });
-                  return;
-                }
-                onMessageCustomer();
+                if (!onMessageCustomer || openingChat) return;
+                setOpeningChat(true);
+                void Promise.resolve(onMessageCustomer())
+                  .catch((err) => {
+                    console.warn("Open chat from profile failed:", err);
+                    toast.error("Could not open chat", {
+                      description: err instanceof Error ? err.message : "Please try again.",
+                    });
+                  })
+                  .finally(() => setOpeningChat(false));
               }}
-              disabled={!onMessageCustomer}
             >
               <MessageSquare className="w-4 h-4" />
-              Message
+              {openingChat ? "Opening…" : "Message"}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

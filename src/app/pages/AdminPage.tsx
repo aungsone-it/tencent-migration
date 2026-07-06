@@ -163,6 +163,7 @@ export function AdminPage() {
     email: string;
     name: string;
     avatar?: string;
+    customerId?: string;
   } | null>(null);
   /** Prefill list search when jumping from global search */
   const [vendorSearchPrefill, setVendorSearchPrefill] = useState<{ q: string; t: number } | null>(null);
@@ -656,6 +657,7 @@ export function AdminPage() {
             onOpenChatWithCustomer={(c) => {
               setChatHandoff(c);
               setCurrentPage(ADMIN_PAGES.CHAT);
+              navigate("/admin/chat");
             }}
           />
         );

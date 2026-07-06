@@ -10309,7 +10309,10 @@ function mergeLatestAvatarAcrossConversationsByEmail(conversations: any[]): any[
 }
 
 function normalizeChatEmail(email: unknown): string {
-  return String(email || "").trim().toLowerCase();
+  const s = String(email || "").trim().toLowerCase();
+  if (!s || s === "—" || s === "-" || s === "n/a" || s === "na") return "";
+  if (!s.includes("@")) return "";
+  return s;
 }
 
 function sanitizeChatToken(input: unknown): string {
@@ -10349,10 +10352,15 @@ function canonicalConversationIdFor(email: unknown, vendorId: unknown, vendorSou
 }
 
 function conversationBucketKeyFor(conv: any): string {
-  const normalizedEmail = normalizeChatEmail(conv?.customerEmail);
-  if (!normalizedEmail) return `conv-id:${String(conv?.id || "")}`;
   const vendorToken = normalizeChatVendorThreadToken(conv?.vendorId, conv?.vendorSource);
-  return `${normalizedEmail}::${vendorToken || "secure"}`;
+  const normalizedEmail = normalizeChatEmail(conv?.customerEmail);
+  const nameToken = sanitizeChatToken(conv?.customerName);
+  if (nameToken && vendorToken && vendorToken !== "secure") {
+    return `name:${nameToken}::${vendorToken}`;
+  }
+  if (normalizedEmail) return `${normalizedEmail}::${vendorToken || "secure"}`;
+  if (nameToken && vendorToken) return `name:${nameToken}::${vendorToken}`;
+  return `conv-id:${String(conv?.id || "")}`;
 }
 
 function mergeConversationsByCustomerVendor(conversations: any[]): any[] {
@@ -10372,6 +10380,10 @@ function mergeConversationsByCustomerVendor(conversations: any[]): any[] {
     const currentTs = Number(current.__ts) || 0;
     const nextIds = Array.from(new Set([...(current.__ids || []), String(conv?.id || "")]));
     const merged = ts >= currentTs ? { ...current, ...conv } : { ...conv, ...current };
+    const email =
+      normalizeChatEmail(conv?.customerEmail) ||
+      normalizeChatEmail(current?.customerEmail);
+    if (email) merged.customerEmail = email;
     merged.unread = (Number(current.unread) || 0) + unread;
     merged.starred = Boolean(current?.starred) || Boolean(conv?.starred);
     merged.__ts = Math.max(currentTs, ts);

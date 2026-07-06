@@ -1,6 +1,38 @@
 /** Matches `auth_routes.tsx` — synthetic CloudBase email for phone-only customers. */
 export const PHONE_AUTH_EMAIL_DOMAIN = "phone.migoo.store";
 
+/** Staff / admin roles must not use storefront customer sessions. */
+export const STOREFRONT_BLOCKED_ROLES = new Set([
+  "super-admin",
+  "store-owner",
+  "administrator",
+  "data-entry",
+  "warehouse",
+  "platform-admin",
+  "product-manager",
+  "developer",
+  "vendor-admin",
+  "collaborator",
+]);
+
+export const STOREFRONT_STAFF_BLOCKED_MESSAGE =
+  "This account is for staff. Sign in through the admin portal. To shop here, register a separate customer account.";
+
+export function isStaffOrPortalRole(role: unknown): boolean {
+  const r = String(role || "").trim().toLowerCase();
+  if (!r || r === "customer") return false;
+  return STOREFRONT_BLOCKED_ROLES.has(r);
+}
+
+export function isStorefrontCustomerSession(
+  user: Record<string, unknown> | null | undefined
+): boolean {
+  if (!user || typeof user !== "object") return false;
+  if (isStaffOrPortalRole(user.role)) return false;
+  const id = user.id ?? user.userId;
+  return typeof id === "string" ? id.trim().length > 0 : typeof id === "number";
+}
+
 const MYANMAR_PHONE_RE = /^(\+959|09)\d{9}$/;
 
 export function normalizeMyanmarPhone(raw: string): string | null {
@@ -241,7 +273,9 @@ export function buildCustomerSessionFromAuthResponse(
   user: Record<string, unknown> | null | undefined,
   ctx: { phone?: string; loginIdentifier?: string; email?: string }
 ): Record<string, unknown> | null {
-  return enrichCustomerSessionFromAuthContext(user, ctx);
+  const enriched = enrichCustomerSessionFromAuthContext(user, ctx);
+  if (!enriched || isStaffOrPortalRole(enriched.role)) return null;
+  return enriched;
 }
 
 export function readNormalizedMigooUserFromStorage(): Record<string, unknown> | null {
@@ -250,14 +284,26 @@ export function readNormalizedMigooUserFromStorage(): Record<string, unknown> | 
     const raw = localStorage.getItem("migoo-user");
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return normalizeCustomerSessionUser(parsed);
+    const normalized = normalizeCustomerSessionUser(parsed);
+    if (!normalized || !isStorefrontCustomerSession(normalized)) {
+      localStorage.removeItem("migoo-user");
+      return null;
+    }
+    return normalized;
   } catch {
+    localStorage.removeItem("migoo-user");
     return null;
   }
 }
 
 export function persistMigooUserSession(user: Record<string, unknown>): Record<string, unknown> {
   const normalized = normalizeCustomerSessionUser(user) ?? user;
+  if (!isStorefrontCustomerSession(normalized)) {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("migoo-user");
+    }
+    throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
+  }
   if (typeof window !== "undefined") {
     localStorage.setItem("migoo-user", JSON.stringify(normalized));
   }

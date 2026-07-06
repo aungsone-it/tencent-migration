@@ -1796,12 +1796,14 @@ authApp.post("/login", async (c) => {
       return c.json({ error: staffResult.error }, 401);
     }
     if (staffResult && "user" in staffResult) {
-      return c.json({
-        success: true,
-        user: staffResult.user,
-        accessToken: "tencent-kv-session",
-        message: "Login successful",
-      });
+      return c.json(
+        {
+          error:
+            "This account is for staff. Sign in through the admin portal. To shop here, register a separate customer account.",
+          code: "STAFF_NOT_STOREFRONT",
+        },
+        403
+      );
     }
 
     const resolved = await resolveCustomerLoginEmail(email);
@@ -2099,6 +2101,17 @@ authApp.post("/register", async (c) => {
     }
 
     if (displayEmail) {
+      const staffEmail = await findStaffUserByEmail(displayEmail.toLowerCase());
+      if (staffEmail) {
+        return c.json(
+          {
+            error:
+              "This email belongs to a staff account. Use a different email to register as a customer, or sign in through the admin portal.",
+          },
+          409
+        );
+      }
+
       if (await authUserExistsByEmail(displayEmail)) {
         console.log(`❌ Email already registered: ${displayEmail}`);
         return c.json({

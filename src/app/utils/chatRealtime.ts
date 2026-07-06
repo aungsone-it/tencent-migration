@@ -28,6 +28,8 @@ export type InboxBroadcastPayload = {
   vendorSource?: string;
   /** Customer → admin: increment sidebar unread (caller should skip when admin is already on that thread). */
   unreadBump?: boolean;
+  /** Optional full message body so admin can append to the open thread without a channel id match. */
+  message?: unknown;
   /** All conversations were wiped — other admin tabs should clear local inbox. */
   clearedAll?: boolean;
   /** One or more threads were deleted — other admin tabs remove rows without refetch. */
@@ -268,5 +270,22 @@ export function subscribeConversationBroadcast(
     } catch {
       /* ignore */
     }
+  };
+}
+
+/** Subscribe to legacy + canonical conversation ids (merged inbox rows may use either). */
+export function subscribeConversationBroadcastMulti(
+  conversationIds: string[],
+  onMessage: (message: Record<string, unknown>) => void
+): () => void {
+  const unique = [
+    ...new Set(
+      conversationIds.map((id) => String(id || "").trim()).filter(Boolean)
+    ),
+  ];
+  if (unique.length === 0) return () => undefined;
+  const unsubs = unique.map((id) => subscribeConversationBroadcast(id, onMessage));
+  return () => {
+    for (const off of unsubs) off();
   };
 }

@@ -58,6 +58,9 @@ import {
   queueVendorReadModelSync,
   findProductIdFromReadModelSkuOrVariant,
   findVendorReadModelByEmailNorm,
+  fetchChatMessagesFromReadModel,
+  queueChatConversationReadModelSync,
+  queueChatMessageReadModelSync,
 } from "./read_model.ts";
 
 // FIRST: Override console.error to filter out HTTP connection errors from Deno runtime
@@ -10448,84 +10451,182 @@ app.get("/make-server-16010b6f/chat/conversations", async (c) => {
   }
 });
 
+/** Load full thread history from KV (+ SQL read-model fallback), merging alias + peer admin rows. */
+async function collectConversationMessages(
+  conversationId: string,
+  queryEmail?: string,
+  conversationHint?: any,
+  vendorHint?: { vendorId?: unknown; vendorSource?: unknown }
+): Promise<any[]> {
+  const convId = String(conversationId || "").trim();
+  if (!convId) return [];
+
+  let messages: any[] = [];
+  try {
+    messages = await withTimeout(kv.getByPrefix(`chat:message:${convId}:`), 8000);
+  } catch {
+    messages = [];
+  }
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    const fromSql = await fetchChatMessagesFromReadModel(convId);
+    if (fromSql.length > 0) messages = fromSql;
+  }
+
+  const conversation =
+    conversationHint ??
+    ((await withTimeout(kv.get(`chat:conversation:${convId}`), 5000).catch(() => null)) as any);
+
+  const resolvedEmail = normalizeChatEmail(
+    conversation?.customerEmail || queryEmail || ""
+  );
+
+  const bucketConv =
+    conversation ??
+    (resolvedEmail
+      ? {
+          id: convId,
+          customerEmail: resolvedEmail,
+          vendorId: vendorHint?.vendorId,
+          vendorSource: vendorHint?.vendorSource,
+        }
+      : null);
+
+  if (bucketConv && resolvedEmail) {
+    const allConversations = await withTimeout(kv.getByPrefix("chat:conversation:"), 10000).catch(
+      () => []
+    );
+    const bucket = conversationBucketKeyFor(bucketConv);
+    const aliasIds = (allConversations || [])
+      .filter((conv: any) => String(conv?.id || "") !== convId)
+      .filter((conv: any) => conversationBucketKeyFor(conv) === bucket)
+      .map((conv: any) => String(conv?.id || ""))
+      .filter(Boolean);
+
+    for (const aliasId of aliasIds) {
+      const aliasMessages = await withTimeout(
+        kv.getByPrefix(`chat:message:${aliasId}:`),
+        8000
+      ).catch(() => []);
+      if (Array.isArray(aliasMessages) && aliasMessages.length > 0) {
+        messages = [...messages, ...aliasMessages];
+      }
+    }
+  }
+
+  if (resolvedEmail) {
+    const allConversations = await withTimeout(kv.getByPrefix("chat:conversation:"), 10000).catch(
+      () => []
+    );
+    const peerIds = (allConversations || [])
+      .filter((conv: any) => {
+        const id = String(conv?.id || "").trim();
+        if (!id || id === convId) return false;
+        return normalizeChatEmail(conv?.customerEmail) === resolvedEmail;
+      })
+      .map((conv: any) => String(conv.id));
+
+    for (const peerId of peerIds) {
+      const peerMessages = await withTimeout(
+        kv.getByPrefix(`chat:message:${peerId}:`),
+        8000
+      ).catch(() => []);
+      if (!Array.isArray(peerMessages) || peerMessages.length === 0) continue;
+      const adminOnly = peerMessages.filter((m: any) => String(m?.sender) === "admin");
+      if (adminOnly.length > 0) {
+        messages = [...messages, ...adminOnly];
+      }
+    }
+  }
+
+  if ((!messages || messages.length === 0) && resolvedEmail) {
+    const canonical = canonicalConversationIdFor(
+      resolvedEmail,
+      vendorHint?.vendorId ?? conversation?.vendorId,
+      vendorHint?.vendorSource ?? conversation?.vendorSource
+    );
+    if (canonical && canonical !== convId) {
+      const canonicalMessages = await collectConversationMessages(
+        canonical,
+        resolvedEmail,
+        conversation,
+        vendorHint
+      );
+      if (canonicalMessages.length > 0) return canonicalMessages;
+    }
+  }
+
+  return Array.from(
+    new Map(
+      (messages || []).map((m: any) => [String(m?.id || `${m?.timestamp}-${Math.random()}`), m])
+    ).values()
+  ).sort((a: any, b: any) => {
+    const ta = Date.parse(String(a?.timestamp || "")) || 0;
+    const tb = Date.parse(String(b?.timestamp || "")) || 0;
+    return ta - tb;
+  });
+}
+
+// Cross-device history: resolve canonical thread by customer email (+ optional vendor).
+app.get("/make-server-16010b6f/chat/history", async (c) => {
+  try {
+    const customerEmail = normalizeChatEmail(c.req.query("customerEmail"));
+    if (!customerEmail) {
+      return c.json({ error: "customerEmail is required" }, 400);
+    }
+
+    const vendorId = c.req.query("vendorId");
+    const vendorSource = c.req.query("vendorSource");
+
+    const conversationId =
+      canonicalConversationIdFor(customerEmail, vendorId, vendorSource) ||
+      `conv-${sanitizeChatToken(customerEmail)}`;
+
+    const conversation = (await withTimeout(
+      kv.get(`chat:conversation:${conversationId}`),
+      5000
+    ).catch(() => null)) as any;
+
+    const messages = await collectConversationMessages(conversationId, customerEmail, conversation, {
+      vendorId,
+      vendorSource,
+    });
+
+    console.log(
+      `📨 Chat history for ${customerEmail} (${conversationId}): ${messages.length} message(s)`
+    );
+
+    return c.json({
+      conversationId,
+      conversation: conversation ?? null,
+      messages,
+      success: true,
+    });
+  } catch (error: any) {
+    console.error("❌ Failed to get chat history:", error);
+    return c.json({ error: error.message, messages: [], success: false }, 500);
+  }
+});
+
 // Get messages for a specific conversation
 app.get("/make-server-16010b6f/chat/messages/:conversationId", async (c) => {
   try {
     const conversationId = c.req.param("conversationId");
     const queryEmail = normalizeChatEmail(c.req.query("customerEmail"));
-    
-    // Return empty array immediately if query would timeout
-    // This allows localStorage to work without blocking
-    let messages;
-    try {
-      messages = await withTimeout(kv.getByPrefix(`chat:message:${conversationId}:`), 8000); // Increased from 5s to 8s
-    } catch (timeoutError) {
-      console.log(`⚠️ Chat messages query timeout for ${conversationId} - returning empty array`);
-      return c.json({ messages: [], cached: false });
-    }
-    
-    const conversation = await withTimeout(
+    const vendorId = c.req.query("vendorId");
+    const vendorSource = c.req.query("vendorSource");
+
+    const conversation = (await withTimeout(
       kv.get(`chat:conversation:${conversationId}`),
       5000
-    ).catch(() => null) as any;
+    ).catch(() => null)) as any;
 
-    const resolvedEmail = normalizeChatEmail(
-      conversation?.customerEmail || queryEmail || ""
+    const dedupedMessages = await collectConversationMessages(
+      conversationId,
+      queryEmail,
+      conversation,
+      { vendorId, vendorSource }
     );
-
-    // Merge alias conversation streams for the same customer+vendor bucket
-    // so duplicated historic ids still appear as one continuous thread.
-    if (conversation?.customerEmail) {
-      const allConversations = await withTimeout(kv.getByPrefix("chat:conversation:"), 10000).catch(() => []);
-      const bucket = conversationBucketKeyFor(conversation);
-      const aliasIds = (allConversations || [])
-        .filter((conv: any) => String(conv?.id || "") !== conversationId)
-        .filter((conv: any) => conversationBucketKeyFor(conv) === bucket)
-        .map((conv: any) => String(conv?.id || ""))
-        .filter(Boolean);
-
-      for (const aliasId of aliasIds) {
-        const aliasMessages = await withTimeout(
-          kv.getByPrefix(`chat:message:${aliasId}:`),
-          8000
-        ).catch(() => []);
-        if (Array.isArray(aliasMessages) && aliasMessages.length > 0) {
-          messages = [...messages, ...aliasMessages];
-        }
-      }
-    }
-
-    // Super-admin replies on the main-store thread must appear on vendor storefront threads too.
-    if (resolvedEmail) {
-      const allConversations = await withTimeout(kv.getByPrefix("chat:conversation:"), 10000).catch(() => []);
-      const peerIds = (allConversations || [])
-        .filter((conv: any) => {
-          const id = String(conv?.id || "").trim();
-          if (!id || id === conversationId) return false;
-          return normalizeChatEmail(conv?.customerEmail) === resolvedEmail;
-        })
-        .map((conv: any) => String(conv.id));
-
-      for (const peerId of peerIds) {
-        const peerMessages = await withTimeout(
-          kv.getByPrefix(`chat:message:${peerId}:`),
-          8000
-        ).catch(() => []);
-        if (!Array.isArray(peerMessages) || peerMessages.length === 0) continue;
-        const adminOnly = peerMessages.filter((m: any) => String(m?.sender) === "admin");
-        if (adminOnly.length > 0) {
-          messages = [...messages, ...adminOnly];
-        }
-      }
-    }
-
-    const dedupedMessages = Array.from(
-      new Map((messages || []).map((m: any) => [String(m?.id || `${m?.timestamp}-${Math.random()}`), m])).values()
-    ).sort((a: any, b: any) => {
-      const ta = Date.parse(String(a?.timestamp || "")) || 0;
-      const tb = Date.parse(String(b?.timestamp || "")) || 0;
-      return ta - tb;
-    });
 
     console.log(`📨 Retrieved ${dedupedMessages.length} messages for conversation ${conversationId}`);
     return c.json({ messages: dedupedMessages });
@@ -10733,6 +10834,9 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
       kv.set(`chat:conversation:${message.conversationId}`, conversation),
       5000
     );
+
+    queueChatMessageReadModelSync(message.conversationId, message);
+    queueChatConversationReadModelSync(message.conversationId, conversation);
 
     // Fan-out admin replies to every thread for this customer (main store + each vendor storefront).
     if (sender === "admin" && resolvedCustomerEmail) {

@@ -714,12 +714,38 @@ export const chatApi = {
   /**
    * Get messages for a specific conversation
    */
-  getMessages: async (conversationId: string, customerEmail?: string) => {
-    const q =
-      customerEmail && String(customerEmail).trim()
-        ? `?customerEmail=${encodeURIComponent(String(customerEmail).trim())}`
-        : "";
+  getMessages: async (
+    conversationId: string,
+    customerEmail?: string,
+    options?: { vendorId?: string; vendorSource?: string }
+  ) => {
+    const params = new URLSearchParams();
+    if (customerEmail && String(customerEmail).trim()) {
+      params.set("customerEmail", String(customerEmail).trim());
+    }
+    if (options?.vendorId && String(options.vendorId).trim()) {
+      params.set("vendorId", String(options.vendorId).trim());
+    }
+    if (options?.vendorSource && String(options.vendorSource).trim()) {
+      params.set("vendorSource", String(options.vendorSource).trim());
+    }
+    const q = params.toString() ? `?${params.toString()}` : "";
     return apiClient.get(`/chat/messages/${conversationId}${q}`, { silent: true });
+  },
+
+  /**
+   * Cross-device thread history keyed by signed-in customer email (+ optional vendor).
+   */
+  getHistory: async (params: {
+    customerEmail: string;
+    vendorId?: string;
+    vendorSource?: string;
+  }) => {
+    const search = new URLSearchParams();
+    search.set("customerEmail", String(params.customerEmail).trim());
+    if (params.vendorId?.trim()) search.set("vendorId", params.vendorId.trim());
+    if (params.vendorSource?.trim()) search.set("vendorSource", params.vendorSource.trim());
+    return apiClient.get(`/chat/history?${search.toString()}`, { silent: true });
   },
 
   /**

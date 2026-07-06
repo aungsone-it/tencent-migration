@@ -450,3 +450,118 @@ export function queueOrderReadModelSync(orderId: string, orderValue: unknown): v
 export function queueOrderReadModelDelete(orderId: string): void {
   enqueueReadModelWork(deleteOrderReadModel(orderId));
 }
+
+export async function syncChatConversationReadModel(
+  conversationId: string,
+  conversationValue: unknown,
+): Promise<void> {
+  const conv = asRecord(conversationValue);
+  const id = text(conv.id) || text(conversationId);
+  if (!id) return;
+
+  await bestEffort(`sync chat conversation ${id}`, async () => {
+    const row = {
+      id,
+      source_kv_key: `chat:conversation:${id}`,
+      customer_email: text(conv.customerEmail),
+      customer_name: text(conv.customerName),
+      customer_profile_image: text(conv.customerProfileImage),
+      vendor_id: text(conv.vendorId),
+      vendor_source: text(conv.vendorSource),
+      last_message: text(conv.lastMessage),
+      unread: integerValue(conv.unread) ?? 0,
+      starred: Boolean(conv.starred),
+      status: text(conv.status),
+      raw: conv,
+      last_message_at: isoTimestamp(conv.timestamp),
+      synced_at: new Date().toISOString(),
+    };
+
+    const { error } = await readModelClient
+      .from("app_chat_conversations")
+      .upsert(row, { onConflict: "id" });
+    if (error) throw error;
+  });
+}
+
+export async function syncChatMessageReadModel(
+  conversationId: string,
+  messageValue: unknown,
+): Promise<void> {
+  const msg = asRecord(messageValue);
+  const id = text(msg.id);
+  const convId = text(msg.conversationId) || text(conversationId);
+  if (!id || !convId) return;
+
+  await bestEffort(`sync chat message ${id}`, async () => {
+    const row = {
+      id,
+      conversation_id: convId,
+      source_kv_key: `chat:message:${convId}:${id}`,
+      sender: text(msg.sender),
+      sender_name: text(msg.senderName),
+      text: text(msg.text),
+      image_url: text(msg.imageUrl),
+      status: text(msg.status),
+      raw: msg,
+      message_at: isoTimestamp(msg.timestamp),
+      synced_at: new Date().toISOString(),
+    };
+
+    const { error: convErr } = await readModelClient
+      .from("app_chat_conversations")
+      .upsert(
+        {
+          id: convId,
+          source_kv_key: `chat:conversation:${convId}`,
+          raw: { id: convId },
+          synced_at: new Date().toISOString(),
+        },
+        { onConflict: "id" },
+      );
+    if (convErr) throw convErr;
+
+    const { error } = await readModelClient
+      .from("app_chat_messages")
+      .upsert(row, { onConflict: "id" });
+    if (error) throw error;
+  });
+}
+
+export async function fetchChatMessagesFromReadModel(
+  conversationId: string,
+): Promise<AnyRecord[]> {
+  const id = text(conversationId);
+  if (!id) return [];
+  try {
+    const { data, error } = await readModelClient
+      .from("app_chat_messages")
+      .select("raw")
+      .eq("conversation_id", id)
+      .order("message_at", { ascending: true });
+    if (error) {
+      console.warn("[read-model] fetchChatMessagesFromReadModel:", error.message);
+      return [];
+    }
+    return (data || [])
+      .map((row) => asRecord((row as { raw?: unknown }).raw))
+      .filter((row) => text(row.id));
+  } catch (error) {
+    console.warn("[read-model] fetchChatMessagesFromReadModel:", error);
+    return [];
+  }
+}
+
+export function queueChatConversationReadModelSync(
+  conversationId: string,
+  conversationValue: unknown,
+): void {
+  enqueueReadModelWork(syncChatConversationReadModel(conversationId, conversationValue));
+}
+
+export function queueChatMessageReadModelSync(
+  conversationId: string,
+  messageValue: unknown,
+): void {
+  enqueueReadModelWork(syncChatMessageReadModel(conversationId, messageValue));
+}

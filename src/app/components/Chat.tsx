@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { CHAT_SCROLL_DEBOUNCE_MS, POLLING_INTERVALS_MS } from "../../constants";
+import {
+  CHAT_LOCAL_STORAGE_DEBOUNCE_MS,
+  CHAT_SCROLL_DEBOUNCE_MS,
+  POLLING_INTERVALS_MS,
+} from "../../constants";
 import imageCompression from "browser-image-compression";
 import {
   MessageSquare,
@@ -43,6 +47,17 @@ import { buildVendorDisplayLookup, resolveChatVendorLabel } from "../utils/vendo
 
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import {
+  clearAdminChatLocalCaches,
+  mergeChatMessageLists,
+  readAdminInboxLocal,
+  readAdminStaffIdLocal,
+  readAdminThreadLocal,
+  writeAdminInboxLocal,
+  writeAdminStaffIdLocal,
+  writeAdminThreadLocal,
+} from "../utils/chatLocalCache";
 
 interface Message {
   id: string;
@@ -318,17 +333,30 @@ export function Chat({
   onInitialCustomerHandled?: () => void;
 } = {}) {
   const { t } = useLanguage();
+  const { user: staffUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState<"new-old" | "old-new" | "starred">("new-old");
   const [selectedConversation, setSelectedConversation] = useState<string | null>(
     () => chatAdminSelectedConversationCache
   );
   const [messageInput, setMessageInput] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>(() =>
-    chatAdminInboxCache?.length ? normalizeAdminInboxList([...chatAdminInboxCache]) : []
-  );
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    if (chatAdminInboxCache?.length) {
+      return normalizeAdminInboxList([...chatAdminInboxCache]);
+    }
+    const local = readAdminInboxLocal<Conversation>();
+    if (local?.length) {
+      chatAdminInboxCache = normalizeAdminInboxList(local);
+      return chatAdminInboxCache;
+    }
+    return [];
+  });
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(() => !(chatAdminInboxCache && chatAdminInboxCache.length > 0));
+  const [loading, setLoading] = useState(() => {
+    if (chatAdminInboxCache && chatAdminInboxCache.length > 0) return false;
+    const local = readAdminInboxLocal<Conversation>();
+    return !(local && local.length > 0);
+  });
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -352,6 +380,10 @@ export function Chat({
   }, [selectedConversation, conversations]);
   const handoffPinnedConversationRef = useRef<Conversation | null>(null);
   const messagesLoadInFlightRef = useRef<Set<string>>(new Set());
+  const adminInboxLsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const adminThreadLsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   useEffect(() => {
     let cancelled = false;
@@ -404,6 +436,7 @@ export function Chat({
         }
         chatAdminInboxCache = next;
         setConversations(next);
+        writeAdminInboxLocal(next);
         if (sel) {
           const row = findConversationRow(next, sel, handoffPinnedConversationRef.current);
           if (row && row.id !== sel) {
@@ -446,7 +479,10 @@ export function Chat({
       markRead: boolean | "auto" = "auto"
     ) => {
       const shouldMarkRead = markRead === "auto" ? !silentUi : markRead;
-      const cached = getCachedThreadMessages(conversationId);
+      const cached =
+        getCachedThreadMessages(conversationId) ??
+        readAdminThreadLocal<Message>(conversationId) ??
+        undefined;
 
       if (messagesLoadInFlightRef.current.has(conversationId) && silentUi) {
         return;
@@ -464,14 +500,30 @@ export function Chat({
 
       messagesLoadInFlightRef.current.add(conversationId);
       try {
-        const response = await chatApi.getMessages(conversationId);
+        const row = conversationsRef.current.find(
+          (c) =>
+            c.id === conversationId ||
+            (Array.isArray(c.aliasConversationIds) &&
+              c.aliasConversationIds.includes(conversationId))
+        );
+        const customerEmail = String(row?.customerEmail || "").trim();
+        const response = await chatApi.getMessages(
+          conversationId,
+          customerEmail.includes("@") ? customerEmail : undefined,
+          {
+            vendorId: row?.vendorId,
+            vendorSource: row?.vendorSource,
+          }
+        );
         if (response.messages && Array.isArray(response.messages)) {
           const sortedMessages = response.messages.sort(
             (a: Message, b: Message) =>
               new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
           );
-          primeCachedThreadMessages(conversationId, sortedMessages);
-          setMessages(sortedMessages);
+          const merged = mergeChatMessageLists(cached ?? [], sortedMessages);
+          primeCachedThreadMessages(conversationId, merged);
+          writeAdminThreadLocal(conversationId, merged);
+          setMessages(merged);
 
           if (shouldMarkRead) {
             void chatApi.markAsRead(conversationId).then(() => {
@@ -533,6 +585,7 @@ export function Chat({
         if (inboxFetchFallbackRef.current) clearTimeout(inboxFetchFallbackRef.current);
         chatAdminInboxCache = null;
         chatAdminMessagesCache.clear();
+        clearAdminChatLocalCaches();
         setConversations([]);
         setMessages([]);
         setSelectedConversation(null);
@@ -721,22 +774,89 @@ export function Chat({
     if (!selectedRow) return;
     const canonicalConversationId = selectedRow.id;
 
-    const selectionChanged = prevSelectedConversationRef.current !== selectedConversation;
     prevSelectedConversationRef.current = selectedConversation;
 
     const cached =
       getCachedThreadMessages(canonicalConversationId) ??
-      getCachedThreadMessages(selectedConversation);
+      getCachedThreadMessages(selectedConversation) ??
+      readAdminThreadLocal<Message>(canonicalConversationId) ??
+      readAdminThreadLocal<Message>(selectedConversation);
     if (cached !== undefined) {
       setMessages(cached);
       setLoadingMessages(false);
-      if (selectionChanged) {
-        void loadMessages(canonicalConversationId, true, true);
-      }
-      return;
     }
-    void loadMessages(canonicalConversationId, false, "auto");
+    void loadMessages(canonicalConversationId, cached !== undefined, true);
   }, [conversations, selectedConversation, loadMessages]);
+
+  // Staff sign-in / account switch: localStorage for speed; DB on new device or different admin.
+  useEffect(() => {
+    const staffId = String(staffUser?.id || "").trim();
+    if (!staffId) return;
+
+    const prev = readAdminStaffIdLocal();
+    const accountSwitch = Boolean(prev && prev !== staffId);
+
+    if (accountSwitch) {
+      clearAdminChatLocalCaches();
+      chatAdminInboxCache = null;
+      chatAdminMessagesCache.clear();
+      setConversations([]);
+      setMessages([]);
+      setSelectedConversation(null);
+      void loadConversations("initial");
+    }
+
+    writeAdminStaffIdLocal(staffId);
+  }, [staffUser?.id]);
+
+  // Persist inbox + active thread to localStorage (debounced) for instant reopen.
+  useEffect(() => {
+    if (adminInboxLsRef.current) clearTimeout(adminInboxLsRef.current);
+    adminInboxLsRef.current = setTimeout(() => {
+      adminInboxLsRef.current = null;
+      if (conversations.length > 0) writeAdminInboxLocal(conversations);
+    }, CHAT_LOCAL_STORAGE_DEBOUNCE_MS);
+    return () => {
+      if (adminInboxLsRef.current) clearTimeout(adminInboxLsRef.current);
+    };
+  }, [conversations]);
+
+  useEffect(() => {
+    if (!selectedConversation || messages.length === 0) return;
+    const row = findConversationRow(
+      conversations,
+      selectedConversation,
+      handoffPinnedConversationRef.current
+    );
+    const threadId = row?.id ?? selectedConversation;
+    if (adminThreadLsRef.current) clearTimeout(adminThreadLsRef.current);
+    adminThreadLsRef.current = setTimeout(() => {
+      adminThreadLsRef.current = null;
+      writeAdminThreadLocal(threadId, messages);
+    }, CHAT_LOCAL_STORAGE_DEBOUNCE_MS);
+    return () => {
+      if (adminThreadLsRef.current) clearTimeout(adminThreadLsRef.current);
+    };
+  }, [messages, selectedConversation, conversations]);
+
+  useEffect(() => {
+    return () => {
+      if (adminInboxLsRef.current) clearTimeout(adminInboxLsRef.current);
+      if (adminThreadLsRef.current) clearTimeout(adminThreadLsRef.current);
+      if (conversationsRef.current.length > 0) {
+        writeAdminInboxLocal(conversationsRef.current);
+      }
+      const sel = selectedConversationRef.current;
+      if (sel && messagesRef.current.length > 0) {
+        const row = findConversationRow(
+          conversationsRef.current,
+          sel,
+          handoffPinnedConversationRef.current
+        );
+        writeAdminThreadLocal(row?.id ?? sel, messagesRef.current);
+      }
+    };
+  }, []);
 
   // Super admin: Customers → Message — open this thread and focus composer
   useEffect(() => {

@@ -26,9 +26,42 @@ import imageCompression from "browser-image-compression";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
 import { canonicalChatThreadId } from "../../utils/chatConversation";
+import {
+  chatMessagesStorageKey,
+  mergeChatMessageLists,
+  readLocalChatMessages,
+  readSyncedChatEmail,
+  writeLocalChatMessages,
+  writeSyncedChatEmail,
+  clearSyncedChatEmail,
+} from "../utils/chatLocalCache";
 import { useChatNotification } from "../contexts/ChatNotificationContext";
 
 const MIGOO_USER_STORAGE_KEY = "migoo-user";
+
+function readMigooCustomerEmail(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(MIGOO_USER_STORAGE_KEY);
+    if (!raw) return "";
+    const u = JSON.parse(raw) as { email?: unknown } | null;
+    return String(u?.email || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function createWelcomeMessage(vendorId?: string): Message {
+  const storeName = vendorId ? "this store" : "SECURE Store";
+  return {
+    id: "welcome-1",
+    text: `Hello! Welcome to ${storeName}. How can we help you today?`,
+    timestamp: new Date().toISOString(),
+    sender: "admin",
+    senderName: vendorId ? "Store Support" : "Admin",
+    status: "read",
+  };
+}
 
 /** Customer accounts use KV/authApi session in localStorage (not CloudBase AuthContext). Read fresh — state can be stale after same-tab login. */
 function hasMigooCustomerSession(): boolean {
@@ -166,27 +199,12 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   };
   
   const [messages, setMessages] = useState<Message[]>(() => {
-    // Try to load messages from localStorage first (vendor-specific)
-    const storageKey = vendorId ? `migoo-chat-messages-vendor-${vendorId}` : "migoo-chat-messages";
-    const savedMessages = localStorage.getItem(storageKey);
-    if (savedMessages) {
-      try {
-        return JSON.parse(savedMessages);
-      } catch (error) {
-        console.error("Failed to parse saved messages:", error);
-      }
-    }
-    
-    // Default welcome message (vendor-specific or SECURE)
-    const storeName = vendorId ? "this store" : "SECURE Store";
-    return [{
-      id: "welcome-1",
-      text: `Hello! Welcome to ${storeName}. How can we help you today?`,
-      timestamp: new Date().toISOString(),
-      sender: "admin",
-      senderName: vendorId ? "Store Support" : "Admin",
-      status: "read"
-    }];
+    const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+    const cached = readLocalChatMessages<Message>(
+      chatMessagesStorageKey(vendorId, email || undefined)
+    );
+    if (cached && cached.length > 0) return cached;
+    return [createWelcomeMessage(vendorId)];
   });
   
   const [messageInput, setMessageInput] = useState("");
@@ -207,31 +225,26 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-  const vendorIdForLsRef = useRef(vendorId);
-  vendorIdForLsRef.current = vendorId;
-  const lsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollingIntervalRef = useRef<number | null>(null);
+  const lsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastMessageIdRef = useRef<string | null>(null);
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
 
-  const appendAdminMessage = useCallback((msg: Record<string, unknown>) => {
-    if (String(msg.sender) !== "admin") return;
+  const appendRealtimeMessage = useCallback((msg: Record<string, unknown>) => {
+    const id = String(msg.id ?? "");
+    if (!id) return;
+    const isAdmin = String(msg.sender) === "admin";
     setMessages((prev) => {
-      const id = String(msg.id ?? "");
-      if (!id || prev.some((m) => m.id === id)) return prev;
+      if (prev.some((m) => m.id === id)) return prev;
       const withoutWelcome =
         prev.length === 1 && prev[0]?.id === "welcome-1" ? [] : prev;
-      const next = [...withoutWelcome, msg as unknown as Message];
-      const sorted = next.sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
-      lastMessageIdRef.current = sorted[sorted.length - 1]?.id || null;
-      return sorted;
+      const merged = mergeChatMessageLists(withoutWelcome, [msg as unknown as Message]);
+      lastMessageIdRef.current = merged[merged.length - 1]?.id || null;
+      return merged;
     });
-    if (!isOpenRef.current) {
+    if (isAdmin && !isOpenRef.current) {
       setUnreadCount((c) => c + 1);
     }
   }, []);
@@ -259,79 +272,80 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     return () => clearTimeout(timer);
   }, []);
 
-  // Load messages from server (only call this once on mount)
-  const loadMessages = async (silent = false) => {
+  // Merge DB history with local cache (local = instant UI; server wins on conflicts).
+  const syncFromServer = async (opts: { silent?: boolean; force?: boolean } = {}) => {
+    const silent = opts.silent ?? false;
+    if (!hasActiveChatSession(vendorId, isAuthenticated)) return;
+    const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+    if (!email) return;
+
+    const storageKey = chatMessagesStorageKey(vendorId, email);
+    const emailNorm = email.toLowerCase();
+    const prevSynced = readSyncedChatEmail(vendorId);
+    const accountSwitched = Boolean(prevSynced && prevSynced !== emailNorm);
+    const force = opts.force || accountSwitched;
+
+    if (!silent && !force) {
+      const cached = readLocalChatMessages<Message>(storageKey);
+      if (cached?.length) setMessages(cached);
+    }
+
     if (!silent) setLoading(true);
     try {
-      const response = await chatApi.getMessages(
-        conversationId,
-        customerEmail?.trim() || undefined
-      );
-      if (response.messages && Array.isArray(response.messages)) {
-        const sortedMessages = response.messages.sort(
-          (a: Message, b: Message) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-        if (sortedMessages.length > 0) {
-          const canonicalConversationId = (sortedMessages[0] as { conversationId?: unknown }).conversationId;
-          adoptConversationId(canonicalConversationId);
-        }
-        
-        if (sortedMessages.length === 0) {
-          // No messages from server - keep welcome message
-          return;
-        }
+      const response = (await chatApi.getHistory({
+        customerEmail: email,
+        vendorId: vendorId ? String(vendorId).trim() : undefined,
+      })) as { conversationId?: string; messages?: Message[] };
 
-        // Replace all messages with server data
-        setMessages(sortedMessages);
-        lastMessageIdRef.current = sortedMessages[sortedMessages.length - 1]?.id || null;
+      if (response.conversationId) {
+        adoptConversationId(response.conversationId);
       }
+
+      const serverMessages = (response.messages || []).sort(
+        (a: Message, b: Message) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      const localBase = force
+        ? []
+        : messagesRef.current.filter((m) => m.id !== "welcome-1");
+
+      const merged =
+        serverMessages.length > 0
+          ? mergeChatMessageLists(localBase, serverMessages)
+          : localBase.length > 0
+            ? localBase
+            : [createWelcomeMessage(vendorId)];
+
+      setMessages(merged);
+      writeLocalChatMessages(storageKey, merged);
+      writeSyncedChatEmail(vendorId, email);
+      lastMessageIdRef.current = merged[merged.length - 1]?.id || null;
     } catch (error) {
-      console.error("Failed to load messages:", error);
+      console.error("Failed to sync chat from server:", error);
     } finally {
       if (!silent) setLoading(false);
     }
   };
 
-  // Only poll for NEW messages from admin (check if there are messages after our last known ID)
-  const pollForNewMessages = async () => {
-    try {
-      const response = await chatApi.getMessages(
-        conversationId,
-        customerEmail?.trim() || undefined
-      );
-      if (response.messages && Array.isArray(response.messages)) {
-        const sortedMessages = response.messages.sort(
-          (a: Message, b: Message) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-
-        // Create a Set of existing message IDs for O(1) lookup
-        const existingMessageIds = new Set(messagesRef.current.map((msg) => msg.id));
-
-        // Find new messages that we don't have yet (by ID, not timestamp)
-        const newMessages = sortedMessages.filter(msg => 
-          !existingMessageIds.has(msg.id) && msg.sender === "admin"
-        );
-
-        if (newMessages.length > 0) {
-          setMessages(prev => [...prev, ...newMessages]);
-          if (!isOpen) {
-            setUnreadCount(prev => prev + newMessages.length);
-          }
-        }
-      }
-    } catch (error) {
-      // Silent fail - don't show error to user
-    }
+  const loadMessages = async (silent = false) => {
+    await syncFromServer({ silent, force: false });
   };
 
-  // Signed-in: keep thread in sync with server (silent when minimized; full load when panel is open).
+  const pollForNewMessages = async () => {
+    await syncFromServer({ silent: true, force: false });
+  };
+
+  // Signed-in: show local cache immediately, reconcile with DB in background.
   useEffect(() => {
-    if (!conversationId) return;
     if (!hasActiveChatSession(vendorId, isAuthenticated)) return;
-    void loadMessages(!isOpen);
-  }, [conversationId, isOpen, isCustomerAuthenticated, isAuthenticated]);
+    const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+    if (!email) return;
+    const storageKey = chatMessagesStorageKey(vendorId, email);
+    const cached = readLocalChatMessages<Message>(storageKey);
+    if (cached?.length) setMessages(cached);
+    void syncFromServer({ silent: !isOpen, force: false });
+  }, [conversationId, isOpen, isCustomerAuthenticated, isAuthenticated, customerEmail, vendorId]);
 
   // Realtime is primary; reconcile with server when tab becomes visible (missed deltas / offline).
   useEffect(() => {
@@ -419,17 +433,17 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     }
 
     unsubs.push(
-      subscribeConversationBroadcastMulti([...threadIds], appendAdminMessage)
+      subscribeConversationBroadcastMulti([...threadIds], appendRealtimeMessage)
     );
 
     if (email && hasActiveChatSession(vendorId, isAuthenticated)) {
-      unsubs.push(subscribeCustomerChatBroadcast(email, appendAdminMessage));
+      unsubs.push(subscribeCustomerChatBroadcast(email, appendRealtimeMessage));
     }
 
     return () => {
       for (const off of unsubs) off();
     };
-  }, [conversationId, customerEmail, isAuthenticated, isCustomerAuthenticated, appendAdminMessage]);
+  }, [conversationId, customerEmail, isAuthenticated, isCustomerAuthenticated, appendRealtimeMessage]);
 
   // Reset unread count when chat is opened
   useEffect(() => {
@@ -478,22 +492,60 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     }
   }, [unreadCount, onUnreadCountChange]);
 
-  // 💾 PERSISTENCE: debounce localStorage writes (same data; fewer main-thread JSON.stringify blocks)
+  // 🔒 Sign-in / account switch: force DB sync so other devices match this account.
   useEffect(() => {
-    const storageKey = vendorId ? `migoo-chat-messages-vendor-${vendorId}` : "migoo-chat-messages";
+    const syncSessionAndHistory = () => {
+      const hasSession = hasMigooCustomerSession() || isAuthenticated;
+      setIsCustomerAuthenticated(hasSession);
+      if (!hasSession) {
+        setMessages([createWelcomeMessage(vendorId)]);
+        clearSyncedChatEmail(vendorId);
+        return;
+      }
+      const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+      if (!email) return;
+      const canonical = canonicalChatThreadId(
+        email,
+        vendorId ? String(vendorId).trim() : undefined
+      );
+      if (canonical) adoptConversationId(canonical);
+      const prevSynced = readSyncedChatEmail(vendorId);
+      const forceDb =
+        !prevSynced || prevSynced !== email.trim().toLowerCase();
+      const storageKey = chatMessagesStorageKey(vendorId, email);
+      if (!forceDb) {
+        const cached = readLocalChatMessages<Message>(storageKey);
+        if (cached?.length) setMessages(cached);
+      }
+      void syncFromServer({ silent: true, force: forceDb });
+    };
+
+    syncSessionAndHistory();
+    window.addEventListener("storage", syncSessionAndHistory);
+    window.addEventListener("focus", syncSessionAndHistory);
+    window.addEventListener(MIGOO_USER_SESSION_CHANGED_EVENT, syncSessionAndHistory);
+
+    return () => {
+      window.removeEventListener("storage", syncSessionAndHistory);
+      window.removeEventListener("focus", syncSessionAndHistory);
+      window.removeEventListener(MIGOO_USER_SESSION_CHANGED_EVENT, syncSessionAndHistory);
+    };
+  }, [isAuthenticated, customerEmail, vendorId]);
+
+  // Persist messages to localStorage for fast reopen (realtime + sends update state too).
+  useEffect(() => {
+    const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+    if (!email) return;
+    const storageKey = chatMessagesStorageKey(vendorId, email);
     if (lsDebounceRef.current) window.clearTimeout(lsDebounceRef.current);
     lsDebounceRef.current = window.setTimeout(() => {
       lsDebounceRef.current = null;
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(messages));
-      } catch {
-        /* quota / private mode */
-      }
+      writeLocalChatMessages(storageKey, messages);
     }, CHAT_LOCAL_STORAGE_DEBOUNCE_MS);
     return () => {
       if (lsDebounceRef.current) window.clearTimeout(lsDebounceRef.current);
     };
-  }, [messages, vendorId]);
+  }, [messages, vendorId, customerEmail, isCustomerAuthenticated]);
 
   useEffect(() => {
     return () => {
@@ -501,17 +553,15 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
         window.clearTimeout(lsDebounceRef.current);
         lsDebounceRef.current = null;
       }
-      const vid = vendorIdForLsRef.current;
-      const key = vid ? `migoo-chat-messages-vendor-${vid}` : "migoo-chat-messages";
-      try {
-        localStorage.setItem(key, JSON.stringify(messagesRef.current));
-      } catch {
-        /* quota / private mode */
-      }
+      const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+      if (!email) return;
+      writeLocalChatMessages(
+        chatMessagesStorageKey(vendorId, email),
+        messagesRef.current
+      );
     };
-  }, []);
+  }, [vendorId, customerEmail]);
 
-  // 💾 PERSISTENCE: Save isOpen state to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem("migoo-chat-isOpen", JSON.stringify(isOpen));
   }, [isOpen]);
@@ -520,24 +570,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     setFloatingChatOpen(isOpen);
     return () => setFloatingChatOpen(false);
   }, [isOpen, setFloatingChatOpen]);
-
-  // 🔒 Sync auth: other tabs + window focus; merge with CloudBase-backed AuthContext user
-  useEffect(() => {
-    const checkAuth = () => {
-      setIsCustomerAuthenticated(hasMigooCustomerSession() || isAuthenticated);
-    };
-
-    checkAuth();
-    window.addEventListener("storage", checkAuth);
-    window.addEventListener("focus", checkAuth);
-    window.addEventListener(MIGOO_USER_SESSION_CHANGED_EVENT, checkAuth);
-
-    return () => {
-      window.removeEventListener("storage", checkAuth);
-      window.removeEventListener("focus", checkAuth);
-      window.removeEventListener(MIGOO_USER_SESSION_CHANGED_EVENT, checkAuth);
-    };
-  }, [isAuthenticated]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() && !selectedImage) return;

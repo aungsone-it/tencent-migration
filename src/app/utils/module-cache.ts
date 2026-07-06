@@ -232,6 +232,23 @@ class ModuleCache {
     }
   }
 
+  patchInventoryInPaginatedAdminCaches(
+    pageKeyPrefix: string,
+    itemId: string,
+    newInventory: number,
+    patchRow: (p: any, id: string, qty: number, opts?: { isVariant?: boolean; parentId?: string }) => any,
+    opts?: { isVariant?: boolean; parentId?: string }
+  ): void {
+    for (const key of [...this.cache.keys()]) {
+      if (!key.startsWith(pageKeyPrefix)) continue;
+      const entry = this.cache.get(key);
+      const raw = entry?.data as { products?: any[]; [k: string]: unknown } | undefined;
+      if (!raw || !Array.isArray(raw.products)) continue;
+      const products = raw.products.map((row) => patchRow(row, itemId, newInventory, opts));
+      this.cache.set(key, { data: { ...raw, products }, timestamp: Date.now() });
+    }
+  }
+
   /**
    * Drop deleted rows from each cached admin paginated page and adjust totals/counts in place.
    * `deletedSnapshots` supplies status metadata when the row is no longer on this page slice.
@@ -351,6 +368,31 @@ class ModuleCache {
         },
         timestamp: Date.now(),
       });
+    }
+  }
+
+  /** Merge an updated product row into each cached admin paginated page (in-place, no refetch). */
+  updateProductInPaginatedAdminCaches(
+    pageKeyPrefix: string,
+    productId: string,
+    patch: Record<string, unknown>,
+    mergeRow: (existing: any, patch: Record<string, unknown>) => any
+  ): void {
+    const id = String(productId).trim();
+    if (!id) return;
+    for (const key of [...this.cache.keys()]) {
+      if (!key.startsWith(pageKeyPrefix)) continue;
+      const entry = this.cache.get(key);
+      const raw = entry?.data as { products?: any[]; [k: string]: unknown } | undefined;
+      if (!raw || !Array.isArray(raw.products)) continue;
+      let changed = false;
+      const products = raw.products.map((row) => {
+        if (String(row?.id) !== id) return row;
+        changed = true;
+        return mergeRow(row, patch);
+      });
+      if (!changed) continue;
+      this.cache.set(key, { data: { ...raw, products }, timestamp: Date.now() });
     }
   }
 
@@ -2143,6 +2185,69 @@ export function insertAdminProductIntoCaches(product: any): void {
   dispatchAdminProductsCachePatched();
 }
 
+function mergeAdminProductRow(existing: any, patch: Record<string, unknown>): any {
+  const inventory =
+    Number(patch.inventory ?? patch.stock ?? existing?.inventory ?? existing?.stock ?? 0) || 0;
+  const stock = Number(patch.stock ?? patch.inventory ?? existing?.stock ?? inventory) || inventory;
+  const next: Record<string, unknown> = {
+    ...existing,
+    ...patch,
+    inventory,
+    stock,
+  };
+  if (patch.name != null || patch.title != null) {
+    next.name = String(patch.name ?? patch.title ?? existing?.name ?? "");
+  }
+  if (Array.isArray(patch.variants)) {
+    next.variants = patch.variants;
+    next.hasVariants = patch.hasVariants ?? existing?.hasVariants ?? true;
+    if (patch.variantOptions == null && existing?.variantOptions != null) {
+      next.variantOptions = existing.variantOptions;
+    }
+  }
+  if (patch.variantOptions != null) {
+    next.variantOptions = patch.variantOptions;
+  }
+  if (patch.status != null) {
+    next.status = patch.status;
+  }
+  return next;
+}
+
+/**
+ * After Super Admin product edit save — patch session + paginated caches in place.
+ * Keeps Products grid and Inventory page aligned without invalidating/refetching.
+ */
+export function updateAdminProductInCaches(
+  productId: string,
+  patch: Record<string, unknown>
+): void {
+  const id = String(productId).trim();
+  if (!id || !patch || typeof patch !== "object") return;
+
+  const full = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+  if (full && Array.isArray(full)) {
+    const next = full.map((p) =>
+      String(p?.id) === id ? mergeAdminProductRow(p, patch) : p
+    );
+    moduleCache.prime(CACHE_KEYS.ADMIN_PRODUCTS, next);
+  }
+
+  moduleCache.updateProductInPaginatedAdminCaches(
+    ADMIN_PRODUCTS_PAGE_CACHE_PREFIX,
+    id,
+    patch,
+    mergeAdminProductRow
+  );
+  mergePaginatedAdminProductCachesFromFullProducts();
+
+  if (typeof window !== "undefined") {
+    removePersistedKeysPrefix("migoo-ls-admin-p1-");
+  }
+
+  dispatchAdminProductsCachePatched();
+}
+
 /** Vendor admin product list — drop deleted rows from cached payload for each vendor. */
 export function removeProductsFromVendorAdminCaches(
   vendorIds: string[],
@@ -2242,21 +2347,56 @@ export function patchAdminProductInventoryInCache(
   const peeked = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
   if (!peeked || !Array.isArray(peeked)) return;
 
-  const next = peeked.map((p: any) => {
-    if (opts?.isVariant && opts.parentId && p.id === opts.parentId) {
-      const variants = (p.variants || []).map((v: any) =>
-        v.id === itemId ? { ...v, inventory: newInventory } : v
-      );
-      const total = variants.reduce((s: number, v: any) => s + (Number(v.inventory) || 0), 0);
-      return { ...p, variants, inventory: total };
-    }
-    if (!opts?.isVariant && p.id === itemId) {
-      return { ...p, inventory: newInventory };
-    }
-    return p;
-  });
-
+  const next = peeked.map((p) => patchAdminProductInventoryRow(p, itemId, newInventory, opts));
   moduleCache.prime(CACHE_KEYS.ADMIN_PRODUCTS, next);
+}
+
+function patchAdminProductInventoryRow(
+  p: any,
+  itemId: string,
+  newInventory: number,
+  opts?: { isVariant?: boolean; parentId?: string }
+): any {
+  if (opts?.isVariant && opts.parentId && p.id === opts.parentId) {
+    const variants = (p.variants || []).map((v: any) =>
+      v.id === itemId ? { ...v, inventory: newInventory } : v
+    );
+    const total = variants.reduce((s: number, v: any) => s + (Number(v.inventory) || 0), 0);
+    return { ...p, variants, inventory: total, stock: total };
+  }
+  if (!opts?.isVariant && p.id === itemId) {
+    return { ...p, inventory: newInventory, stock: newInventory };
+  }
+  return p;
+}
+
+function patchInventoryInPaginatedAdminCaches(
+  itemId: string,
+  newInventory: number,
+  opts?: { isVariant?: boolean; parentId?: string }
+): void {
+  moduleCache.patchInventoryInPaginatedAdminCaches(
+    ADMIN_PRODUCTS_PAGE_CACHE_PREFIX,
+    itemId,
+    newInventory,
+    patchAdminProductInventoryRow,
+    opts
+  );
+}
+
+/**
+ * After Inventory +/- or save — patch session caches in place (no invalidate/refetch blink).
+ * Keeps Products grid and Inventory page aligned across admin navigation.
+ */
+export function syncAdminInventoryStockAfterAdjust(
+  itemId: string,
+  newInventory: number,
+  opts?: { isVariant?: boolean; parentId?: string }
+): void {
+  patchAdminProductInventoryInCache(itemId, newInventory, opts);
+  patchInventoryInPaginatedAdminCaches(itemId, newInventory, opts);
+  mergePaginatedAdminProductCachesFromFullProducts();
+  dispatchAdminProductsCachePatched();
 }
 
 /** Cross-tab: Inventory in other tabs listens on this channel (session cache is not shared between tabs). */

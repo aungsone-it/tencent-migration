@@ -328,7 +328,8 @@ app.use("*", cors({
 // Global request timeout middleware - prevents hanging connections
 app.use("*", async (c, next) => {
   // Skip timeout for specific endpoints that need more time
-  if (c.req.url.includes('/chat/upload-image') || 
+  if (c.req.url.includes('/chat/upload-image') ||
+      c.req.url.includes('/products/upload-image') ||
       c.req.url.includes('/health') ||
       c.req.url.includes('/stats') ||
       c.req.url.includes('/vendors') ||
@@ -4831,6 +4832,91 @@ app.post("/make-server-16010b6f/seed-products", async (c) => {
   }
 });
 
+// Upload product gallery image (multipart — avoids CloudBase JSON body size limits)
+app.post("/make-server-16010b6f/products/upload-image", async (c) => {
+  try {
+    console.log("📤 Uploading product image...");
+
+    const formData = await c.req.formData();
+    const imageFile = formData.get("image") as File;
+
+    if (!imageFile || !(imageFile instanceof File)) {
+      return c.json({ error: "No image file provided" }, 400);
+    }
+
+    const fileSizeKB = imageFile.size / 1024;
+    console.log(`📦 Product image size: ${fileSizeKB.toFixed(2)} KB`);
+
+    if (fileSizeKB > 600) {
+      return c.json({
+        error: "Image file too large. Maximum size is 500KB",
+        size: `${fileSizeKB.toFixed(2)} KB`,
+      }, 400);
+    }
+
+    const bucketName = "make-16010b6f-product-images";
+    try {
+      await ensureBucket(supabase, bucketName, {
+        public: false,
+        fileSizeLimit: 524288,
+      });
+    } catch (bucketErr: any) {
+      console.error("❌ Failed to ensure product images bucket:", bucketErr);
+      return c.json({ error: "Failed to prepare storage bucket" }, 500);
+    }
+
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 9);
+    const fileExt = imageFile.name.split(".").pop() || "jpg";
+    const fileName = `product_${timestamp}_${randomStr}.${fileExt}`;
+
+    const arrayBuffer = await imageFile.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucketName)
+      .upload(fileName, uint8Array, {
+        contentType: imageFile.type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("❌ Product image upload error:", uploadError);
+      return c.json({
+        error: "Failed to upload image",
+        details: uploadError.message,
+      }, 500);
+    }
+
+    const { data: urlData, error: urlError } = await supabase.storage
+      .from(bucketName)
+      .createSignedUrl(fileName, 315360000);
+
+    if (urlError || !urlData) {
+      console.error("❌ Product image URL generation error:", urlError);
+      return c.json({
+        error: "Failed to generate image URL",
+        details: urlError?.message,
+      }, 500);
+    }
+
+    console.log(`✅ Product image uploaded: ${fileName}`);
+
+    return c.json({
+      success: true,
+      imageUrl: urlData.signedUrl,
+      fileName,
+      size: `${fileSizeKB.toFixed(2)} KB`,
+    });
+  } catch (error: any) {
+    console.error("❌ Error uploading product image:", error);
+    return c.json({
+      error: "Failed to upload image",
+      details: String(error),
+    }, 500);
+  }
+});
+
 // Upload description image to Supabase Storage
 app.post("/make-server-16010b6f/upload-description-image", async (c) => {
   try {
@@ -4872,16 +4958,25 @@ app.post("/make-server-16010b6f/upload-description-image", async (c) => {
       return c.json({ error: "Failed to upload image", details: uploadError.message }, 500);
     }
     
-    // Get public URL
-    const { data: urlData } = supabase.storage
+    // Prefer signed URLs — getPublicUrl is unreliable when KV storage fallback is active
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(bucketName)
-      .getPublicUrl(fileName);
-    
-    console.log("✅ Image uploaded successfully:", urlData.publicUrl);
+      .createSignedUrl(fileName, 315360000);
+
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(fileName);
+      console.log("✅ Image uploaded successfully:", urlData.publicUrl);
+      return c.json({
+        success: true,
+        url: urlData.publicUrl,
+      });
+    }
+
+    console.log("✅ Image uploaded successfully:", signedUrlData.signedUrl);
     
     return c.json({ 
       success: true,
-      url: urlData.publicUrl 
+      url: signedUrlData.signedUrl,
     });
   } catch (error) {
     console.error("❌ Error uploading description image:", error);
@@ -14615,7 +14710,7 @@ app.get("/make-server-16010b6f/inventory/:vendorId", async (c) => {
 // Adjust single inventory item
 app.post("/make-server-16010b6f/inventory/adjust", async (c) => {
   try {
-    const { itemId, adjustmentQty, newSku, reason } = await c.req.json();
+    const { itemId, parentProductId, adjustmentQty, newSku, reason } = await c.req.json();
     
     console.log(`📦 [INVENTORY ADJUST] Starting adjustment for: ${itemId} by ${adjustmentQty}`);
     
@@ -14623,7 +14718,21 @@ app.post("/make-server-16010b6f/inventory/adjust", async (c) => {
     // First, try as a product key
     let product = await kv.get(`product:${itemId}`);
     let isVariant = false;
-    let variantId = null;
+    let variantId: string | null = null;
+    
+    // Variant row from Inventory UI — parent product id is known (avoids read-model lookup).
+    if (!product && parentProductId) {
+      const parent = await kv.get(`product:${parentProductId}`);
+      if (parent && typeof parent === "object" && Array.isArray(parent.variants)) {
+        const match = parent.variants.find((v: any) => String(v?.id) === String(itemId));
+        if (match) {
+          product = parent;
+          isVariant = true;
+          variantId = String(itemId);
+          console.log(`✅ Resolved variant ${itemId} on parent product ${parentProductId}`);
+        }
+      }
+    }
     
     // If not found, resolve variant ID/SKU through the SQL read model instead of scanning every product.
     if (!product) {
@@ -14672,6 +14781,12 @@ app.post("/make-server-16010b6f/inventory/adjust", async (c) => {
         updatedAt: new Date().toISOString(),
       };
       
+      const totalInventory = product.variants.reduce(
+        (sum: number, v: any) => sum + (Number(v?.inventory) || 0),
+        0
+      );
+      product.inventory = totalInventory;
+      product.stock = totalInventory;
       product.updatedAt = new Date().toISOString();
       
       // Save the updated product (with updated variant)

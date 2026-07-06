@@ -6,13 +6,13 @@ import { Input } from "./ui/input";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { useLanguage } from "../contexts/LanguageContext";
-import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
+import { cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { toast } from "sonner";
 import {
   getCachedAdminProductsPage,
-  invalidateAdminAllProductsCache,
   ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
-  dispatchAdminProductsCachePatched,
+  syncAdminInventoryStockAfterAdjust,
+  invalidateProductByIdCache,
   ADMIN_PRODUCTS_BROADCAST_CHANNEL,
   CACHE_KEYS,
   moduleCache,
@@ -36,6 +36,11 @@ interface InventoryItem {
   parentName?: string;
 }
 
+function inventoryAvailability(onHand: number) {
+  const qty = Math.max(0, Number(onHand) || 0);
+  return { committed: 0, available: qty };
+}
+
 function productsToInventoryItems(products: any[]): InventoryItem[] {
   const inventoryData: InventoryItem[] = [];
   (products || []).forEach((product: any) => {
@@ -48,8 +53,8 @@ function productsToInventoryItems(products: any[]): InventoryItem[] {
     if (hasVariantRows) {
       product.variants.forEach((variant: any) => {
         const variantInventory = variant.inventory || 0;
-        const variantCommitted = Math.floor(variantInventory * 0.05);
-        const variantAvailable = variantInventory - variantCommitted;
+        const { committed: variantCommitted, available: variantAvailable } =
+          inventoryAvailability(variantInventory);
         const variantName =
           variant.name || (variant.options ? Object.values(variant.options).join(" / ") : "Variant");
         inventoryData.push({
@@ -75,8 +80,7 @@ function productsToInventoryItems(products: any[]): InventoryItem[] {
     }
 
     const inventoryQty = product.inventory || 0;
-    const committed = Math.floor(inventoryQty * 0.05);
-    const available = inventoryQty - committed;
+    const { committed, available } = inventoryAvailability(inventoryQty);
     inventoryData.push({
       id: product.id,
       product: product.name || product.title,
@@ -94,6 +98,43 @@ function productsToInventoryItems(products: any[]): InventoryItem[] {
     });
   });
   return inventoryData;
+}
+
+/** Inventory +/- or typed qty — adjusts stock only (never rewrites product specs/variants). */
+async function persistInventoryQuantity(
+  item: InventoryItem,
+  adjustment: number
+): Promise<void> {
+  if (adjustment === 0) return;
+
+  const productKey = item.isVariant && item.parentId ? item.parentId : item.id;
+  const response = await fetch(`${cloudbaseApiBaseUrl}/inventory/adjust`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getCloudBaseRequestHeaders(),
+      ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+    },
+    body: JSON.stringify({
+      itemId: item.id,
+      ...(item.isVariant && item.parentId ? { parentProductId: item.parentId } : {}),
+      adjustmentQty: String(adjustment),
+      newSku: item.sku,
+      reason: "Inventory page adjustment",
+    }),
+  });
+
+  if (!response.ok) {
+    const err = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(err?.error || "Failed to adjust inventory");
+  }
+
+  const newQuantity = item.onHand + adjustment;
+  invalidateProductByIdCache(productKey);
+  syncAdminInventoryStockAfterAdjust(item.id, newQuantity, {
+    isVariant: item.isVariant,
+    parentId: item.parentId,
+  });
 }
 
 export type InventoryProps = {
@@ -149,6 +190,12 @@ export function Inventory({
   const [listRefreshing, setListRefreshing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const editingIdRef = useRef<string | null>(null);
+  const editValueRef = useRef("");
+
+  useEffect(() => {
+    editingIdRef.current = editingId;
+  }, [editingId]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
@@ -294,12 +341,12 @@ export function Inventory({
 
       if (nextOnHand === Number(row.onHand ?? 0)) return row;
       changed = true;
-      const committed = Math.floor(nextOnHand * 0.05);
+      const { committed, available } = inventoryAvailability(nextOnHand);
       return {
         ...row,
         onHand: nextOnHand,
         committed,
-        available: Math.max(0, nextOnHand - committed),
+        available,
       };
     });
 
@@ -352,6 +399,7 @@ export function Inventory({
 
   useEffect(() => {
     const applyCachePatch = () => {
+      if (editingIdRef.current) return;
       if (!applyCachedInventoryPage()) {
         if (!applyVisibleInventoryStockPatchFromFullCache()) {
           void loadInventory(false, { silent: true });
@@ -359,6 +407,7 @@ export function Inventory({
       }
     };
     const onListChanged = () => {
+      if (editingIdRef.current) return;
       if (applyCachedInventoryPage()) return;
       if (applyVisibleInventoryStockPatchFromFullCache()) return;
       void loadInventory(true, { silent: true });
@@ -383,18 +432,34 @@ export function Inventory({
     };
   }, [loadInventory, applyCachedInventoryPage, applyVisibleInventoryStockPatchFromFullCache]);
 
-  // Inline editing - click number to edit
+  // Inline editing - click/focus the stock input to edit
   const startEditing = (item: InventoryItem) => {
+    const next = String(item.onHand);
+    editingIdRef.current = item.id;
+    editValueRef.current = next;
     setEditingId(item.id);
-    setEditValue(String(item.onHand));
+    setEditValue(next);
   };
 
-  const saveQuantity = async (item: InventoryItem) => {
-    const newQuantity = parseInt(editValue);
-    
-    if (isNaN(newQuantity) || newQuantity < 0) {
+  const cancelEditing = () => {
+    editingIdRef.current = null;
+    editValueRef.current = "";
+    setEditingId(null);
+    setEditValue("");
+  };
+
+  const saveQuantity = async (item: InventoryItem, rawValue?: string) => {
+    const qtyText = (rawValue ?? editValueRef.current).trim();
+    const newQuantity = parseInt(qtyText, 10);
+
+    if (qtyText === "" || Number.isNaN(newQuantity) || newQuantity < 0) {
       toast.error("Invalid quantity");
-      setEditingId(null);
+      cancelEditing();
+      return;
+    }
+
+    if (newQuantity === item.onHand) {
+      cancelEditing();
       return;
     }
 
@@ -403,50 +468,33 @@ export function Inventory({
     console.log(`📦 Updating ${item.product}: ${item.onHand} → ${newQuantity} (adjustment: ${adjustment})`);
 
     // Optimistic update - instant UI change like Shopify
+    const prevOnHand = item.onHand;
+    const { available: nextAvailable } = inventoryAvailability(newQuantity);
     setInventoryItems(prev => prev.map(i => 
       i.id === item.id 
-        ? { ...i, onHand: newQuantity, available: newQuantity - i.committed }
+        ? { ...i, onHand: newQuantity, available: nextAvailable, committed: 0 }
         : i
     ));
 
-    setEditingId(null);
-    setEditValue("");
-    toast.success(`✅ Updated ${item.product} to ${newQuantity} units`);
+    cancelEditing();
 
-    // Sync with backend in background
     try {
-      const response = await fetch(
-        `${cloudbaseApiBaseUrl}/inventory/adjust`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...getCloudBaseRequestHeaders(),
-
-            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-          },
-          body: JSON.stringify({
-            itemId: item.id,
-            adjustmentQty: String(adjustment),
-            newSku: item.sku,
-            reason: "Quick adjustment",
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        console.warn("Backend sync failed, but UI is updated");
-      } else {
-        invalidateAdminAllProductsCache();
-        dispatchAdminProductsCachePatched();
-        console.log("✅ Backend synced successfully");
-      }
+      await persistInventoryQuantity(item, adjustment);
+      toast.success(`Updated ${item.product} to ${newQuantity} units`);
     } catch (error) {
-      console.warn("Backend sync error (UI still updated):", error);
+      console.warn("Failed to save inventory quantity:", error);
+      setInventoryItems(prev => prev.map(i =>
+        i.id === item.id ? { ...i, onHand: prevOnHand, ...inventoryAvailability(prevOnHand) } : i
+      ));
+      toast.error("Failed to save inventory change");
     }
   };
 
   const quickAdjust = async (item: InventoryItem, amount: number) => {
+    if (editingIdRef.current === item.id) {
+      cancelEditing();
+    }
+
     const newQuantity = item.onHand + amount;
     
     if (newQuantity < 0) {
@@ -457,9 +505,11 @@ export function Inventory({
     console.log(`📦 Quick adjust ${item.product}: ${item.onHand} → ${newQuantity}`);
 
     // Instant update
+    const prevOnHand = item.onHand;
+    const { available: nextAvailable } = inventoryAvailability(newQuantity);
     setInventoryItems(prev => prev.map(i => 
       i.id === item.id 
-        ? { ...i, onHand: newQuantity, available: newQuantity - i.committed }
+        ? { ...i, onHand: newQuantity, available: nextAvailable, committed: 0 }
         : i
     ));
 
@@ -472,36 +522,14 @@ export function Inventory({
     toast.success(`${amount > 0 ? '+' : ''}${amount} → ${item.product}`);
 
     try {
-      const res = await fetch(
-        `${cloudbaseApiBaseUrl}/inventory/adjust`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...getCloudBaseRequestHeaders(),
-
-            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-          },
-          body: JSON.stringify({
-            itemId: item.id,
-            adjustmentQty: String(amount),
-            newSku: item.sku,
-            reason: "Quick adjustment",
-          }),
-        }
-      );
-      if (res.ok) {
-        invalidateAdminAllProductsCache();
-        dispatchAdminProductsCachePatched();
-      }
+      await persistInventoryQuantity(item, amount);
     } catch (error) {
-      console.warn("Backend sync error:", error);
+      console.warn("Backend sync error, reverting UI:", error);
+      setInventoryItems(prev => prev.map(i =>
+        i.id === item.id ? { ...i, onHand: prevOnHand, ...inventoryAvailability(prevOnHand) } : i
+      ));
+      toast.error("Failed to save inventory change");
     }
-  };
-
-  const cancelEditing = () => {
-    setEditingId(null);
-    setEditValue("");
   };
 
   if (!inventoryHydrated) {
@@ -704,6 +732,7 @@ export function Inventory({
                           size="sm"
                           variant="outline"
                           className="h-9 w-9 p-0 border-slate-300 hover:bg-slate-100"
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => quickAdjust(item, -10)}
                           title="Decrease by 10"
                         >
@@ -712,28 +741,39 @@ export function Inventory({
                         
                         {/* Stock Input Box */}
                         <Input
-                          type="number"
-                          value={isEditing ? editValue : item.onHand}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          aria-label={`Stock quantity for ${item.product}`}
+                          value={isEditing ? editValue : String(item.onHand)}
+                          onFocus={(e) => {
+                            startEditing(item);
+                            requestAnimationFrame(() => e.currentTarget.select());
+                          }}
                           onChange={(e) => {
-                            setEditingId(item.id);
-                            setEditValue(e.target.value);
+                            const next = e.target.value.replace(/[^\d]/g, "");
+                            editValueRef.current = next;
+                            setEditValue(next);
+                            if (editingId !== item.id) {
+                              editingIdRef.current = item.id;
+                              setEditingId(item.id);
+                            }
                           }}
                           onBlur={() => {
-                            if (isEditing && editValue !== String(item.onHand)) {
-                              saveQuantity(item);
-                            } else {
-                              setEditingId(null);
-                            }
+                            if (editingIdRef.current !== item.id) return;
+                            void saveQuantity(item);
                           }}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              saveQuantity(item);
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              (e.currentTarget as HTMLInputElement).blur();
                             }
-                            if (e.key === 'Escape') {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
                               cancelEditing();
                             }
                           }}
-                          className="w-20 text-center font-semibold border-slate-300"
+                          className="w-20 text-center font-semibold border-slate-300 bg-white"
                         />
                         
                         {/* Quick Increase by 10 */}
@@ -741,6 +781,7 @@ export function Inventory({
                           size="sm"
                           variant="outline"
                           className="h-9 w-9 p-0 border-slate-300 hover:bg-slate-100"
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => quickAdjust(item, 10)}
                           title="Increase by 10"
                         >

@@ -13,7 +13,7 @@ import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner";
 import { compressImageToDataURL, compressMultipleImagesToDataURL } from "../../utils/imageCompression";
 import { RichTextEditor } from "./RichTextEditor";
-import { productsApi } from "../../utils/api";
+import { productsApi, uploadProductGalleryImage } from "../../utils/api";
 import { apiCache } from "../utils/cache";
 import {
   invalidateAdminAllProductsCache,
@@ -616,6 +616,18 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         console.log(`📊 Variant Summary: ${variantsForSave.length} variants, Total inventory: ${finalInventory}, Base price: $${finalPrice}`);
       }
       
+      // Upload inline images separately so the JSON payload stays under CloudBase limits
+      const hasInlineImages =
+        images.some((img) => typeof img === "string" && img.startsWith("data:image/")) ||
+        (hasVariants &&
+          variantsForSave.some(
+            (v) => typeof (v as { image?: string }).image === "string" &&
+              (v as { image: string }).image.startsWith("data:image/")
+          ));
+      if (hasInlineImages) {
+        toast.info("Uploading product images...", { duration: 3000 });
+      }
+
       const data = {
         name: title,
         description,
@@ -692,12 +704,16 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
           return;
         }
         
-        // Compress all images using the new utility (max 500KB each)
+        // Compress then upload to storage so saves only send URLs (avoids 413 payload limit)
         const compressedDataUrls = await compressMultipleImagesToDataURL(imageFiles, 500);
-        
-        // Add compressed images to the BEGINNING of the array (new images become cover)
-        setImages(prev => [...compressedDataUrls, ...prev]);
-        toast.success(`${compressedDataUrls.length} image(s) uploaded and compressed to 800KB!`);
+        toast.info("Uploading images to storage...", { duration: 2000 });
+        const uploadedUrls = await Promise.all(
+          compressedDataUrls.map((url) => uploadProductGalleryImage(url))
+        );
+
+        // Add uploaded images to the BEGINNING of the array (new images become cover)
+        setImages((prev) => [...uploadedUrls, ...prev]);
+        toast.success(`${uploadedUrls.length} image(s) uploaded!`);
       } catch (error) {
         console.error("Error uploading images:", error);
         toast.error("Failed to upload images");
@@ -736,12 +752,15 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         const availableSlots = 10 - images.length;
         const filesToProcess = imageFiles.slice(0, availableSlots);
         
-        // Compress all images using the new utility (max 500KB each)
+        // Compress then upload to storage so saves only send URLs (avoids 413 payload limit)
         const compressedDataUrls = await compressMultipleImagesToDataURL(filesToProcess, 500);
-        
-        // Add compressed images to the BEGINNING of the array (new images become cover)
-        setImages(prev => [...compressedDataUrls, ...prev]);
-        toast.success(`${compressedDataUrls.length} image(s) uploaded and compressed to 500KB!`);
+        toast.info("Uploading images to storage...", { duration: 2000 });
+        const uploadedUrls = await Promise.all(
+          compressedDataUrls.map((url) => uploadProductGalleryImage(url))
+        );
+
+        setImages((prev) => [...uploadedUrls, ...prev]);
+        toast.success(`${uploadedUrls.length} image(s) uploaded!`);
       } catch (error) {
         console.error("Error uploading images:", error);
         toast.error("Failed to upload images");

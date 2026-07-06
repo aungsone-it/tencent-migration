@@ -52,6 +52,7 @@ import {
   invalidateVendorStorefrontCatalogCachesAfterProductLinkChange,
   insertAdminProductIntoCaches,
   removeAdminProductsFromCaches,
+  updateAdminProductInCaches,
   removeProductsFromVendorAdminCaches,
   notifyVendorStorefrontProductsRemoved,
   broadcastPlatformProductsDeleted,
@@ -802,7 +803,7 @@ export function ProductList({
   const handleUpdateProduct = async (id: string, data: any) => {
     const prevVendors = selectedProduct?.selectedVendors;
     try {
-      await productsApi.update(id, { ...data, performedByUserId: sessionUser?.id });
+      const response = await productsApi.update(id, { ...data, performedByUserId: sessionUser?.id });
       let vendorsList =
         (moduleCache.peek<unknown[]>(MODULE_CACHE_KEYS.ADMIN_VENDORS) as any[]) || [];
       if (!Array.isArray(vendorsList) || vendorsList.length === 0) {
@@ -816,19 +817,22 @@ export function ProductList({
       invalidateProductByIdCache(id);
       toast.success("Product updated successfully!");
       SmartCache.delete(CACHE_KEYS.STOREFRONT_PRODUCTS);
+
+      const serverProduct = (response as { product?: Record<string, unknown> }).product;
+      const mergedRaw: Record<string, unknown> = {
+        ...(selectedProduct as Record<string, unknown> | undefined),
+        ...(serverProduct ?? data),
+        id,
+      };
+      const mergedRow = normalizeCreatedProductForAdminList(mergedRaw);
+
       skipCacheSoftReloadRef.current = true;
-      setProducts((prev) =>
-        prev.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                ...data,
-                name: data.name ?? data.title ?? p.name,
-                status: (data.status ?? p.status) as Product["status"],
-              }
-            : p
-        )
-      );
+      updateAdminProductInCaches(id, mergedRow as Record<string, unknown>);
+      setProducts((prev) => {
+        const next = prev.map((p) => (p.id === id ? { ...p, ...mergedRow } : p));
+        SmartCache.set(CACHE_KEYS.PRODUCTS, next);
+        return next;
+      });
       onProductsChanged?.();
       setCurrentView("list");
     } catch (error) {

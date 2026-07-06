@@ -12,6 +12,7 @@ export const OWNED_STORAGE_BUCKETS = new Set([
   "make-16010b6f-chat-images",
   "make-16010b6f-customer-images",
   "make-16010b6f-user-avatars",
+  "make-16010b6f-product-images",
 ]);
 
 /** Resolve a stored string to bucket + object path for removal. */
@@ -48,6 +49,10 @@ export function parseOwnedStorageRef(value: unknown): { bucket: string; objectPa
 
   if (/^customer_\d+_/i.test(s)) {
     return { bucket: "make-16010b6f-customer-images", objectPath: s };
+  }
+
+  if (/^product_\d+_/i.test(s)) {
+    return { bucket: "make-16010b6f-product-images", objectPath: s };
   }
 
   // User avatars: {uuid}/{timestamp}.ext (KV may store path; signed URLs hit the regex above)

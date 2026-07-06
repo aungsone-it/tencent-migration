@@ -57,6 +57,87 @@ import type {
 // PRODUCTS API
 // ============================================
 
+const PRODUCT_IMAGE_DATA_URL_RE = /^data:image\/(png|jpg|jpeg|gif|webp);base64,/i;
+
+function dataUrlToUploadMeta(dataUrl: string): { mime: string; ext: string; bytes: Uint8Array } {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Invalid product image format");
+  }
+
+  const mime = match[1];
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : mime.includes("gif") ? "gif" : "jpg";
+  return { mime, ext, bytes };
+}
+
+/** Upload one gallery image; returns a storage URL (not base64). */
+export async function uploadProductGalleryImage(dataUrl: string): Promise<string> {
+  if (!PRODUCT_IMAGE_DATA_URL_RE.test(dataUrl)) {
+    return dataUrl;
+  }
+
+  const { ext } = dataUrlToUploadMeta(dataUrl);
+  const fileName = `product-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
+
+  // JSON upload via existing chat route — works on current CloudBase deploy (signed URLs, no multipart).
+  const chatRes = await apiClient.post<{ success?: boolean; imageUrl?: string; error?: string }>(
+    "/chat/upload-image",
+    {
+      imageData: dataUrl,
+      fileName,
+      conversationId: "products",
+    }
+  );
+
+  if (chatRes.imageUrl && typeof chatRes.imageUrl === "string") {
+    return chatRes.imageUrl;
+  }
+
+  throw new Error(chatRes.error || "Failed to upload product image");
+}
+
+async function uploadProductImageDataUrl(dataUrl: string): Promise<string> {
+  return uploadProductGalleryImage(dataUrl);
+}
+
+async function resolveProductImageRef(src: unknown): Promise<unknown> {
+  if (typeof src !== "string" || !src.trim()) return src;
+  if (!PRODUCT_IMAGE_DATA_URL_RE.test(src)) return src;
+  return uploadProductImageDataUrl(src);
+}
+
+/** Upload inline base64 gallery/variant images so JSON create/update stays under CloudBase limits. */
+async function prepareProductPayloadForSave<T extends Partial<Product>>(
+  data: T
+): Promise<T> {
+  const next: Partial<Product> = { ...data };
+
+  if (Array.isArray(next.images) && next.images.length > 0) {
+    next.images = await Promise.all(next.images.map((img) => resolveProductImageRef(img))) as string[];
+  }
+
+  if (Array.isArray(next.variants) && next.variants.length > 0) {
+    next.variants = await Promise.all(
+      next.variants.map(async (variant) => {
+        if (!variant || typeof variant !== "object") return variant;
+        const v = variant as Record<string, unknown>;
+        if (typeof v.image !== "string" || !PRODUCT_IMAGE_DATA_URL_RE.test(v.image)) {
+          return variant;
+        }
+        return {
+          ...variant,
+          image: await uploadProductImageDataUrl(v.image),
+        };
+      })
+    ) as Product["variants"];
+  }
+
+  return next as T;
+}
+
 export const productsApi = {
   /**
    * Get all products
@@ -76,7 +157,8 @@ export const productsApi = {
    * Create a new product (`performedByUserId`: CloudBase Auth UUID of acting staff — for audit timeline)
    */
   create: async (data: Partial<Product> & { performedByUserId?: string }): Promise<ApiResponse<Product>> => {
-    return apiClient.post<ApiResponse<Product>>('/products', data);
+    const prepared = await prepareProductPayloadForSave(data);
+    return apiClient.post<ApiResponse<Product>>('/products', prepared);
   },
 
   /**
@@ -86,7 +168,8 @@ export const productsApi = {
     id: string,
     data: Partial<Product> & { performedByUserId?: string }
   ): Promise<ApiResponse<Product>> => {
-    return apiClient.put<ApiResponse<Product>>(`/products/${id}`, data);
+    const prepared = await prepareProductPayloadForSave(data);
+    return apiClient.put<ApiResponse<Product>>(`/products/${id}`, prepared);
   },
 
   /**

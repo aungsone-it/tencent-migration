@@ -7,6 +7,7 @@ import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { useLanguage } from "../contexts/LanguageContext";
 import { cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
+import { productsApi } from "../../utils/api";
 import { toast } from "sonner";
 import {
   getCachedAdminProductsPage,
@@ -51,14 +52,14 @@ function productsToInventoryItems(products: any[]): InventoryItem[] {
       product.variants.length > 0;
 
     if (hasVariantRows) {
-      product.variants.forEach((variant: any) => {
+      product.variants.forEach((variant: any, idx: number) => {
         const variantInventory = variant.inventory || 0;
         const { committed: variantCommitted, available: variantAvailable } =
           inventoryAvailability(variantInventory);
         const variantName =
           variant.name || (variant.options ? Object.values(variant.options).join(" / ") : "Variant");
         inventoryData.push({
-          id: variant.id,
+          id: String(variant.id || `${product.id}::${variant.sku || idx}`),
           product: `${product.name || product.title} — ${variantName}`,
           sku: variant.sku,
           image:
@@ -100,6 +101,53 @@ function productsToInventoryItems(products: any[]): InventoryItem[] {
   return inventoryData;
 }
 
+/** Fallback when /inventory/adjust is missing or read-model lookup fails — merges stock on full parent product. */
+async function persistVariantInventoryViaParentUpdate(
+  item: InventoryItem,
+  newQuantity: number
+): Promise<void> {
+  if (!item.parentId) {
+    throw new Error("Missing parent product for variant row");
+  }
+
+  const response = await productsApi.getById(item.parentId);
+  const product = response.product as Record<string, unknown> | undefined;
+  const variants = product?.variants;
+  if (!product || !Array.isArray(variants) || variants.length === 0) {
+    throw new Error("Parent product has no variants");
+  }
+
+  const skuNorm = String(item.sku || "").trim().toLowerCase();
+  let matched = false;
+  const nextVariants = variants.map((v: Record<string, unknown>) => {
+    const vSku = String(v.sku || "").trim().toLowerCase();
+    const idMatch = String(v.id ?? "") === String(item.id);
+    const skuMatch = skuNorm && vSku === skuNorm;
+    if (idMatch || skuMatch) {
+      matched = true;
+      return { ...v, inventory: newQuantity };
+    }
+    return v;
+  });
+
+  if (!matched) {
+    throw new Error("Variant not found on parent product");
+  }
+
+  const total = nextVariants.reduce(
+    (sum: number, v: Record<string, unknown>) => sum + (Number(v.inventory) || 0),
+    0
+  );
+
+  await productsApi.update(item.parentId, {
+    hasVariants: true,
+    variantOptions: Array.isArray(product.variantOptions) ? product.variantOptions : [],
+    variants: nextVariants,
+    inventory: total,
+    stock: total,
+  });
+}
+
 /** Inventory +/- or typed qty — adjusts stock only (never rewrites product specs/variants). */
 async function persistInventoryQuantity(
   item: InventoryItem,
@@ -108,6 +156,8 @@ async function persistInventoryQuantity(
   if (adjustment === 0) return;
 
   const productKey = item.isVariant && item.parentId ? item.parentId : item.id;
+  const newQuantity = item.onHand + adjustment;
+
   const response = await fetch(`${cloudbaseApiBaseUrl}/inventory/adjust`, {
     method: "POST",
     headers: {
@@ -126,14 +176,31 @@ async function persistInventoryQuantity(
 
   if (!response.ok) {
     const err = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(err?.error || "Failed to adjust inventory");
+    const adjustError = err?.error || "Failed to adjust inventory";
+
+    if (item.isVariant && item.parentId) {
+      try {
+        await persistVariantInventoryViaParentUpdate(item, newQuantity);
+        invalidateProductByIdCache(productKey);
+        syncAdminInventoryStockAfterAdjust(item.id, newQuantity, {
+          isVariant: item.isVariant,
+          parentId: item.parentId,
+          sku: item.sku,
+        });
+        return;
+      } catch (fallbackErr) {
+        console.warn("Variant inventory fallback failed:", fallbackErr);
+      }
+    }
+
+    throw new Error(adjustError);
   }
 
-  const newQuantity = item.onHand + adjustment;
   invalidateProductByIdCache(productKey);
   syncAdminInventoryStockAfterAdjust(item.id, newQuantity, {
     isVariant: item.isVariant,
     parentId: item.parentId,
+    sku: item.sku,
   });
 }
 

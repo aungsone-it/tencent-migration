@@ -5665,6 +5665,21 @@ function findVariantIndexBySku(product: any, sku: string | undefined): number {
   );
 }
 
+function findVariantIndexOnProduct(
+  product: any,
+  variantId: string | null | undefined,
+  sku: string | undefined
+): number {
+  if (!Array.isArray(product?.variants)) return -1;
+  if (variantId) {
+    const byId = product.variants.findIndex(
+      (v: any) => String(v?.id ?? "") === String(variantId)
+    );
+    if (byId >= 0) return byId;
+  }
+  return findVariantIndexBySku(product, sku);
+}
+
 /**
  * Vendor cart/checkout sometimes stored cart line `id` (`parentId:variantSku`) as `productId`.
  * Normalize to real parent product id + SKU so KV `product:${uuid}` resolves.
@@ -14724,12 +14739,12 @@ app.post("/make-server-16010b6f/inventory/adjust", async (c) => {
     if (!product && parentProductId) {
       const parent = await kv.get(`product:${parentProductId}`);
       if (parent && typeof parent === "object" && Array.isArray(parent.variants)) {
-        const match = parent.variants.find((v: any) => String(v?.id) === String(itemId));
-        if (match) {
+        let variantIndex = findVariantIndexOnProduct(parent, itemId, newSku);
+        if (variantIndex >= 0) {
           product = parent;
           isVariant = true;
-          variantId = String(itemId);
-          console.log(`✅ Resolved variant ${itemId} on parent product ${parentProductId}`);
+          variantId = String(parent.variants[variantIndex]?.id ?? itemId);
+          console.log(`✅ Resolved variant on parent product ${parentProductId} (index ${variantIndex})`);
         }
       }
     }
@@ -14761,7 +14776,7 @@ app.post("/make-server-16010b6f/inventory/adjust", async (c) => {
     
     if (isVariant) {
       // Update variant inventory
-      const variantIndex = product.variants.findIndex((v: any) => v.id === variantId);
+      let variantIndex = findVariantIndexOnProduct(product, variantId, newSku);
       if (variantIndex === -1) {
         return c.json({ error: "Variant not found" }, 404);
       }

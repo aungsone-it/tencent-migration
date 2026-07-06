@@ -2342,7 +2342,7 @@ export function primeAdminAllProductsCache(products: unknown[]): void {
 export function patchAdminProductInventoryInCache(
   itemId: string,
   newInventory: number,
-  opts?: { isVariant?: boolean; parentId?: string }
+  opts?: { isVariant?: boolean; parentId?: string; sku?: string }
 ): void {
   const peeked = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
   if (!peeked || !Array.isArray(peeked)) return;
@@ -2351,15 +2351,26 @@ export function patchAdminProductInventoryInCache(
   moduleCache.prime(CACHE_KEYS.ADMIN_PRODUCTS, next);
 }
 
+function variantRowMatches(
+  v: Record<string, unknown>,
+  itemId: string,
+  sku?: string
+): boolean {
+  if (String(v.id ?? "") === String(itemId)) return true;
+  const skuNorm = String(sku || "").trim().toLowerCase();
+  if (!skuNorm) return false;
+  return String(v.sku || "").trim().toLowerCase() === skuNorm;
+}
+
 function patchAdminProductInventoryRow(
   p: any,
   itemId: string,
   newInventory: number,
-  opts?: { isVariant?: boolean; parentId?: string }
+  opts?: { isVariant?: boolean; parentId?: string; sku?: string }
 ): any {
   if (opts?.isVariant && opts.parentId && p.id === opts.parentId) {
     const variants = (p.variants || []).map((v: any) =>
-      v.id === itemId ? { ...v, inventory: newInventory } : v
+      variantRowMatches(v, itemId, opts.sku) ? { ...v, inventory: newInventory } : v
     );
     const total = variants.reduce((s: number, v: any) => s + (Number(v.inventory) || 0), 0);
     return { ...p, variants, inventory: total, stock: total };
@@ -2373,7 +2384,7 @@ function patchAdminProductInventoryRow(
 function patchInventoryInPaginatedAdminCaches(
   itemId: string,
   newInventory: number,
-  opts?: { isVariant?: boolean; parentId?: string }
+  opts?: { isVariant?: boolean; parentId?: string; sku?: string }
 ): void {
   moduleCache.patchInventoryInPaginatedAdminCaches(
     ADMIN_PRODUCTS_PAGE_CACHE_PREFIX,
@@ -2391,7 +2402,7 @@ function patchInventoryInPaginatedAdminCaches(
 export function syncAdminInventoryStockAfterAdjust(
   itemId: string,
   newInventory: number,
-  opts?: { isVariant?: boolean; parentId?: string }
+  opts?: { isVariant?: boolean; parentId?: string; sku?: string }
 ): void {
   patchAdminProductInventoryInCache(itemId, newInventory, opts);
   patchInventoryInPaginatedAdminCaches(itemId, newInventory, opts);

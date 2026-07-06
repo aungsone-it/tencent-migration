@@ -1,3 +1,4 @@
+import nodeCrypto from "node:crypto";
 import {
   kvCreateBucket,
   kvCreateSignedUrl,
@@ -482,18 +483,44 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
         async createUser(payload: Record<string, unknown>) {
           const base = cloudbaseAuthBaseUrl();
           if (!base) {
+            const fallbackId =
+              typeof nodeCrypto.randomUUID === "function"
+                ? nodeCrypto.randomUUID()
+                : `user_${Date.now()}`;
             return {
               data: {
                 user: {
-                  id: crypto.randomUUID(),
+                  id: fallbackId,
                   email: String(payload.email || ""),
                   created_at: new Date().toISOString(),
+                  user_metadata: payload.user_metadata,
                 },
               },
               error: null,
             };
           }
-          return postJson(`${base}/admin/users`, payload);
+          const result = await postJson<Record<string, unknown>>(`${base}/admin/users`, payload);
+          if (result.error) return result;
+          const d = result.data || {};
+          const userId = String(
+            (d as { sub?: string }).sub ||
+              (d as { user?: { id?: string } }).user?.id ||
+              (d as { uid?: string }).uid ||
+              (d as { Uid?: string }).Uid ||
+              ""
+          );
+          if (!userId) return result;
+          return {
+            data: {
+              user: {
+                id: userId,
+                email: String(payload.email || (d as { email?: string }).email || ""),
+                created_at: new Date().toISOString(),
+                user_metadata: payload.user_metadata,
+              },
+            },
+            error: null,
+          };
         },
         async getUserById(userId: string) {
           const base = cloudbaseAuthBaseUrl();

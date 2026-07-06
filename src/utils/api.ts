@@ -4,8 +4,13 @@
 // ============================================
 
 import { API_TIMEOUTS } from '../constants';
-import { apiClient } from './api-client';
-import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import { apiClient, API_BASE_URL } from './api-client';
+import {
+  projectId,
+  publicAnonKey,
+  cloudbasePublishableKey,
+  getCloudBaseRequestHeaders,
+} from '../../utils/supabase/info';
 import type {
   // Product types
   ProductsResponse,
@@ -694,6 +699,38 @@ export const chatApi = {
 // AUTH API
 // ============================================
 
+async function uploadCustomerProfileImageDataUrl(
+  userId: string,
+  profileImage: string
+): Promise<void> {
+  const match = profileImage.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return;
+
+  const mime = match[1];
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+
+  const formData = new FormData();
+  formData.append("image", new Blob([bytes], { type: mime }), `profile.${ext}`);
+
+  const headers: Record<string, string> = {
+    ...getCloudBaseRequestHeaders(),
+    ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+  };
+
+  const uploadRes = await fetch(
+    `${API_BASE_URL}/auth/customer/${encodeURIComponent(userId)}/profile-image`,
+    { method: "POST", headers, body: formData }
+  );
+
+  if (!uploadRes.ok) {
+    const errorData = await uploadRes.json().catch(() => ({ error: uploadRes.statusText }));
+    throw new Error(errorData.error || `Failed to upload profile image: ${uploadRes.statusText}`);
+  }
+}
+
 export const authApi = {
   /**
    * Register a new user
@@ -705,13 +742,27 @@ export const authApi = {
     phone?: string,
     profileImage?: string
   ): Promise<AuthResponse> => {
-    return apiClient.post<AuthResponse>('/auth/register', {
+    const response = await apiClient.post<AuthResponse>('/auth/register', {
       email: email?.trim() || "",
       password,
       name,
       phone,
-      profileImage,
     });
+
+    const userId = response.user?.id;
+    if (profileImage && userId && profileImage.startsWith("data:image/")) {
+      try {
+        await uploadCustomerProfileImageDataUrl(String(userId), profileImage);
+        const refreshed = await apiClient.get<ProfileResponse>(`/auth/profile/${userId}`);
+        if (refreshed.user) {
+          response.user = { ...response.user, ...refreshed.user };
+        }
+      } catch (uploadErr) {
+        console.warn("Profile image upload failed after registration:", uploadErr);
+      }
+    }
+
+    return response;
   },
 
   /**

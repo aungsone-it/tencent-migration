@@ -144,6 +144,98 @@ function isSyntheticAuthEmail(email: string): boolean {
   return String(email || "").toLowerCase().endsWith(`@${PHONE_AUTH_EMAIL_DOMAIN}`);
 }
 
+type CustomerAuthRecord = {
+  id: string;
+  email: string;
+  password: string;
+  name: string;
+  phone: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+async function persistCustomerAuthRecord(record: CustomerAuthRecord): Promise<void> {
+  await kv.set(`customer_auth:${record.id}`, record);
+  const emailLower = record.email.trim().toLowerCase();
+  if (emailLower) {
+    await kv.set(`customer_auth_email:${emailLower}`, { userId: record.id });
+  }
+}
+
+async function findCustomerAuthByEmail(authEmail: string): Promise<CustomerAuthRecord | null> {
+  const emailLower = authEmail.trim().toLowerCase();
+  if (!emailLower) return null;
+  const idx = await kv.get(`customer_auth_email:${emailLower}`);
+  const userId =
+    idx && typeof idx === "object" && typeof (idx as { userId?: string }).userId === "string"
+      ? String((idx as { userId: string }).userId).trim()
+      : "";
+  if (!userId) return null;
+  const rec = await kv.get(`customer_auth:${userId}`);
+  return rec && typeof rec === "object" ? (rec as CustomerAuthRecord) : null;
+}
+
+async function verifyKvCustomerPassword(
+  authEmail: string,
+  password: string
+): Promise<CustomerAuthRecord | null> {
+  const rec = await findCustomerAuthByEmail(authEmail);
+  if (!rec?.password) return null;
+  const ok = await verifyPasswordPlain(password, rec.password);
+  return ok ? rec : null;
+}
+
+async function createKvCustomerAuthUser(opts: {
+  authEmail: string;
+  password: string;
+  name: string;
+  phone: string;
+}): Promise<string> {
+  const userId =
+    typeof nodeCrypto.randomUUID === "function"
+      ? nodeCrypto.randomUUID()
+      : `cust_auth_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const record: CustomerAuthRecord = {
+    id: userId,
+    email: opts.authEmail.toLowerCase(),
+    password: await hashPasswordPlain(opts.password),
+    name: opts.name,
+    phone: opts.phone,
+    createdAt: new Date().toISOString(),
+  };
+  await persistCustomerAuthRecord(record);
+  return userId;
+}
+
+async function authUserExistsByEmail(authEmail: string): Promise<boolean> {
+  const emailLower = authEmail.trim().toLowerCase();
+  if (!emailLower) return false;
+  if (await findCustomerAuthByEmail(emailLower)) return true;
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+    if (error) return false;
+    const users = (data as { users?: { email?: string }[] } | null)?.users;
+    return (
+      Array.isArray(users) &&
+      users.some((u) => String(u.email || "").trim().toLowerCase() === emailLower)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function createStorefrontAuthUser(opts: {
+  authEmail: string;
+  password: string;
+  name: string;
+  phone: string;
+}): Promise<{ userId: string; provider: "cloudbase" | "kv" }> {
+  // CloudBase Auth admin `/admin/users` is unavailable on this environment (returns not_found).
+  // Storefront customers use KV-backed auth; login verifies via signInWithPassword or KV fallback.
+  const userId = await createKvCustomerAuthUser(opts);
+  return { userId, provider: "kv" };
+}
+
 function rowToCustomer(row: any): any | null {
   if (!row) return null;
   const raw = row.raw && typeof row.raw === "object" ? row.raw : {};
@@ -746,21 +838,30 @@ authApp.get("/profile/:userId", async (c) => {
       return c.json({ user: out });
     }
 
-    // Storefront customers (Supabase) live in customer:* — same as login payload, not auth:user.
-    // If auth account no longer exists, force 404 so storefront session is invalidated client-side.
+    // Storefront customers live in customer:* — same as login payload, not auth:user.
     let authUserEmail = "";
+    let customer = await findStorefrontCustomerByUserId(userId);
+
     try {
       const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (authErr || !authData?.user) {
-        console.log(`❌ API Error (/auth/profile/${userId}): Auth account missing`);
-        return c.json({ error: "User not found" }, 404);
+      if (!authErr && authData?.user) {
+        authUserEmail = String(authData.user.email || "").trim().toLowerCase();
       }
-      authUserEmail = String(authData.user.email || "").trim().toLowerCase();
     } catch {
-      return c.json({ error: "User not found" }, 404);
+      // CloudBase Auth admin lookup unavailable — KV storefront customers may still exist.
     }
 
-    let customer = await findStorefrontCustomerByUserId(userId);
+    if (!authUserEmail) {
+      const kvAuth = await kv.get(`customer_auth:${userId}`);
+      if (kvAuth && typeof kvAuth === "object") {
+        authUserEmail = String((kvAuth as CustomerAuthRecord).email || "").trim().toLowerCase();
+      }
+    }
+
+    if (!customer && !authUserEmail) {
+      console.log(`❌ API Error (/auth/profile/${userId}): User not found`);
+      return c.json({ error: "User not found" }, 404);
+    }
 
     if (customer && typeof customer === "object") {
       const authEmail = authUserEmail || (await getSupabaseAuthEmail(userId));
@@ -1711,50 +1812,70 @@ authApp.post("/login", async (c) => {
 
     console.log(`🔐 Customer login attempt: ${email} → ${loginEmail}`);
 
-    // Sign in with Supabase Auth
+    // Sign in with CloudBase Auth (username/password)
+    let authUser: {
+      id: string;
+      email?: string | null;
+      user_metadata?: Record<string, unknown>;
+    } | null = null;
+    let authSession: { access_token?: string; refresh_token?: string } | undefined;
+
     const { data, error } = await supabaseAuth.auth.signInWithPassword({
       email: loginEmail,
       password,
     });
 
-    if (error) {
-      console.error(`❌ Login failed for ${email}:`, error.message);
-      const msg = String(error.message || "");
-      if (msg.includes("invalid_username_or_password") || msg.includes("Invalid login credentials")) {
-        return c.json({ error: "Invalid email or password" }, 401);
+    if (!error && data.user) {
+      authUser = data.user;
+      authSession = data.session;
+    } else {
+      const kvAuth = await verifyKvCustomerPassword(loginEmail, password);
+      if (kvAuth) {
+        console.log(`✅ KV customer auth successful for ${loginEmail}`);
+        authUser = {
+          id: kvAuth.id,
+          email: loginEmail,
+          user_metadata: { name: kvAuth.name, phone: kvAuth.phone, role: "customer" },
+        };
+      } else {
+        console.error(`❌ Login failed for ${email}:`, error?.message);
+        const msg = String(error?.message || "");
+        if (msg.includes("invalid_username_or_password") || msg.includes("Invalid login credentials")) {
+          return c.json({ error: "Invalid email or password" }, 401);
+        }
+        return c.json({ error: error?.message || "Invalid email or password" }, 401);
       }
-      return c.json({ error: error.message }, 401);
     }
 
-    if (!data.user) {
+    if (!authUser) {
       return c.json({ error: "Login failed" }, 401);
     }
 
-    console.log(`✅ Auth successful for ${email}, user ID: ${data.user.id}`);
+    console.log(`✅ Auth successful for ${email}, user ID: ${authUser.id}`);
 
     // Find or create customer record
     let customer = null;
     
     // Try to find existing customer by userId
-    customer = await findStorefrontCustomerByUserId(data.user.id);
+    customer = await findStorefrontCustomerByUserId(authUser.id);
     let allCustomers: any[] | null = null;
     if (!customer) {
       allCustomers = await withTimeout(kv.getByPrefix("customer:"), 30000);
       customer = Array.isArray(allCustomers)
-        ? allCustomers.find((c: any) => c != null && c.userId === data.user!.id)
+        ? allCustomers.find((c: any) => c != null && c.userId === authUser!.id)
         : null;
     }
 
     // If no customer found, create one
     if (!customer) {
-      console.log(`📝 Creating new customer record for user: ${data.user.id}`);
+      console.log(`📝 Creating new customer record for user: ${authUser.id}`);
       
       const customerId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const userName = data.user.user_metadata?.name || loginEmail.split('@')[0];
+      const userName = authUser.user_metadata?.name || loginEmail.split('@')[0];
       const loginPhone = normalizeMyanmarPhone(String(email || ""));
-      const userPhoneRaw = data.user.user_metadata?.phone || loginPhone || "";
+      const userPhoneRaw = authUser.user_metadata?.phone || loginPhone || "";
       const userPhone = normalizeMyanmarPhone(String(userPhoneRaw)) || String(userPhoneRaw).trim();
-      const profileImage = data.user.user_metadata?.profileImage || null;
+      const profileImage = authUser.user_metadata?.profileImage || null;
       const displayEmail = isSyntheticAuthEmail(loginEmail) ? "" : loginEmail;
       
       // 🔥 CHECK FOR DUPLICATE EMAIL (should never happen since auth succeeded, but double-check)
@@ -1762,14 +1883,14 @@ authApp.post("/login", async (c) => {
         ? await findCustomerByEmailFromReadModel(displayEmail)
         : null;
       const duplicateEmailConflict =
-        duplicateEmail && duplicateEmail.userId !== data.user!.id
+        duplicateEmail && duplicateEmail.userId !== authUser.id
           ? duplicateEmail
           : null;
       
       if (duplicateEmailConflict) {
         console.error(`❌ CRITICAL: Customer with email ${displayEmail} already exists but has different userId!`);
         console.error(`   Existing customer: ${duplicateEmailConflict.id} (userId: ${duplicateEmailConflict.userId})`);
-        console.error(`   Current auth user: ${data.user.id}`);
+        console.error(`   Current auth user: ${authUser.id}`);
         return c.json({ 
           error: "Account conflict detected. Please contact support.",
           details: "Another customer account is using this email address."
@@ -1781,7 +1902,7 @@ authApp.post("/login", async (c) => {
         const normalizedPhone = normalizeMyanmarPhone(userPhone) || userPhone.replace(/\s+/g, '');
         const duplicatePhone = await findCustomerByPhone(normalizedPhone);
         const duplicatePhoneConflict =
-          duplicatePhone && duplicatePhone.userId !== data.user!.id ? duplicatePhone : null;
+          duplicatePhone && duplicatePhone.userId !== authUser.id ? duplicatePhone : null;
         
         if (duplicatePhoneConflict) {
           console.error(`❌ Phone number ${userPhone} is already registered to another customer: ${duplicatePhoneConflict.id}`);
@@ -1794,11 +1915,11 @@ authApp.post("/login", async (c) => {
       
       customer = {
         id: customerId,
-        userId: data.user.id, // Link to Supabase Auth user
+        userId: authUser.id,
         name: userName,
         email: displayEmail,
         phone: userPhone,
-        location: "", // Can be updated later
+        location: "",
         address: "",
         city: "",
         region: "",
@@ -1828,7 +1949,7 @@ authApp.post("/login", async (c) => {
       queueCustomerReadModelSync(customerId, customer);
       console.log(`✅ Customer record created: ${customerId}`);
     } else {
-      customer = await enrichCustomerFromAuthUser(customer, data.user);
+      customer = await enrichCustomerFromAuthUser(customer, authUser);
       // Update last visit
       customer.lastVisit = new Date().toISOString().split('T')[0];
       customer.updatedAt = new Date().toISOString();
@@ -1841,21 +1962,95 @@ authApp.post("/login", async (c) => {
     // so profile fetching works correctly. Store the customerId separately.
     const userResponse = buildStorefrontUserResponse(
       customer,
-      data.user.id,
-      String(data.user.email || "").trim().toLowerCase()
+      authUser.id,
+      String(authUser.email || "").trim().toLowerCase()
     );
 
     return c.json({
       success: true,
       user: userResponse,
       session: {
-        access_token: data.session?.access_token,
-        refresh_token: data.session?.refresh_token,
+        access_token: authSession?.access_token,
+        refresh_token: authSession?.refresh_token,
       },
     });
   } catch (error: any) {
     console.error("Login error:", error);
     return c.json({ error: error.message || "Login failed" }, 500);
+  }
+});
+
+// ============================================
+// UPLOAD CUSTOMER PROFILE IMAGE (multipart — avoids JSON body size limits)
+// ============================================
+authApp.post("/customer/:userId/profile-image", async (c) => {
+  try {
+    const userId = c.req.param("userId").trim();
+    if (!userId) {
+      return c.json({ error: "userId required" }, 400);
+    }
+
+    const customer = await findStorefrontCustomerByUserId(userId);
+    if (!customer?.id) {
+      return c.json({ error: "Customer not found" }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const imageFile = formData.get("image") as File | null;
+    if (!imageFile || typeof imageFile.arrayBuffer !== "function") {
+      return c.json({ error: "No image file provided" }, 400);
+    }
+
+    if (imageFile.size / 1024 > 600) {
+      return c.json({ error: "Image file too large. Maximum size is 500KB" }, 400);
+    }
+
+    const uploadedPath = await uploadProfileImageFile(userId, imageFile);
+    if (!uploadedPath) {
+      return c.json({ error: "Failed to upload profile image" }, 500);
+    }
+
+    const prevImg =
+      typeof customer.profileImage === "string"
+        ? customer.profileImage.trim()
+        : "";
+
+    const signedUrl =
+      (await getSignedImageUrl(uploadedPath)) ||
+      `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(String(customer.name || userId))}`;
+
+    const updatedCustomer = {
+      ...customer,
+      profileImage: uploadedPath,
+      avatar: signedUrl,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await kv.set(`customer:${customer.id}`, updatedCustomer);
+    queueCustomerReadModelSync(String(customer.id), updatedCustomer);
+
+    if (prevImg && prevImg !== uploadedPath) {
+      await deleteOwnedStorageRefs(supabaseAdmin, [prevImg]);
+    }
+
+    const userResponse = buildStorefrontUserResponse(
+      updatedCustomer,
+      userId,
+      String(customer.email || "").trim().toLowerCase()
+    );
+    if (signedUrl) {
+      (userResponse as Record<string, unknown>).profileImageUrl = signedUrl;
+    }
+
+    return c.json({
+      success: true,
+      profileImage: uploadedPath,
+      profileImageUrl: signedUrl,
+      user: userResponse,
+    });
+  } catch (error: any) {
+    console.error("❌ Customer profile image upload error:", error);
+    return c.json({ error: error.message || "Failed to upload profile image" }, 500);
   }
 });
 
@@ -1904,12 +2099,7 @@ authApp.post("/register", async (c) => {
     }
 
     if (displayEmail) {
-      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
-      const existingUser = authUsers?.users.find(
-        (u) => u.email?.toLowerCase() === displayEmail.toLowerCase()
-      );
-
-      if (existingUser) {
+      if (await authUserExistsByEmail(displayEmail)) {
         console.log(`❌ Email already registered: ${displayEmail}`);
         return c.json({
           error: "This email is already registered. Please use a different email or sign in instead.",
@@ -1932,41 +2122,38 @@ authApp.post("/register", async (c) => {
           error: "This email is already registered. Please use a different email or sign in instead.",
         }, 409);
       }
-    } else {
-      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
-      const existingSynthetic = authUsers?.users.find(
-        (u) => u.email?.toLowerCase() === authEmail.toLowerCase()
-      );
-      if (existingSynthetic) {
-        return c.json({
-          error: "This phone number is already registered. Please sign in instead.",
-        }, 409);
-      }
+    } else if (await authUserExistsByEmail(authEmail)) {
+      return c.json({
+        error: "This phone number is already registered. Please sign in instead.",
+      }, 409);
     }
 
-    // Create user in Supabase Auth
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email: authEmail,
-      password,
-      email_confirm: true, // Auto-confirm since email server not configured
-      user_metadata: {
+    let authAccount: { userId: string; provider: "cloudbase" | "kv" };
+    try {
+      authAccount = await createStorefrontAuthUser({
+        authEmail: authEmail.toLowerCase(),
+        password,
         name,
         phone: normalizedPhone,
-        role: "customer",
-      },
-    });
-
-    if (error || !data.user) {
-      console.error(`❌ Registration failed for ${email}:`, error);
-      return c.json({ error: error?.message || "Registration failed" }, 500);
+      });
+    } catch (regErr: unknown) {
+      const msg = regErr instanceof Error ? regErr.message : "Registration failed";
+      console.error(`❌ Registration failed for ${authEmail}:`, regErr);
+      return c.json({ error: msg }, 500);
     }
 
-    console.log(`✅ Auth user created: ${data.user.id}`);
+    console.log(`✅ Auth user created (${authAccount.provider}): ${authAccount.userId}`);
 
-    // Upload profile image if provided
+    // Upload profile image if provided (small data URLs only — large images use multipart endpoint)
     let uploadedImagePath = null;
-    if (profileImage) {
-      uploadedImagePath = await uploadProfileImage(data.user.id, profileImage);
+    if (profileImage && typeof profileImage === "string" && profileImage.startsWith("data:image/")) {
+      if (profileImage.length <= 450_000) {
+        uploadedImagePath = await uploadProfileImage(authAccount.userId, profileImage);
+      } else {
+        console.warn(
+          "[auth] profileImage skipped in register JSON — use POST /auth/customer/:userId/profile-image"
+        );
+      }
     }
 
     // Create customer record
@@ -1974,7 +2161,7 @@ authApp.post("/register", async (c) => {
     
     const customer = {
       id: customerId,
-      userId: data.user.id, // Link to Supabase Auth user
+      userId: authAccount.userId,
       name: name,
       email: displayEmail,
       phone: normalizedPhone,
@@ -2012,7 +2199,7 @@ authApp.post("/register", async (c) => {
     // so profile fetching works correctly. Store the customerId separately.
     const userResponse = buildStorefrontUserResponse(
       customer,
-      data.user.id,
+      authAccount.userId,
       authEmail.toLowerCase()
     );
 

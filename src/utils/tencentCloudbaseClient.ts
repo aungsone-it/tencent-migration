@@ -171,10 +171,33 @@ class TencentRealtimeChannel {
   }
 }
 
+async function persistAuthSessionFromLoginResponse(data: Record<string, unknown>): Promise<AuthResult> {
+  const user = data.user as AuthUser | undefined;
+  if (!user?.id) {
+    return {
+      data: { user: null, session: null },
+      error: { message: String(data?.error || data?.message || "Invalid email or password") },
+    };
+  }
+
+  const session: AuthSession = {
+    access_token: String(data.accessToken || data.token || cloudbasePublishableKey || ""),
+    user,
+    expires_at: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+  };
+  writeSession(session);
+  return { data: { user, session }, error: null };
+}
+
 export type TencentCloudBaseCompatClient = {
   auth: {
     getSession: () => Promise<{ data: { session: AuthSession | null }; error: null }>;
     signInWithPassword: (credentials: {
+      email: string;
+      password: string;
+    }) => Promise<AuthResult>;
+    /** Admin portal — staff/owner accounts only (separate from storefront customer login). */
+    signInStaffWithPassword: (credentials: {
       email: string;
       password: string;
     }) => Promise<AuthResult>;
@@ -199,22 +222,42 @@ export function createTencentCloudBaseCompatClient(): TencentCloudBaseCompatClie
             headers: authHeaders(),
             body: JSON.stringify({ email, password }),
           });
-          const data = await response.json().catch(() => ({}));
+          const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
           if (!response.ok || !data?.user) {
             return {
               data: { user: null, session: null },
-              error: { message: data?.error || data?.message || "Invalid email or password" },
+              error: { message: String(data?.error || data?.message || "Invalid email or password") },
             };
           }
-
-          const user = data.user as AuthUser;
-          const session: AuthSession = {
-            access_token: String(data.accessToken || data.token || cloudbasePublishableKey || ""),
-            user,
-            expires_at: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+          return persistAuthSessionFromLoginResponse(data);
+        } catch (error) {
+          return {
+            data: { user: null, session: null },
+            error: { message: error instanceof Error ? error.message : "Login failed" },
           };
-          writeSession(session);
-          return { data: { user, session }, error: null };
+        }
+      },
+
+      async signInStaffWithPassword({ email, password }) {
+        try {
+          const response = await fetch(apiUrl("/auth/staff/login"), {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ email, password }),
+          });
+          const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+          if (!response.ok || !data?.user) {
+            const raw = String(data?.error || data?.message || "Invalid email or password");
+            const message =
+              response.status === 404 || raw.toLowerCase() === "not found"
+                ? "Admin login is not available on the server yet. Deploy the latest make-server-16010b6f function (TCB console upload), then sign in again."
+                : raw;
+            return {
+              data: { user: null, session: null },
+              error: { message },
+            };
+          }
+          return persistAuthSessionFromLoginResponse(data);
         } catch (error) {
           return {
             data: { user: null, session: null },

@@ -1779,6 +1779,59 @@ authApp.get("/list-emails", async (c) => {
   }
 });
 
+function buildStaffLoginPayload(staffUser: Record<string, unknown>) {
+  const { password: _password, ...safeUser } = staffUser;
+  return {
+    id: String(safeUser.id || ""),
+    email: String(safeUser.email || "").trim().toLowerCase(),
+    name: String(safeUser.name || ""),
+    role: String(safeUser.role || ""),
+    phone: safeUser.phone,
+    tempPassword: Boolean(safeUser.tempPassword),
+    storeId: safeUser.storeId,
+    profileImage: safeUser.profileImage,
+    profileImageUrl: safeUser.profileImageUrl,
+    createdAt: safeUser.createdAt,
+    updatedAt: safeUser.updatedAt,
+  };
+}
+
+// ============================================
+// ADMIN PORTAL: STAFF LOGIN (owner / administrators)
+// ============================================
+authApp.post("/staff/login", async (c) => {
+  try {
+    const { email, password } = await c.req.json();
+
+    if (!email || !password) {
+      return c.json({ error: "Email and password are required" }, 400);
+    }
+
+    const staffResult = await tryStaffLogin(email, password);
+    if (!staffResult) {
+      return c.json({ error: "Invalid email or password" }, 401);
+    }
+    if ("error" in staffResult) {
+      return c.json({ error: staffResult.error }, 401);
+    }
+
+    const user = buildStaffLoginPayload(staffResult.user);
+    if (!user.id) {
+      return c.json({ error: "Invalid staff account" }, 401);
+    }
+
+    console.log(`✅ Staff login successful: ${user.email} (${user.role})`);
+
+    return c.json({
+      success: true,
+      user,
+    });
+  } catch (error: any) {
+    console.error("Staff login error:", error);
+    return c.json({ error: error.message || "Login failed" }, 500);
+  }
+});
+
 // ============================================
 // STOREFRONT: LOGIN (for customers)
 // ============================================
@@ -1791,20 +1844,6 @@ authApp.post("/login", async (c) => {
     }
 
     const emailLower = String(email || "").trim().toLowerCase();
-    const staffResult = await tryStaffLogin(email, password);
-    if (staffResult && "error" in staffResult) {
-      return c.json({ error: staffResult.error }, 401);
-    }
-    if (staffResult && "user" in staffResult) {
-      return c.json(
-        {
-          error:
-            "This account is for staff. Sign in through the admin portal. To shop here, register a separate customer account.",
-          code: "STAFF_NOT_STOREFRONT",
-        },
-        403
-      );
-    }
 
     const resolved = await resolveCustomerLoginEmail(email);
     if (resolved.error || !resolved.email) {
@@ -1840,6 +1879,21 @@ authApp.post("/login", async (c) => {
           user_metadata: { name: kvAuth.name, phone: kvAuth.phone, role: "customer" },
         };
       } else {
+        const staffUser = await findStaffUserByEmail(emailLower);
+        if (staffUser?.id && staffUser.password) {
+          const staffOk = await verifyPasswordPlain(password, staffUser.password);
+          if (staffOk) {
+            return c.json(
+              {
+                error:
+                  "This account is for staff. Sign in through the admin portal. To shop here, register a separate customer account.",
+                code: "STAFF_NOT_STOREFRONT",
+              },
+              403
+            );
+          }
+        }
+
         console.error(`❌ Login failed for ${email}:`, error?.message);
         const msg = String(error?.message || "");
         if (msg.includes("invalid_username_or_password") || msg.includes("Invalid login credentials")) {
@@ -2101,17 +2155,6 @@ authApp.post("/register", async (c) => {
     }
 
     if (displayEmail) {
-      const staffEmail = await findStaffUserByEmail(displayEmail.toLowerCase());
-      if (staffEmail) {
-        return c.json(
-          {
-            error:
-              "This email belongs to a staff account. Use a different email to register as a customer, or sign in through the admin portal.",
-          },
-          409
-        );
-      }
-
       if (await authUserExistsByEmail(displayEmail)) {
         console.log(`❌ Email already registered: ${displayEmail}`);
         return c.json({

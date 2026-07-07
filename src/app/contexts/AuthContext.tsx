@@ -340,7 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('🔐 Attempting login for:', email, '| Remember me:', rememberMe);
 
       const attemptSignIn = () =>
-        supabase.auth.signInWithPassword({
+        supabase.auth.signInStaffWithPassword({
           email,
           password,
         });

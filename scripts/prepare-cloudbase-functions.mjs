@@ -54,7 +54,22 @@ function bundleFunction(entry, outfile) {
 }
 
 function wrapperSource(entry, routePrefix) {
-  return `globalThis.Deno = globalThis.Deno || {
+  return `const nodeCrypto = require("crypto");
+// Deno Edge code uses global crypto (subtle.digest, randomUUID). Polyfill for Node 18 on CloudBase.
+if (!globalThis.crypto?.subtle?.digest) {
+  globalThis.crypto = {
+    subtle: nodeCrypto.webcrypto.subtle,
+    randomUUID: () => nodeCrypto.randomUUID(),
+    getRandomValues: (typedArray) => {
+      nodeCrypto.randomFillSync(typedArray);
+      return typedArray;
+    },
+  };
+} else if (!globalThis.crypto.randomUUID) {
+  globalThis.crypto.randomUUID = () => nodeCrypto.randomUUID();
+}
+
+globalThis.Deno = globalThis.Deno || {
   env: {
     get(name) {
       return process.env[name];

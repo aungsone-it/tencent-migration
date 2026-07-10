@@ -17,6 +17,7 @@ import {
   handleKPayPwaReturn,
   getPwaCheckoutDraftRoute,
   postPwaFinalizeRoute,
+  postPwaAdminRecoverRoute,
   getOrphanedPwaDraftsRoute,
   getPwaDraftStatusRoute,
   postPwaReconcileRoute,
@@ -1292,6 +1293,7 @@ app.post("/make-server-16010b6f/kpay/pwa/start", startKPayPwa);
 app.get("/make-server-16010b6f/kpay/pwa/return", handleKPayPwaReturn);
 app.get("/make-server-16010b6f/kpay/pwa/draft/:merchantOrderId", getPwaCheckoutDraftRoute);
 app.post("/make-server-16010b6f/kpay/pwa/finalize/:merchantOrderId", postPwaFinalizeRoute);
+app.post("/make-server-16010b6f/kpay/pwa/admin-recover/:merchantOrderId", postPwaAdminRecoverRoute);
 app.get("/make-server-16010b6f/kpay/pwa/orphaned-drafts", getOrphanedPwaDraftsRoute);
 app.get("/make-server-16010b6f/kpay/pwa/draft-status/:merchantOrderId", getPwaDraftStatusRoute);
 app.post("/make-server-16010b6f/kpay/pwa/reconcile", postPwaReconcileRoute);
@@ -5035,7 +5037,7 @@ function parseAdminOrdersPageQuery(c: any) {
 
 function filterSortOrdersAdmin(minimalOrders: any[], opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>) {
   let rows = minimalOrders.filter((order: any) => {
-    if (opts.status !== "all" && String(order.status || "") !== opts.status) return false;
+    if (opts.status !== "all" && normalizeOrderStatus(order.status) !== opts.status) return false;
     if (opts.payment !== "all" && String(order.paymentStatus || "") !== opts.payment) return false;
     const vendorLabel = order.vendor || "SECURE Store";
     if (opts.vendor !== "all" && vendorLabel !== opts.vendor) return false;
@@ -5074,12 +5076,12 @@ function filterSortOrdersAdmin(minimalOrders: any[], opts: NonNullable<ReturnTyp
 
 function buildAdminOrdersAggregates(filtered: any[]) {
   const filteredTotalRevenue = filtered
-    .filter((o: any) => o.status !== "cancelled")
+    .filter((o: any) => normalizeOrderStatus(o.status) !== "cancelled")
     .reduce((s: number, o: any) => s + (Number(o.total) || 0), 0);
   const uniqueVendors = [...new Set(filtered.map((o: any) => o.vendor || "SECURE Store"))].sort();
   const vendorRev = new Map<string, number>();
   for (const o of filtered) {
-    if (o.status === "cancelled") continue;
+    if (normalizeOrderStatus(o.status) === "cancelled") continue;
     const v = o.vendor || "SECURE Store";
     vendorRev.set(v, (vendorRev.get(v) || 0) + (Number(o.total) || 0));
   }
@@ -5092,10 +5094,13 @@ function buildAdminOrdersAggregates(filtered: any[]) {
     filteredAvgOrderValue:
       filtered.length > 0 ? filteredTotalRevenue / filtered.length : 0,
     statusBreakdown: {
-      pending: filtered.filter((o: any) => o.status === "pending").length,
-      processing: filtered.filter((o: any) => o.status === "processing").length,
-      fulfilled: filtered.filter((o: any) => o.status === "fulfilled").length,
-      cancelled: filtered.filter((o: any) => o.status === "cancelled").length,
+      pending: filtered.filter((o: any) => normalizeOrderStatus(o.status) === "pending").length,
+      processing: filtered.filter((o: any) => {
+        const st = normalizeOrderStatus(o.status);
+        return st === "processing" || st === "ready-to-ship";
+      }).length,
+      fulfilled: filtered.filter((o: any) => normalizeOrderStatus(o.status) === "fulfilled").length,
+      cancelled: filtered.filter((o: any) => normalizeOrderStatus(o.status) === "cancelled").length,
     },
     uniqueVendors,
     vendorRevenue,

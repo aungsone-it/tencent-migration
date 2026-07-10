@@ -709,24 +709,162 @@ export async function fetchPwaCheckoutDraft(
   return data.draft ?? null;
 }
 
-export async function finalizePwaCheckoutOrderApi(
-  params: KPayBaseParams & { merchantOrderId: string }
-): Promise<{ ok: boolean; created?: boolean; error?: string; message?: string }> {
-  const { projectId: _projectId, publicAnonKey: _publicAnonKey, merchantOrderId } = params;
-  const response = await fetch(
-    `${API_ROOT}/kpay/pwa/finalize/${encodeURIComponent(merchantOrderId)}`,
-    {
-      method: "POST",
-      headers: cloudbaseHeaders(),
-    }
-  );
-  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+function parseFinalizeApiPayload(data: Record<string, unknown>): {
+  ok: boolean;
+  created?: boolean;
+  order?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+} {
   return {
     ok: Boolean(data.success),
     created: Boolean(data.created),
+    order:
+      data.order && typeof data.order === "object"
+        ? (data.order as Record<string, unknown>)
+        : undefined,
     error: typeof data.error === "string" ? data.error : undefined,
     message: typeof data.message === "string" ? data.message : undefined,
   };
+}
+
+async function requestPwaFinalize(
+  merchantOrderId: string,
+  adminRecover: boolean,
+): Promise<{ response: Response; data: Record<string, unknown> }> {
+  const finalizeUrl = `${API_ROOT}/kpay/pwa/finalize/${encodeURIComponent(merchantOrderId)}`;
+  const url = adminRecover ? `${finalizeUrl}?adminRecover=1` : finalizeUrl;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: cloudbaseHeaders(
+      adminRecover
+        ? { "x-admin-recover": "1", "Content-Type": "application/json" }
+        : undefined,
+    ),
+    body: adminRecover
+      ? JSON.stringify({ adminRecover: true, mode: "admin_recover" })
+      : undefined,
+  });
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  return { response, data };
+}
+
+async function recoverPwaDraftViaDirectOrderCreate(
+  params: KPayBaseParams & { merchantOrderId: string },
+): Promise<{
+  ok: boolean;
+  created?: boolean;
+  order?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}> {
+  const draft = await fetchPwaCheckoutDraft(params);
+  const draftOrder = draft?.draftOrder;
+  if (!draftOrder || typeof draftOrder !== "object") {
+    return { ok: false, error: "no_checkout_draft" };
+  }
+
+  const d = draftOrder as Record<string, unknown>;
+  const ship =
+    d.shippingInfo && typeof d.shippingInfo === "object"
+      ? (d.shippingInfo as Record<string, unknown>)
+      : {};
+
+  const orderPayload: Record<string, unknown> = {
+    orderNumber: params.merchantOrderId,
+    userId: d.userId ?? null,
+    customer: d.customerName || ship.fullName || "",
+    customerName: d.customerName || ship.fullName || "",
+    email: d.email || "",
+    phone: d.phone || ship.phone || "",
+    status: "pending",
+    paymentStatus: "paid",
+    paymentMethod: "KBZPay (PWA)",
+    total: Number(d.total || 0),
+    subtotal: Number(d.subtotal || 0),
+    discount: Number(d.discount || 0),
+    vendor: d.vendor || "",
+    vendorId: d.vendorId || undefined,
+    couponCode: d.couponCode || null,
+    couponId: d.couponId || null,
+    items: Array.isArray(d.items) ? d.items : [],
+    address: ship.address || "",
+    city: ship.city || "",
+    state: ship.state || "",
+    zipCode: ship.zipCode || "",
+    country: ship.country || "",
+    notes: d.notes || "",
+    kpay: {
+      method: "pwa",
+      merchantOrderId: params.merchantOrderId,
+      prepayId: draft.prepayId || "",
+      status: "paid",
+      adminRecovered: true,
+    },
+  };
+
+  const { ordersApi } = await import("../../utils/api");
+  try {
+    const res = (await ordersApi.create(orderPayload as never)) as Record<string, unknown>;
+    const order =
+      res.order && typeof res.order === "object"
+        ? (res.order as Record<string, unknown>)
+        : res.data && typeof res.data === "object"
+          ? (res.data as Record<string, unknown>)
+          : undefined;
+    if (order) {
+      return { ok: true, created: true, order };
+    }
+    return {
+      ok: false,
+      error: typeof res.error === "string" ? res.error : "create_failed",
+      message: typeof res.message === "string" ? res.message : undefined,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: "create_failed",
+      message: error instanceof Error ? error.message : "Failed to create order",
+    };
+  }
+}
+
+export async function finalizePwaCheckoutOrderApi(
+  params: KPayBaseParams & { merchantOrderId: string; adminRecover?: boolean }
+): Promise<{
+  ok: boolean;
+  created?: boolean;
+  order?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}> {
+  const { merchantOrderId, adminRecover } = params;
+
+  if (!adminRecover) {
+    const { data } = await requestPwaFinalize(merchantOrderId, false);
+    return parseFinalizeApiPayload(data);
+  }
+
+  const { response, data } = await requestPwaFinalize(merchantOrderId, true);
+  const parsed = parseFinalizeApiPayload(data);
+  if (parsed.ok && parsed.order) return parsed;
+
+  const shouldFallback =
+    response.status === 404 ||
+    parsed.error === "payment_not_confirmed" ||
+    parsed.error === "cloudbase_env_missing";
+
+  if (shouldFallback) {
+    const direct = await recoverPwaDraftViaDirectOrderCreate(params);
+    if (direct.ok) return direct;
+    return {
+      ok: false,
+      error: direct.error || parsed.error || "recovery_failed",
+      message: direct.message || parsed.message,
+    };
+  }
+
+  return parsed;
 }
 
 export type OrphanedPwaDraftRow = {

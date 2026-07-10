@@ -174,7 +174,7 @@ export const ProductCard = ({
                       className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all active:scale-95 ${
                         outOfStock
                           ? "bg-slate-300 cursor-not-allowed"
-                          : "bg-amber-600 hover:bg-amber-700"
+                          : "bg-[#1a1d29] hover:bg-slate-900"
                       }`}
                       onClick={handleAdd}
                       disabled={outOfStock}
@@ -230,7 +230,7 @@ export const ProductCard = ({
                 className={`w-7 h-7 md:w-9 md:h-9 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md transition-all group/btn active:scale-95 ${
                   outOfStock
                     ? "bg-slate-200/90 cursor-not-allowed"
-                    : "bg-white/90 hover:bg-amber-600"
+                    : "bg-white/90 hover:bg-[#1a1d29]"
                 }`}
                 onClick={handleAdd}
                 disabled={outOfStock}

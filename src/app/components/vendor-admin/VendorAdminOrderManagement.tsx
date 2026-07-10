@@ -540,6 +540,10 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     }
   };
 
+  const handlePwaOrderRecovered = () => {
+    void loadOrders(true);
+  };
+
   const orderPageKpis = useMemo(() => {
     const endMs = Date.now();
     const activePool = rawVendorOrders.filter(isVendorOrderActive);
@@ -1401,7 +1405,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
           <PwaOrphanedOrdersRecovery
             vendorId={vendorStoreSlug || vendorId}
             searchQuery={searchQuery}
-            onRecovered={() => void loadOrders(true)}
+            onRecovered={handlePwaOrderRecovered}
             compact
           />
           {/* Toolbar */}

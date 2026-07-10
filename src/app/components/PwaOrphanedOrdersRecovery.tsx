@@ -8,7 +8,7 @@ import {
   finalizePwaCheckoutOrderApi,
   type OrphanedPwaDraftRow,
 } from "../utils/kpayClient";
-import { notifyAdminOrdersUpdated } from "../utils/adminOrdersRealtime";
+import { invalidateAdminOrdersCache, invalidateVendorOrdersCache } from "../utils/module-cache";
 import { projectId, publicAnonKey } from "../../../utils/supabase/info";
 
 type PwaOrphanedOrdersRecoveryProps = {
@@ -17,7 +17,7 @@ type PwaOrphanedOrdersRecoveryProps = {
   /** When user searches an order id, surface a matching draft if the list is empty. */
   searchQuery?: string;
   /** Called after an order was recovered so parent lists can refresh. */
-  onRecovered?: () => void;
+  onRecovered?: (order?: Record<string, unknown>) => void;
   compact?: boolean;
 };
 
@@ -66,18 +66,19 @@ export function PwaOrphanedOrdersRecovery({
         projectId,
         publicAnonKey,
         merchantOrderId,
+        adminRecover: true,
       });
       if (!result.ok) {
-        toast.error(
-          result.message ||
-            result.error ||
-            "Could not create order from KBZPay draft",
-        );
+        const detail = [result.error, result.message].filter(Boolean).join(": ");
+        toast.error(detail || "Could not create order from KBZPay draft");
         return;
       }
       toast.success(`Order ${merchantOrderId} registered successfully`);
-      notifyAdminOrdersUpdated("pwa-draft-recovered");
-      onRecovered?.();
+      invalidateAdminOrdersCache();
+      if (vendorId?.trim()) {
+        invalidateVendorOrdersCache(vendorId.trim());
+      }
+      onRecovered?.(result.order);
       await loadDrafts();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Recovery failed");

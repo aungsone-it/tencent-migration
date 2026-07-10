@@ -125,7 +125,7 @@ export const zhTranslations: Record<string, string> = {
     'checkout.placeOrderConfirmed': '下单（已确认付款）',
     'checkout.completedPayment': '我已完成付款',
     'checkout.payWithKpay': '使用 KBZPay 支付',
-    'checkout.placeCodOrder': '提交货到付款订单',
+    'checkout.placeCodOrder': '继续结账',
     'checkout.selectPaymentMethod': '选择支付方式',
     'checkout.payAmount': '支付 {amount} MMK',
     'checkout.paymentReceived': '已收到付款。您现在可以通过订单摘要中的按钮下单。',

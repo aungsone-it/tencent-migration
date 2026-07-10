@@ -48,6 +48,7 @@ import {
   ADMIN_ORDERS_PAGE_DEFAULT,
   moduleCache,
   adminOrdersPageCacheKey,
+  dispatchAdminProductsCachePatched,
   type AdminOrdersPagePayload,
 } from "../utils/module-cache";
 import {
@@ -93,6 +94,63 @@ function isFinanciallyAccruedOrderStatus(status: string | undefined): boolean {
     .toLowerCase()
     .replace(/\s+/g, "-");
   return normalized === "ready-to-ship" || normalized === "fulfilled";
+}
+
+function normalizeOrderListStatus(status: string | undefined): string {
+  return String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+}
+
+function dedupeOrderItemsByOrderNumber(rows: OrderItem[]): OrderItem[] {
+  const byKey = new Map<string, OrderItem>();
+  for (const row of rows) {
+    const key = (row.orderNumber || row.id || "").trim().toLowerCase();
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, row);
+      continue;
+    }
+    const prevAt = new Date(prev.createdAt || prev.date || 0).getTime();
+    const nextAt = new Date(row.createdAt || row.date || 0).getTime();
+    if (nextAt >= prevAt) byKey.set(key, row);
+  }
+  return [...byKey.values()];
+}
+
+function countOrderStatusBreakdown(rows: OrderItem[]) {
+  return {
+    pending: rows.filter((o) => normalizeOrderListStatus(o.status) === "pending").length,
+    processing: rows.filter((o) => {
+      const st = normalizeOrderListStatus(o.status);
+      return st === "processing" || st === "ready-to-ship";
+    }).length,
+    fulfilled: rows.filter((o) => normalizeOrderListStatus(o.status) === "fulfilled").length,
+    cancelled: rows.filter((o) => normalizeOrderListStatus(o.status) === "cancelled").length,
+  };
+}
+
+function aggregatesBreakdownLooksStale(
+  rows: OrderItem[],
+  breakdown:
+    | {
+        pending?: number;
+        processing?: number;
+        fulfilled?: number;
+        cancelled?: number;
+      }
+    | undefined,
+  total: number,
+): boolean {
+  if (!breakdown || rows.length === 0 || total <= 0) return false;
+  const sum =
+    Number(breakdown.pending ?? 0) +
+    Number(breakdown.processing ?? 0) +
+    Number(breakdown.fulfilled ?? 0) +
+    Number(breakdown.cancelled ?? 0);
+  return sum === 0;
 }
 
 
@@ -779,7 +837,11 @@ export function Orders({
           toast.warning(payload.warning, { duration: 4000 });
         }
 
-        setOrders(applyPendingStatusDrafts(mapApiOrdersToOrderItems(payload.orders || [])));
+        setOrders(
+          applyPendingStatusDrafts(
+            dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems(payload.orders || []))
+          )
+        );
         setOrdersTotal(payload.total);
         setOrdersHasMore(!!payload.hasMore);
         setOrdersAggregates(payload.aggregates);
@@ -817,6 +879,10 @@ export function Orders({
       sortOrder,
     ]
   );
+
+  const handlePwaOrderRecovered = useCallback(() => {
+    void loadOrders(true);
+  }, [loadOrders]);
 
   useEffect(() => {
     void loadOrders(false);
@@ -859,28 +925,8 @@ export function Orders({
       ordersAggregates.uniqueVendors
     : Array.from(new Set(orders.map((order) => order.vendor || "SECURE Store"))).sort();
 
-  /** Live text filter on the current page while server `q` debounces — same fields as edge filter. */
-  const displayOrders = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter((order) => {
-      const customerHay =
-        typeof order.customer === "string"
-          ? order.customer
-          : JSON.stringify(order.customer ?? "");
-      return (
-        order.orderNumber.toLowerCase().includes(q) ||
-        customerHay.toLowerCase().includes(q) ||
-        order.email.toLowerCase().includes(q) ||
-        String(order.phone ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(order.id ?? "")
-          .toLowerCase()
-          .includes(q)
-      );
-    });
-  }, [orders, searchQuery]);
+  /** Server already filters by debounced search — avoid double-filtering paginated rows. */
+  const displayOrders = orders;
 
   const filteredTotalRevenue =
     displayOrders
@@ -1205,8 +1251,7 @@ export function Orders({
     setStatusFilter("all");
     setPaymentFilter("all");
     setVendorFilter("all");
-    setDateFrom(undefined);
-    setDateTo(undefined);
+    setOrderDateRange(undefined);
   };
 
   const hasActiveFilters = searchQuery || statusFilter !== "all" || paymentFilter !== "all" || vendorFilter !== "all" || dateFrom || dateTo;
@@ -1228,22 +1273,33 @@ export function Orders({
     a.click();
   };
 
+  const pageStatusBreakdown = countOrderStatusBreakdown(orders);
+  const usePageStatusBreakdown = aggregatesBreakdownLooksStale(
+    orders,
+    ordersAggregates?.statusBreakdown,
+    ordersTotal,
+  );
   const totalRevenue =
-    orders
-      .filter((order) => isFinanciallyAccruedOrderStatus(order.status))
-      .reduce((sum, order) => sum + order.total, 0);
-  const pendingOrders =
-    ordersAggregates?.statusBreakdown ?
-      ordersAggregates.statusBreakdown.pending
-    : orders.filter((order) => order.status === "pending").length;
-  const processingOrders =
-    ordersAggregates?.statusBreakdown ?
-      ordersAggregates.statusBreakdown.processing
-    : orders.filter((order) => order.status === "processing").length;
-  const fulfilledOrders =
-    ordersAggregates?.statusBreakdown ?
-      ordersAggregates.statusBreakdown.fulfilled
-    : orders.filter((order) => order.status === "fulfilled").length;
+    ordersAggregates?.filteredTotalRevenue != null && !usePageStatusBreakdown
+      ? ordersAggregates.filteredTotalRevenue
+      : orders
+          .filter((order) => isFinanciallyAccruedOrderStatus(order.status))
+          .reduce((sum, order) => sum + order.total, 0);
+  const pendingOrders = usePageStatusBreakdown
+    ? pageStatusBreakdown.pending
+    : ordersAggregates?.statusBreakdown
+      ? ordersAggregates.statusBreakdown.pending
+      : pageStatusBreakdown.pending;
+  const processingOrders = usePageStatusBreakdown
+    ? pageStatusBreakdown.processing
+    : ordersAggregates?.statusBreakdown
+      ? ordersAggregates.statusBreakdown.processing
+      : pageStatusBreakdown.processing;
+  const fulfilledOrders = usePageStatusBreakdown
+    ? pageStatusBreakdown.fulfilled
+    : ordersAggregates?.statusBreakdown
+      ? ordersAggregates.statusBreakdown.fulfilled
+      : pageStatusBreakdown.fulfilled;
 
   const statusDistributionData = [
     { name: "Pending", value: pendingOrders },
@@ -1251,9 +1307,9 @@ export function Orders({
     { name: "Fulfilled", value: fulfilledOrders },
     {
       name: "Cancelled",
-      value:
-        ordersAggregates?.statusBreakdown.cancelled ??
-        orders.filter((o) => o.status === "cancelled").length,
+      value: usePageStatusBreakdown
+        ? pageStatusBreakdown.cancelled
+        : ordersAggregates?.statusBreakdown?.cancelled ?? pageStatusBreakdown.cancelled,
     },
   ];
 
@@ -1357,7 +1413,7 @@ export function Orders({
         <TabsContent value="orders">
           <PwaOrphanedOrdersRecovery
             searchQuery={debouncedSearch}
-            onRecovered={() => void loadOrders(true)}
+            onRecovered={handlePwaOrderRecovered}
             compact
           />
           {/* Toolbar */}

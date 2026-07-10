@@ -89,7 +89,7 @@ export const myTranslations: Record<string, string> = {
     'checkout.placeOrderConfirmed': 'အော်ဒါတင်မည် (ငွေပေးချေမှု အတည်ပြုပြီး)',
     'checkout.completedPayment': 'ငွေပေးချေပြီးပါပြီ',
     'checkout.payWithKpay': 'KBZPay ဖြင့် ပေးချေမည်',
-    'checkout.placeCodOrder': 'COD အော်ဒါတင်မည်',
+    'checkout.placeCodOrder': 'ငွေရှင်းဆက်လက်လုပ်မည်',
     'checkout.selectPaymentMethod': 'ငွေပေးချေမှုနည်းလမ်း ရွေးပါ',
     'checkout.payAmount': '{amount} MMK ပေးချေမည်',
     'checkout.paymentReceived': 'ငွေပေးချေမှု ရရှိပါပြီ။ အော်ဒါအကျဉ်းချုပ်ရှိ ခလုတ်ဖြင့် အော်ဒါတင်နိုင်ပါသည်။',

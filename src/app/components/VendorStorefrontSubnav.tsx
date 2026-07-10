@@ -21,7 +21,7 @@ const SUBNAV_ROW_GAP_PX = 24;
 function vendorSubnavTabClass(active: boolean): string {
   return `inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
     active
-      ? "bg-white text-amber-800 shadow-sm ring-1 ring-slate-200/90"
+      ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/90"
       : "text-slate-600 hover:bg-white/80 hover:text-slate-900"
   }`;
 }
@@ -228,7 +228,7 @@ export function VendorStorefrontSubnav({
                         key={vendorSubnavTabKey(tab)}
                         onClick={() => onTabSelect(tab)}
                         className={`rounded-md px-3 py-2.5 ${
-                          active ? "font-semibold text-amber-800 focus:text-amber-800" : undefined
+                          active ? "font-semibold text-slate-900 focus:text-slate-900" : undefined
                         }`}
                       >
                         {vendorSubnavTabLabel(tab, t, language)}

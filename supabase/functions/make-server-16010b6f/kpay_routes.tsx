@@ -12,7 +12,7 @@ import {
   getPwaDraftStatusRoute,
   postPwaReconcileRoute as runPwaReconcileRoute,
 } from "./pwa_reconcile.ts";
-import { queueOrderReadModelSync } from "./read_model.ts";
+import { queueOrderReadModelSync, syncOrderReadModel } from "./read_model.ts";
 import { queueMetaCapiPurchaseFromOrder } from "./meta_capi.tsx";
 
 type AnyRecord = Record<string, unknown>;
@@ -2329,19 +2329,66 @@ export async function postPwaFinalizeRoute(c: Context) {
   const merchantOrderId = text(c.req.param("merchantOrderId"));
   if (!merchantOrderId) return c.json({ error: "merchantOrderId is required" }, 400);
 
+  let bodyAdminRecover = false;
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    if (body && typeof body === "object") {
+      bodyAdminRecover =
+        Boolean((body as AnyRecord).adminRecover) ||
+        text((body as AnyRecord).mode).toLowerCase() === "admin_recover";
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const adminRecover =
+    bodyAdminRecover ||
+    text(c.req.query("adminRecover")).toLowerCase() === "true" ||
+    text(c.req.query("adminRecover")) === "1" ||
+    text(c.req.header("x-admin-recover")) === "1";
+
   await syncKPayTxnStatusFromProvider(merchantOrderId);
-  let result = await finalizePwaCheckoutOrder(merchantOrderId);
-  for (let attempt = 0; attempt < 3 && !result.ok && result.error === "payment_not_confirmed"; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    await syncKPayTxnStatusFromProvider(merchantOrderId);
-    result = await finalizePwaCheckoutOrder(merchantOrderId);
+  let result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover });
+  if (!adminRecover) {
+    for (let attempt = 0; attempt < 3 && !result.ok && result.error === "payment_not_confirmed"; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await syncKPayTxnStatusFromProvider(merchantOrderId);
+      result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover });
+    }
   }
 
   if (!result.ok) {
     const status = result.error === "payment_not_confirmed" ? 409 : 400;
     return c.json({ success: false, ...result }, status);
   }
-  return c.json({ success: true, ...result });
+
+  if (result.order && typeof result.order === "object") {
+    const orderId = text((result.order as AnyRecord).id) || merchantOrderId;
+    await syncOrderReadModel(orderId, result.order);
+  }
+
+  return c.json({ success: true, adminRecover, ...result });
+}
+
+/** Admin-only recovery: always finalize from draft without waiting for synced KBZPay status. */
+export async function postPwaAdminRecoverRoute(c: Context) {
+  const merchantOrderId = text(c.req.param("merchantOrderId"));
+  if (!merchantOrderId) return c.json({ error: "merchantOrderId is required" }, 400);
+
+  await syncKPayTxnStatusFromProvider(merchantOrderId);
+  const result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover: true });
+
+  if (!result.ok) {
+    const status = result.error === "payment_not_confirmed" ? 409 : 400;
+    return c.json({ success: false, adminRecover: true, ...result }, status);
+  }
+
+  if (result.order && typeof result.order === "object") {
+    const orderId = text((result.order as AnyRecord).id) || merchantOrderId;
+    await syncOrderReadModel(orderId, result.order);
+  }
+
+  return c.json({ success: true, adminRecover: true, ...result });
 }
 
 export { getOrphanedPwaDraftsRoute, getPwaDraftStatusRoute };

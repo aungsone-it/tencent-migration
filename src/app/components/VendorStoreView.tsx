@@ -6033,7 +6033,7 @@ export function VendorStoreView({
                               variant={vendorVariantSelections[option.name] === value ? "default" : "outline"}
                               className={`min-w-[70px] h-9 text-sm font-medium px-4 ${
                                 vendorVariantSelections[option.name] === value
-                                  ? "bg-amber-600 hover:bg-amber-700 text-white"
+                                  ? "bg-[#1a1d29] hover:bg-slate-900 text-white"
                                   : "border-slate-300 hover:border-slate-400"
                               }`}
                             >
@@ -6052,7 +6052,7 @@ export function VendorStoreView({
                   disabled={!vendorCanPurchase}
                   className={!vendorCanPurchase
                     ? "bg-slate-300 h-10 font-semibold rounded-lg text-sm px-6 cursor-not-allowed flex items-center justify-center transition-all py-0"
-                    : "bg-amber-600 hover:bg-amber-700 h-10 font-semibold transition-all rounded-lg text-sm px-6 flex items-center justify-center py-0"
+                    : "bg-[#1a1d29] hover:bg-slate-900 text-white h-10 font-semibold transition-all rounded-lg text-sm px-6 flex items-center justify-center py-0"
                   }
                   onClick={() => {
                     if (!vendorCanPurchase) return;
@@ -6068,7 +6068,7 @@ export function VendorStoreView({
                   variant="outline"
                   className={!vendorCanPurchase
                     ? "h-10 border-2 border-slate-300 bg-slate-100 text-slate-400 font-semibold rounded-lg text-sm px-6 cursor-not-allowed flex items-center justify-center transition-all py-0"
-                    : "h-10 border-2 border-amber-600 hover:bg-amber-50 hover:border-amber-700 text-amber-700 hover:text-amber-800 font-semibold transition-all rounded-lg text-sm px-6 flex items-center justify-center py-0"
+                    : "h-10 border-2 border-[#1a1d29] hover:bg-slate-50 hover:border-slate-900 text-slate-900 font-semibold transition-all rounded-lg text-sm px-6 flex items-center justify-center py-0"
                   }
                   onClick={() => {
                     if (!vendorCanPurchase) return;
@@ -6176,7 +6176,7 @@ export function VendorStoreView({
                 disabled={!vendorCanPurchase}
                 className={!vendorCanPurchase
                   ? "flex-1 min-w-0 bg-slate-300 h-11 font-semibold rounded-lg text-sm cursor-not-allowed flex items-center justify-center transition-all py-0"
-                  : "flex-1 min-w-0 bg-amber-600 hover:bg-amber-700 h-11 font-semibold transition-all rounded-lg text-sm flex items-center justify-center py-0"
+                  : "flex-1 min-w-0 bg-[#1a1d29] hover:bg-slate-900 text-white h-11 font-semibold transition-all rounded-lg text-sm flex items-center justify-center py-0"
                 }
                 onClick={() => {
                   if (!vendorCanPurchase) return;
@@ -6192,7 +6192,7 @@ export function VendorStoreView({
                 variant="outline"
                 className={!vendorCanPurchase
                   ? "flex-1 min-w-0 h-11 border-2 border-slate-300 bg-slate-100 text-slate-400 font-semibold rounded-lg text-sm cursor-not-allowed flex items-center justify-center transition-all py-0"
-                  : "flex-1 min-w-0 h-11 border-2 border-amber-600 hover:bg-amber-50 hover:border-amber-700 text-amber-700 hover:text-amber-800 font-semibold transition-all rounded-lg text-sm flex items-center justify-center py-0"
+                  : "flex-1 min-w-0 h-11 border-2 border-[#1a1d29] hover:bg-slate-50 hover:border-slate-900 text-slate-900 font-semibold transition-all rounded-lg text-sm flex items-center justify-center py-0"
                 }
                 onClick={() => {
                   if (!vendorCanPurchase) return;

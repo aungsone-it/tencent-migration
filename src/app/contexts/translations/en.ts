@@ -127,7 +127,7 @@ export const enTranslations: Record<string, string> = {
     'checkout.placeOrderConfirmed': 'Place Order (Payment Confirmed)',
     'checkout.completedPayment': "I've Completed Payment",
     'checkout.payWithKpay': 'Pay with KBZPay',
-    'checkout.placeCodOrder': 'Place COD Order',
+    'checkout.placeCodOrder': 'Proceed Checkout',
     'checkout.selectPaymentMethod': 'Select a payment method',
     'checkout.payAmount': 'Pay {amount} MMK',
     'checkout.paymentReceived': 'Payment received. You can place your order using the button in the order summary.',

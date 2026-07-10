@@ -3,7 +3,7 @@
  * localStorage is often empty when KBZPay returns in its in-app WebView.
  */
 import * as kv from "./kv_store.tsx";
-import { normalizeOrderShippingFields } from "./order_shipping.ts";
+import { normalizeOrderShippingFields, applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
 
 const DRAFT_KEY_PREFIX = "kpay_pwa_draft:";
 
@@ -180,6 +180,69 @@ function buildOrderBodyFromDraft(
   };
 }
 
+async function createStorefrontOrderDirect(body: Record<string, unknown>): Promise<{
+  ok: boolean;
+  status: number;
+  order?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}> {
+  const requestedOrderNumber =
+    text(body.orderNumber) ||
+    text((body.kpay as Record<string, unknown> | undefined)?.merchantOrderId);
+
+  if (requestedOrderNumber) {
+    const mappedId = await kv.get(`order_num:${requestedOrderNumber}`);
+    if (typeof mappedId === "string" && mappedId.trim()) {
+      const existing = (await kv.get(`order:${mappedId.trim()}`)) as Record<string, unknown> | null;
+      if (existing) {
+        return { ok: true, status: 200, order: existing };
+      }
+    }
+  }
+
+  const deterministicOrderId = requestedOrderNumber
+    ? `order_ref_${encodeURIComponent(requestedOrderNumber)}`
+    : "";
+  const id =
+    deterministicOrderId ||
+    `order_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const parsedTotal =
+    typeof body.total === "string" ? parseFloat(body.total) : (Number(body.total) || 0);
+  const parsedSubtotal = body.subtotal
+    ? typeof body.subtotal === "string"
+      ? parseFloat(body.subtotal)
+      : Number(body.subtotal)
+    : parsedTotal;
+  const parsedDiscount = body.discount
+    ? typeof body.discount === "string"
+      ? parseFloat(body.discount)
+      : Number(body.discount)
+    : 0;
+
+  const orderData = {
+    ...applyNormalizedShippingToOrderBody(body),
+    id,
+    total: parsedTotal,
+    subtotal: parsedSubtotal,
+    discount: parsedDiscount,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    date: text(body.date) || new Date().toISOString().split("T")[0],
+    paymentStatus: text(body.paymentStatus) || "unpaid",
+    shippingStatus: text(body.shippingStatus) || "pending",
+    inventoryDeducted: false,
+  };
+
+  await kv.set(`order:${id}`, orderData);
+  if (requestedOrderNumber) {
+    await kv.set(`order_num:${requestedOrderNumber}`, id);
+  }
+
+  return { ok: true, status: 201, order: orderData };
+}
+
 async function postStorefrontOrder(body: Record<string, unknown>): Promise<{
   ok: boolean;
   status: number;
@@ -224,7 +287,10 @@ async function postStorefrontOrder(body: Record<string, unknown>): Promise<{
 }
 
 /** Create storefront order when KBZ txn is paid and draft exists. Idempotent. */
-export async function finalizePwaCheckoutOrder(merchantOrderId: string): Promise<{
+export async function finalizePwaCheckoutOrder(
+  merchantOrderId: string,
+  options?: { adminRecover?: boolean },
+): Promise<{
   ok: boolean;
   created?: boolean;
   duplicate?: boolean;
@@ -250,14 +316,33 @@ export async function finalizePwaCheckoutOrder(merchantOrderId: string): Promise
 
   const txn = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
   const txnStatus = text(txn?.status).toLowerCase();
-  if (txnStatus !== "paid") {
+  if (txnStatus !== "paid" && !options?.adminRecover) {
     return { ok: false, error: "payment_not_confirmed", message: txnStatus || "pending" };
   }
 
   const body = buildOrderBodyFromDraft(id, draft, txn);
   if (!body) return { ok: false, error: "invalid_draft" };
 
-  const result = await postStorefrontOrder(body);
+  if (options?.adminRecover && txnStatus !== "paid") {
+    // Admin is recovering a KBZPay checkout that was paid but never finalized.
+    body.paymentStatus = "paid";
+    const kpay =
+      body.kpay && typeof body.kpay === "object"
+        ? (body.kpay as Record<string, unknown>)
+        : {};
+    body.kpay = {
+      ...kpay,
+      status: "paid",
+      providerStatus: text(txn?.providerStatus) || "paid",
+      adminRecovered: true,
+      recoveredAt: nowIso(),
+    };
+  }
+
+  const persistOrder = options?.adminRecover
+    ? createStorefrontOrderDirect
+    : postStorefrontOrder;
+  const result = await persistOrder(body);
   if (!result.ok) {
     return {
       ok: false,

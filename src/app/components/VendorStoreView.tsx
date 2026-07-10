@@ -4,6 +4,7 @@ import {
   CACHE_KEYS,
   fetchVendorProducts,
   fetchVendorCategories,
+  getCachedProductById,
   filterVendorCreatedCategories,
   fetchVendorWishlistVendorPage,
   wishlistSigFromProductIds,
@@ -191,6 +192,10 @@ import {
   enrichVendorCategoriesWithLocaleNames,
   vendorCategoriesNeedLocaleMy,
 } from "../utils/categoryLocaleTranslate";
+import {
+  rewriteDescriptionHtmlImages,
+  normalizeProductSpecifications,
+} from "../utils/productDescriptionDisplay";
 
 interface Product {
   id: string;
@@ -199,6 +204,8 @@ interface Product {
   price: number;
   compareAtPrice?: number;
   description: string;
+  specifications?: { label: string; value: string }[];
+  sizeChart?: string;
   images: string[];
   category: string;
   inventory: number;
@@ -596,6 +603,18 @@ function withVendorProfileImageCacheBust(user: unknown, baseUrl: string): string
  */
 function applyServerProfileMerge(localUser: any, serverUser: any): any {
   return applyCustomerProfileMerge(localUser, serverUser);
+}
+
+function mergeVendorCatalogWithFullProduct(catalog: Product, raw: Record<string, unknown>): Product {
+  return {
+    ...catalog,
+    description:
+      typeof raw.description === "string" && raw.description.trim()
+        ? raw.description
+        : catalog.description,
+    specifications: normalizeProductSpecifications(raw.specifications ?? catalog.specifications),
+    sizeChart: typeof raw.sizeChart === "string" ? raw.sizeChart : catalog.sizeChart,
+  };
 }
 
 function resolveVendorProductFromSlug(products: Product[], decoded: string): Product | undefined {
@@ -1549,37 +1568,6 @@ export function VendorStoreView({
   const wasCheckoutRouteRef = useRef(false);
 
   const { addToCart, totalItems } = useCart();
-
-  // Product description gallery lightbox (full-screen overlay + prev/next)
-  const [descLightboxOpen, setDescLightboxOpen] = useState(false);
-  const [lightboxImages, setLightboxImages] = useState<string[]>([]);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-
-  useEffect(() => {
-    if (!descLightboxOpen) return;
-    const len = lightboxImages.length;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setDescLightboxOpen(false);
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setLightboxIndex((i) => Math.max(0, i - 1));
-      }
-      if (e.key === "ArrowRight" && len > 0) {
-        e.preventDefault();
-        setLightboxIndex((i) => Math.min(len - 1, i + 1));
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [descLightboxOpen, lightboxImages]);
 
   // 🔐 User Authentication State
   const [user, setUser] = useState<any>(null);
@@ -4676,7 +4664,6 @@ export function VendorStoreView({
       matchPath({ path: "/vendor-:storeName/product/:productSlug", end: true }, location.pathname) ??
       matchPath({ path: "/product/:productSlug", end: true }, location.pathname);
     if (!stillOnProduct) return;
-    if (resolveVendorProductFromSlug(products, decoded)) return;
 
     let cancelled = false;
     void (async () => {
@@ -4685,10 +4672,28 @@ export function VendorStoreView({
           resolveSlug: decoded,
           pageSize: 1,
         });
-        const p = data.products?.[0] as Product | undefined;
-        if (cancelled || !p) return;
-        setSelectedProduct(p);
-        setProducts((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
+        const catalog = data.products?.[0] as Product | undefined;
+        if (cancelled || !catalog) return;
+
+        let detail = catalog;
+        try {
+          const res = await getCachedProductById(catalog.id);
+          const raw = (res?.product ?? res) as Record<string, unknown> | undefined;
+          if (raw && typeof raw === "object") {
+            detail = mergeVendorCatalogWithFullProduct(catalog, raw);
+          }
+        } catch {
+          /* catalog row only */
+        }
+
+        setSelectedProduct(detail);
+        setProducts((prev) => {
+          const idx = prev.findIndex((x) => x.id === detail.id);
+          if (idx === -1) return [...prev, detail];
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...detail };
+          return next;
+        });
       } catch {
         /* ignore */
       }
@@ -6206,60 +6211,60 @@ export function VendorStoreView({
             </div>
           </div>
 
-          {/* Full Product Description Section */}
-          <div className="mb-8">
+          {/* Product specs + description — separate cards */}
+          <div className="mb-8 space-y-4">
+            {(() => {
+              const specs = normalizeProductSpecifications(selectedProduct.specifications);
+              if (specs.length === 0) return null;
+              const rows: typeof specs[] = [];
+              for (let i = 0; i < specs.length; i += 2) {
+                rows.push(specs.slice(i, i + 2));
+              }
+              return (
+                <Card className="border border-slate-200 shadow-sm">
+                  <CardContent className="p-6">
+                    <h2 className="text-lg font-bold text-slate-900 mb-3">
+                      {t("storefront.product.specifications")}
+                    </h2>
+                    <div className="rounded-lg border border-slate-200 overflow-hidden bg-white">
+                      {rows.map((pair, rowIndex) => (
+                        <div
+                          key={`spec-row-${rowIndex}`}
+                          className={`grid grid-cols-1 sm:grid-cols-2 ${rowIndex < rows.length - 1 ? "border-b border-slate-200" : ""}`}
+                        >
+                          {pair.map((spec, colIndex) => (
+                            <div
+                              key={`${spec.label}-${colIndex}`}
+                              className={`grid grid-cols-[minmax(0,38%)_minmax(0,1fr)] min-h-[44px] ${colIndex === 0 ? "sm:border-r border-slate-200" : ""}`}
+                            >
+                              <div className="bg-slate-50 px-3 py-2.5 text-xs sm:text-sm font-medium text-slate-600 flex items-center">
+                                {spec.label}
+                              </div>
+                              <div className="bg-white px-3 py-2.5 text-xs sm:text-sm text-slate-900 flex items-center">
+                                {spec.value || "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             <Card className="border border-slate-200 shadow-sm">
               <CardContent className="p-6">
-                <h2 className="text-xl font-bold text-slate-900 mb-4">{t("storefront.product.description")}</h2>
+                <h2 className="text-lg font-bold text-slate-900 mb-3">{t("storefront.product.description")}</h2>
                 <div className="prose prose-slate max-w-none">
-                  {/* Description Text */}
                   <div className="text-slate-700 leading-relaxed space-y-3 product-description-wrapper">
                     {selectedProduct.description && typeof selectedProduct.description === 'string' ? (
-                      <>
-                        {/* Render text without images */}
-                        <div 
-                          className="text-sm product-description-content"
-                          dangerouslySetInnerHTML={{ 
-                            __html: selectedProduct.description.replace(/<img[^>]*>/g, '') 
-                          }}
-                        />
-                        
-                        {/* Gallery Grid for Images */}
-                        {(() => {
-                          const imgRegex = /<img[^>]+src=["']([^"'>]+)["']/gi;
-                          const matches = [...selectedProduct.description.matchAll(imgRegex)];
-                          const imageSrcs = [...new Set(matches.map((m) => m[1]))];
-                          
-                          if (imageSrcs.length > 0) {
-                            return (
-                              <div className="mt-6">
-                                <h3 className="text-sm font-semibold text-slate-700 mb-3">{t("storefront.product.images")}</h3>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                                  {imageSrcs.map((src, index) => (
-                                    <div 
-                                      key={index}
-                                      className="relative aspect-square overflow-hidden rounded-lg bg-slate-100 group cursor-pointer"
-                                      onClick={() => {
-                                        setLightboxImages(imageSrcs);
-                                        setLightboxIndex(index);
-                                        setDescLightboxOpen(true);
-                                      }}
-                                    >
-                                      <CacheFriendlyImg 
-                                        src={src} 
-                                        alt={`Product detail ${index + 1}`}
-                                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                                      />
-                                      <div className="absolute inset-0 bg-black opacity-0 group-hover:opacity-10 transition-opacity duration-300" />
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </>
+                      <div
+                        className="text-sm product-description-content"
+                        dangerouslySetInnerHTML={{
+                          __html: rewriteDescriptionHtmlImages(selectedProduct.description),
+                        }}
+                      />
                     ) : (
                       <p className="text-sm">
                         {t("storefront.product.fallbackDescription")}
@@ -6267,7 +6272,6 @@ export function VendorStoreView({
                     )}
                   </div>
 
-                  {/* CSS for product description */}
                   <style>{`
                     .product-description-wrapper .product-description-content p {
                       margin-bottom: 12px;
@@ -6284,10 +6288,31 @@ export function VendorStoreView({
                       margin-bottom: 12px;
                       font-weight: 600;
                     }
+                    .product-description-wrapper .product-description-content img {
+                      max-width: 100%;
+                      height: auto;
+                      border-radius: 8px;
+                      margin: 1rem 0;
+                      display: block;
+                    }
                   `}</style>
                 </div>
               </CardContent>
             </Card>
+
+            {selectedProduct.sizeChart?.trim() && (
+              <Card className="border border-slate-200 shadow-sm">
+                <CardContent className="p-6">
+                  <h2 className="text-lg font-bold text-slate-900 mb-3">
+                    {t("storefront.product.sizeChart")}
+                  </h2>
+                  <div
+                    className="text-sm text-slate-700 leading-relaxed product-size-chart-content prose prose-slate max-w-none"
+                    dangerouslySetInnerHTML={{ __html: selectedProduct.sizeChart }}
+                  />
+                </CardContent>
+              </Card>
+            )}
           </div>
         </main>
 
@@ -6297,70 +6322,6 @@ export function VendorStoreView({
             storeSlug={storeLinkSlug || canonicalPathSlug || storeSlug}
             hostRootStorePaths={hostRootStorePaths}
           />
-        )}
-
-        {/* Description image lightbox — matches marketplace full-screen gallery */}
-        {descLightboxOpen && lightboxImages.length > 0 && (
-          <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-3 sm:p-6"
-            role="dialog"
-            aria-modal="true"
-            aria-label={t("storefront.product.gallery")}
-            onClick={() => setDescLightboxOpen(false)}
-          >
-            <button
-              type="button"
-              className="absolute right-3 top-3 z-[210] flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition hover:bg-white/20"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDescLightboxOpen(false);
-              }}
-              aria-label={t("storefront.product.closeGallery")}
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <button
-              type="button"
-              disabled={lightboxIndex <= 0}
-              className="absolute left-2 top-1/2 z-[210] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30 sm:left-4 sm:h-12 sm:w-12"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex((i) => Math.max(0, i - 1));
-              }}
-              aria-label={t("storefront.product.previousImage")}
-            >
-              <ChevronLeft className="h-6 w-6 sm:h-7 sm:w-7" />
-            </button>
-
-            <button
-              type="button"
-              disabled={lightboxIndex >= lightboxImages.length - 1}
-              className="absolute right-2 top-1/2 z-[210] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30 sm:right-4 sm:h-12 sm:w-12"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex((i) => Math.min(lightboxImages.length - 1, i + 1));
-              }}
-              aria-label={t("storefront.product.nextImage")}
-            >
-              <ChevronRight className="h-6 w-6 sm:h-7 sm:w-7" />
-            </button>
-
-            <div
-              className="relative flex max-h-[90vh] max-w-[min(96vw,1200px)] flex-col items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <CacheFriendlyImg
-                src={lightboxImages[lightboxIndex]}
-                alt=""
-                priority
-                className="max-h-[min(85vh,900px)] w-auto max-w-full object-contain shadow-2xl"
-              />
-              <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1.5 text-sm font-medium tabular-nums text-white backdrop-blur-sm">
-                {lightboxIndex + 1} / {lightboxImages.length}
-              </div>
-            </div>
-          </div>
         )}
 
         {/* 🔐 Auth Modal - Available on Product Detail Page */}

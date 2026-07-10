@@ -5,6 +5,7 @@
 
 import { API_TIMEOUTS } from '../constants';
 import { apiClient, API_BASE_URL } from './api-client';
+import { compressImageToFile } from './imageCompression';
 import { chatMessageTextForSend, sanitizeOptionalHttpUrl } from './chatConversation';
 import {
   projectId,
@@ -74,20 +75,40 @@ function dataUrlToUploadMeta(dataUrl: string): { mime: string; ext: string; byte
   return { mime, ext, bytes };
 }
 
-/** Upload one gallery image; returns a storage URL (not base64). */
-export async function uploadProductGalleryImage(dataUrl: string): Promise<string> {
-  if (!PRODUCT_IMAGE_DATA_URL_RE.test(dataUrl)) {
-    return dataUrl;
-  }
+function fileToDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result === "string") resolve(result);
+      else reject(new Error("Failed to read image file"));
+    };
+    reader.onerror = () => reject(new Error("Failed to read image file"));
+    reader.readAsDataURL(file);
+  });
+}
 
-  const { ext } = dataUrlToUploadMeta(dataUrl);
+/** CloudBase JSON body limit — keep inline uploads under this (base64 inflates ~33%). */
+const JSON_UPLOAD_MAX_KB = 180;
+
+async function dataUrlToCompressedFile(dataUrl: string, maxSizeKB: number): Promise<File> {
+  const { mime, ext, bytes } = dataUrlToUploadMeta(dataUrl);
+  const blob = new Blob([bytes], { type: mime });
+  const file = new File([blob], `product.${ext}`, { type: mime });
+  if (file.size <= maxSizeKB * 1024) return file;
+  return compressImageToFile(file, maxSizeKB);
+}
+
+async function uploadProductGalleryImageJson(dataUrl: string): Promise<string> {
+  const smallFile = await dataUrlToCompressedFile(dataUrl, JSON_UPLOAD_MAX_KB);
+  const smallDataUrl = await fileToDataUrl(smallFile);
+  const { ext } = dataUrlToUploadMeta(smallDataUrl);
   const fileName = `product-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
 
-  // JSON upload via existing chat route — works on current CloudBase deploy (signed URLs, no multipart).
   const chatRes = await apiClient.post<{ success?: boolean; imageUrl?: string; error?: string }>(
     "/chat/upload-image",
     {
-      imageData: dataUrl,
+      imageData: smallDataUrl,
       fileName,
       conversationId: "products",
     }
@@ -100,14 +121,95 @@ export async function uploadProductGalleryImage(dataUrl: string): Promise<string
   throw new Error(chatRes.error || "Failed to upload product image");
 }
 
+/** Upload one gallery image file via multipart (avoids CloudBase JSON payload limits). */
+export async function uploadProductGalleryFile(file: File): Promise<string> {
+  try {
+    const formData = new FormData();
+    formData.append("image", file, file.name || "product.jpg");
+
+    const res = await apiClient.postForm<{
+      success?: boolean;
+      imageUrl?: string;
+      error?: string;
+      details?: string;
+    }>("/products/upload-image", formData);
+
+    if (res.imageUrl && typeof res.imageUrl === "string") {
+      return res.imageUrl;
+    }
+
+    throw new Error(res.error || res.details || "Failed to upload product image");
+  } catch (multipartError) {
+    console.warn("[uploadProductGalleryFile] multipart failed, trying JSON fallback", multipartError);
+    const fallbackFile = await compressImageToFile(file, JSON_UPLOAD_MAX_KB);
+    const dataUrl = await fileToDataUrl(fallbackFile);
+    return uploadProductGalleryImageJson(dataUrl);
+  }
+}
+
+/** Upload one gallery image; returns a storage URL (not base64). */
+export async function uploadProductGalleryImage(dataUrl: string): Promise<string> {
+  if (!PRODUCT_IMAGE_DATA_URL_RE.test(dataUrl)) {
+    return dataUrl;
+  }
+
+  const { mime, ext, bytes } = dataUrlToUploadMeta(dataUrl);
+  const blob = new Blob([bytes], { type: mime });
+  const file = new File([blob], `product-${Date.now()}.${ext}`, { type: mime });
+  return uploadProductGalleryFile(file);
+}
+
+async function uploadDescriptionImageFile(file: File): Promise<string> {
+  const ext = file.name.split(".").pop() || "jpg";
+  const fileName = `description-images/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("fileName", fileName);
+
+  try {
+    const res = await apiClient.postForm<{ success?: boolean; url?: string; error?: string }>(
+      "/upload-description-image",
+      formData
+    );
+    if (res.url && typeof res.url === "string") return res.url;
+    throw new Error(res.error || "Failed to upload description image");
+  } catch {
+    return uploadProductGalleryFile(file);
+  }
+}
+
 async function uploadProductImageDataUrl(dataUrl: string): Promise<string> {
   return uploadProductGalleryImage(dataUrl);
+}
+
+async function uploadDescriptionImageDataUrl(dataUrl: string): Promise<string> {
+  const file = await dataUrlToCompressedFile(dataUrl, JSON_UPLOAD_MAX_KB);
+  return uploadDescriptionImageFile(file);
 }
 
 async function resolveProductImageRef(src: unknown): Promise<unknown> {
   if (typeof src !== "string" || !src.trim()) return src;
   if (!PRODUCT_IMAGE_DATA_URL_RE.test(src)) return src;
   return uploadProductImageDataUrl(src);
+}
+
+/** Replace inline base64 <img> sources in HTML with storage URLs before product save. */
+async function replaceDescriptionInlineImages(description: string): Promise<string> {
+  if (!description.includes("data:image/")) return description;
+
+  const dataUrls = new Set<string>();
+  const re = /src=(["'])(data:image\/[^"']+)\1/gi;
+  for (const match of description.matchAll(re)) {
+    dataUrls.add(match[2]);
+  }
+  if (dataUrls.size === 0) return description;
+
+  let next = description;
+  for (const dataUrl of dataUrls) {
+    const uploaded = await uploadDescriptionImageDataUrl(dataUrl);
+    next = next.split(dataUrl).join(uploaded);
+  }
+  return next;
 }
 
 /** Upload inline base64 gallery/variant images so JSON create/update stays under CloudBase limits. */
@@ -117,23 +219,35 @@ async function prepareProductPayloadForSave<T extends Partial<Product>>(
   const next: Partial<Product> = { ...data };
 
   if (Array.isArray(next.images) && next.images.length > 0) {
-    next.images = await Promise.all(next.images.map((img) => resolveProductImageRef(img))) as string[];
+    const uploaded: string[] = [];
+    for (const img of next.images) {
+      uploaded.push((await resolveProductImageRef(img)) as string);
+    }
+    next.images = uploaded;
+  }
+
+  if (typeof next.description === "string" && next.description.includes("data:image/")) {
+    next.description = await replaceDescriptionInlineImages(next.description);
   }
 
   if (Array.isArray(next.variants) && next.variants.length > 0) {
-    next.variants = await Promise.all(
-      next.variants.map(async (variant) => {
-        if (!variant || typeof variant !== "object") return variant;
-        const v = variant as Record<string, unknown>;
-        if (typeof v.image !== "string" || !PRODUCT_IMAGE_DATA_URL_RE.test(v.image)) {
-          return variant;
-        }
-        return {
-          ...variant,
-          image: await uploadProductImageDataUrl(v.image),
-        };
-      })
-    ) as Product["variants"];
+    const variants: Product["variants"] = [];
+    for (const variant of next.variants) {
+      if (!variant || typeof variant !== "object") {
+        variants.push(variant);
+        continue;
+      }
+      const v = variant as Record<string, unknown>;
+      if (typeof v.image !== "string" || !PRODUCT_IMAGE_DATA_URL_RE.test(v.image)) {
+        variants.push(variant);
+        continue;
+      }
+      variants.push({
+        ...variant,
+        image: await uploadProductImageDataUrl(v.image),
+      });
+    }
+    next.variants = variants;
   }
 
   return next as T;

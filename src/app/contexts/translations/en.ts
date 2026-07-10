@@ -794,7 +794,13 @@ export const enTranslations: Record<string, string> = {
     'addProduct.add': 'Add',
     'addProduct.media': 'Media',
     'addProduct.uploadTip': 'Tip: Paste, drag & drop, or click to add images',
-    'addProduct.detailsHint': 'Add product details, care instructions, and sizing information',
+    'addProduct.detailsHint': 'Add product details and care instructions. Use Specifications below for structured attributes.',
+    'addProduct.specifications': 'Specifications',
+    'addProduct.specificationsCardHint': 'Optional attribute pairs shown below the description on the storefront.',
+    'addProduct.specificationsHint': 'Add attribute name and value pairs (e.g. Material → Cotton).',
+    'addProduct.specLabelPlaceholder': 'Attribute (e.g. Material)',
+    'addProduct.specValuePlaceholder': 'Value (e.g. Cotton)',
+    'addProduct.addSpecification': 'Add specification',
     
     // Inventory
     'inventory.title': 'Inventory',
@@ -1722,6 +1728,8 @@ export const enTranslations: Record<string, string> = {
     'storefront.product.savePercent': 'Save {percent}%',
     'storefront.product.product': 'Product',
     'storefront.product.description': 'Product Description',
+    'storefront.product.specifications': 'Specifications',
+    'storefront.product.sizeChart': 'Size Chart',
     'storefront.product.images': 'Product Images',
     'storefront.product.gallery': 'Product image gallery',
     'storefront.product.closeGallery': 'Close gallery',

@@ -26,7 +26,7 @@ import {
   getKPayResolvedUrlsRoute,
   getKPayResolvedEndpointUrls,
 } from "./kpay_routes.tsx";
-import { ensureBucket } from "./storage_bucket_helpers.tsx";
+import { ensureBucket, getFormDataUpload } from "./storage_bucket_helpers.tsx";
 import { kvGetObject, verifyStorageToken } from "./kv_storage_backend.ts";
 import { absolutizeStorageObjectUrl, resolveClientImageUrl } from "./storage_url_helpers.tsx";
 import {
@@ -3618,6 +3618,20 @@ function stableVendorStorefrontSoldCount(p: any): number {
  * variantOptions + variants so product detail can render selectors without waiting on GET /products/:id.
  * (Stripping them caused hasVariants === true with no chips on PDP.)
  */
+function normalizeProductSpecifications(raw: unknown): { label: string; value: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const rows: { label: string; value: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const label = String(row.label ?? row.name ?? "").trim();
+    const value = String(row.value ?? "").trim();
+    if (!label) continue;
+    rows.push({ label, value });
+  }
+  return rows;
+}
+
 function mapVendorStorefrontProductRow(p: any) {
   return {
     id: p.id,
@@ -3626,6 +3640,8 @@ function mapVendorStorefrontProductRow(p: any) {
     price: parseFloat(String(p.price).replace(/[$,]/g, "")),
     compareAtPrice: p.compareAtPrice ? parseFloat(String(p.compareAtPrice).replace(/[$,]/g, "")) : undefined,
     description: p.description || "",
+    specifications: normalizeProductSpecifications(p.specifications),
+    sizeChart: p.sizeChart || "",
     images: p.images || [],
     // Vendor storefront categorization is vendor-owned via category.productIds.
     // Do not expose the super-admin product category on vendor storefront payloads.
@@ -4842,9 +4858,9 @@ app.post("/make-server-16010b6f/products/upload-image", async (c) => {
     console.log("📤 Uploading product image...");
 
     const formData = await c.req.formData();
-    const imageFile = formData.get("image") as File;
+    const imageFile = getFormDataUpload(formData, "image");
 
-    if (!imageFile || !(imageFile instanceof File)) {
+    if (!imageFile) {
       return c.json({ error: "No image file provided" }, 400);
     }
 
@@ -4871,7 +4887,8 @@ app.post("/make-server-16010b6f/products/upload-image", async (c) => {
 
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 9);
-    const fileExt = imageFile.name.split(".").pop() || "jpg";
+    const rawName = typeof imageFile.name === "string" ? imageFile.name : "";
+    const fileExt = rawName.split(".").pop() || "jpg";
     const fileName = `product_${timestamp}_${randomStr}.${fileExt}`;
 
     const arrayBuffer = await imageFile.arrayBuffer();
@@ -4927,10 +4944,10 @@ app.post("/make-server-16010b6f/upload-description-image", async (c) => {
     console.log("📤 Uploading description image to storage...");
     
     const formData = await c.req.formData();
-    const file = formData.get('file');
+    const file = getFormDataUpload(formData, "file");
     const fileName = formData.get('fileName') as string;
     
-    if (!file || !(file instanceof File)) {
+    if (!file) {
       return c.json({ error: "No file provided" }, 400);
     }
     

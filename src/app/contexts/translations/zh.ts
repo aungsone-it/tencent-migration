@@ -785,7 +785,13 @@ export const zhTranslations: Record<string, string> = {
     'addProduct.add': '添加',
     'addProduct.media': '媒体',
     'addProduct.uploadTip': '提示：粘贴、拖放或点击添加图片',
-    'addProduct.detailsHint': '添加产品详细信息、护理说明和尺寸信息',
+    'addProduct.detailsHint': '添加产品详细信息和护理说明。结构化属性请使用下方的规格。',
+    'addProduct.specifications': '规格',
+    'addProduct.specificationsCardHint': '可选的属性对，将显示在店铺前台描述下方。',
+    'addProduct.specificationsHint': '添加属性名称和值（例如：材质 → 棉）。',
+    'addProduct.specLabelPlaceholder': '属性（如：材质）',
+    'addProduct.specValuePlaceholder': '值（如：棉）',
+    'addProduct.addSpecification': '添加规格',
     
     // Inventory
     'inventory.title': '库存',

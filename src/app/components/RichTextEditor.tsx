@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useState } from 'react';
 import 'react-quill/dist/quill.snow.css';
 import ReactQuill from 'react-quill';
 import { ImagePlus } from 'lucide-react';
@@ -12,53 +12,72 @@ interface RichTextEditorProps {
   readOnly?: boolean;
 }
 
+function readFileAsDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result === 'string') resolve(result);
+      else reject(new Error('Failed to read image file'));
+    };
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressImageFile(file: File): Promise<string> {
+  const compressedFile = await imageCompression(file, {
+    maxSizeMB: 0.5,
+    maxWidthOrHeight: 1920,
+    // Sequential multi-upload can deadlock when reusing the same web worker.
+    useWebWorker: false,
+    fileType: 'image/jpeg' as const,
+  });
+  return readFileAsDataUrl(compressedFile);
+}
+
+function buildImageHtml(dataUrls: string[]): string {
+  return dataUrls.map((src) => `<p><img src="${src}"></p>`).join('');
+}
+
 export function RichTextEditor({ value, onChange, placeholder = "Write your content here...", readOnly }: RichTextEditorProps) {
   const quillRef = useRef<ReactQuill>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  // Handle image file upload and compression
-  const handleImageUpload = async (file: File) => {
+  const handleImageUpload = async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length === 0 || isUploading) return;
+
+    setIsUploading(true);
+    const toastId = 'image-upload';
+    const loadingMessage =
+      imageFiles.length === 1
+        ? 'Uploading image...'
+        : `Uploading ${imageFiles.length} images...`;
+    toast.loading(loadingMessage, { id: toastId });
+
     try {
-      // Show loading toast
-      toast.loading('Uploading image...', { id: 'image-upload' });
+      const base64Images: string[] = [];
+      for (const file of imageFiles) {
+        base64Images.push(await compressImageFile(file));
+      }
 
-      // Compress image to 500KB maximum
-      const options = {
-        maxSizeMB: 0.5,
-        maxWidthOrHeight: 1920,
-        useWebWorker: true,
-        fileType: 'image/jpeg' as const,
-      };
-      
-      console.log(`📦 Original image size: ${(file.size / 1024).toFixed(2)} KB`);
-      const compressedFile = await imageCompression(file, options);
-      console.log(`✅ Compressed image size: ${(compressedFile.size / 1024).toFixed(2)} KB`);
-      
-      // Convert to base64
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = e.target?.result as string;
-        
-        // Insert image into editor
-        const quill = quillRef.current?.getEditor();
-        if (quill) {
-          const range = quill.getSelection(true);
-          if (range) {
-            quill.insertEmbed(range.index, 'image', base64);
-            quill.setSelection(range.index + 1, 0);
-          }
-          toast.success('Image uploaded successfully!', { id: 'image-upload' });
-        }
-      };
-      
-      reader.onerror = () => {
-        toast.error('Failed to read image file', { id: 'image-upload' });
-      };
-      
-      reader.readAsDataURL(compressedFile);
+      const imageHtml = buildImageHtml(base64Images);
+      const trimmed = value?.trim() ?? '';
+      const hasContent = trimmed.length > 0 && trimmed !== '<p><br></p>';
+      onChange(hasContent ? `${value}${imageHtml}` : imageHtml);
+
+      const successMessage =
+        base64Images.length === 1
+          ? 'Image uploaded successfully!'
+          : `${base64Images.length} images uploaded successfully!`;
+      toast.success(successMessage, { id: toastId });
     } catch (error) {
       console.error('Error uploading image:', error);
-      toast.error('Failed to upload image', { id: 'image-upload' });
+      toast.error('Failed to upload image', { id: toastId });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -69,9 +88,9 @@ export function RichTextEditor({ value, onChange, placeholder = "Write your cont
 
   // Handle file input change
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.indexOf('image') !== -1) {
-      handleImageUpload(file);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) {
+      void handleImageUpload(files);
     }
     // Reset input so same file can be selected again
     e.target.value = '';
@@ -131,6 +150,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Write your cont
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        multiple
         onChange={handleFileInputChange}
         className="hidden"
       />
@@ -139,15 +159,16 @@ export function RichTextEditor({ value, onChange, placeholder = "Write your cont
       <div className="border-b border-slate-200 bg-slate-50 p-2 flex items-center gap-2">
         <button
           onClick={handleImageButtonClick}
-          className="p-2 rounded hover:bg-purple-100 transition text-slate-700 bg-purple-50 flex items-center gap-1 text-sm"
+          disabled={isUploading}
+          className="p-2 rounded hover:bg-purple-100 transition text-slate-700 bg-purple-50 flex items-center gap-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           type="button"
-          title="Upload Image (or paste)"
+          title="Upload images (select multiple, or paste)"
         >
           <ImagePlus className="w-4 h-4" />
           <span className="text-xs">Add Image</span>
         </button>
         <span className="text-xs text-slate-400">
-          💡 Tip: Paste images directly into the editor
+          💡 Tip: Select multiple images or paste directly into the editor
         </span>
       </div>
 

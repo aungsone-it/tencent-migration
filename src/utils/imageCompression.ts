@@ -15,17 +15,32 @@ export async function compressImage(file: File, maxSizeKB: number = 500): Promis
 
     console.log(`📦 Original image size: ${(file.size / 1024).toFixed(2)} KB`);
 
-    // Compression options
-    const options = {
-      maxSizeMB: maxSizeKB / 1024, // Convert KB to MB
-      maxWidthOrHeight: 1920,
-      useWebWorker: true,
-      fileType: 'image/jpeg' as const,
-    };
+    const maxBytes = maxSizeKB * 1024;
+    let maxWidthOrHeight = 1920;
+    let compressedFile = file;
 
-    // Compress the image
-    const compressedFile = await imageCompression(file, options);
-    console.log(`✅ Compressed image size: ${(compressedFile.size / 1024).toFixed(2)} KB`);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const options = {
+        maxSizeMB: maxSizeKB / 1024,
+        maxWidthOrHeight,
+        useWebWorker: false,
+        fileType: 'image/jpeg' as const,
+      };
+
+      compressedFile = await imageCompression(file, options);
+      console.log(
+        `✅ Compressed image size (attempt ${attempt + 1}): ${(compressedFile.size / 1024).toFixed(2)} KB`
+      );
+
+      if (compressedFile.size <= maxBytes) break;
+      maxWidthOrHeight = Math.floor(maxWidthOrHeight * 0.7);
+    }
+
+    if (compressedFile.size > maxBytes) {
+      throw new Error(
+        `Image is still too large after compression (${(compressedFile.size / 1024).toFixed(0)} KB). Try a smaller photo.`
+      );
+    }
 
     // Convert to base64
     return new Promise((resolve, reject) => {
@@ -43,6 +58,7 @@ export async function compressImage(file: File, maxSizeKB: number = 500): Promis
     });
   } catch (error) {
     console.error('Image compression error:', error);
+    if (error instanceof Error) throw error;
     throw new Error('Failed to compress image. Please try a smaller file.');
   }
 }
@@ -54,7 +70,11 @@ export async function compressImage(file: File, maxSizeKB: number = 500): Promis
  * @returns Promise<string[]> - Array of base64 data URLs
  */
 export async function compressMultipleImages(files: File[], maxSizeKB: number = 500): Promise<string[]> {
-  return Promise.all(files.map(file => compressImage(file, maxSizeKB)));
+  const results: string[] = [];
+  for (const file of files) {
+    results.push(await compressImage(file, maxSizeKB));
+  }
+  return results;
 }
 
 /**

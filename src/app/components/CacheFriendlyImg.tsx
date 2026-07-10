@@ -35,9 +35,10 @@ export function CacheFriendlyImg({
 }: CacheFriendlyImgProps) {
   const displaySrc = resolveDisplaySrc(src, priority, logo);
   const cache = getCacheableImageProps(displaySrc);
+  const isDataUrl = displaySrc.startsWith("data:");
   return (
     <img
-      {...cache}
+      {...(isDataUrl ? {} : cache)}
       {...rest}
       src={displaySrc}
       alt={alt}

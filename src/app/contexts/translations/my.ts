@@ -243,6 +243,8 @@ export const myTranslations: Record<string, string> = {
     'storefront.product.savePercent': '{percent}% သက်သာမည်',
     'storefront.product.product': 'ကုန်ပစ္စည်း',
     'storefront.product.description': 'ကုန်ပစ္စည်းဖော်ပြချက်',
+    'storefront.product.specifications': 'သတ်မှတ်ချက်များ',
+    'storefront.product.sizeChart': 'အရွယ်အစားဇယား',
     'storefront.product.images': 'ကုန်ပစ္စည်းဓာတ်ပုံများ',
     'storefront.product.gallery': 'ကုန်ပစ္စည်းဓာတ်ပုံပြခန်း',
     'storefront.product.closeGallery': 'ပြခန်းပိတ်ရန်',

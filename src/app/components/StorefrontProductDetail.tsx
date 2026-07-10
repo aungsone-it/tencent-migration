@@ -19,6 +19,8 @@ interface Product {
   salesVolume: number;
   createDate: string;
   description?: string;
+  specifications?: { label: string; value: string }[];
+  sizeChart?: string;
   variantOptions?: { name: string; values: string[] }[];
   variants?: { options: Record<string, string>; price: string; inventory: number; sku: string }[];
   hasVariants?: boolean;
@@ -220,6 +222,45 @@ export function StorefrontProductDetail({ product, onBack }: StorefrontProductDe
                 </p>
               )}
             </div>
+
+            {Array.isArray(product.specifications) &&
+              product.specifications.filter((s) => s?.label?.trim()).length > 0 && (
+                <>
+                  <Separator />
+                  <div>
+                    <h3 className="font-semibold text-slate-900 mb-3 text-base sm:text-lg">Specifications</h3>
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      {product.specifications
+                        .filter((s) => s?.label?.trim())
+                        .map((spec, index) => (
+                          <div
+                            key={`${spec.label}-${index}`}
+                            className="grid grid-cols-2 border-b border-slate-200 last:border-b-0"
+                          >
+                            <div className="bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700">
+                              {spec.label}
+                            </div>
+                            <div className="bg-white px-4 py-3 text-sm text-slate-900">
+                              {spec.value || "—"}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+            {product.sizeChart?.trim() && (
+              <>
+                <Separator />
+                <div>
+                  <h3 className="font-semibold text-slate-900 mb-3 text-base sm:text-lg">Size Chart</h3>
+                  <div className="prose prose-slate prose-sm sm:prose-base max-w-none">
+                    <RichTextEditor value={product.sizeChart} onChange={() => {}} readOnly />
+                  </div>
+                </div>
+              </>
+            )}
 
             <Separator />
 

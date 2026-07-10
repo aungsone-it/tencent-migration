@@ -784,6 +784,11 @@ export function ProductList({
         vendorsList = (await getCachedAdminVendorsForProductList(false)) as any[];
       }
       invalidateVendorStorefrontsForProductVendorSelectionChange([], data?.selectedVendors, vendorsList);
+      invalidateVendorStorefrontsForProductVendorSelectionChange(
+        data?.selectedVendors,
+        data?.selectedVendors,
+        vendorsList
+      );
       invalidateProductByIdCache(created.id);
       SmartCache.delete(CACHE_KEYS.STOREFRONT_PRODUCTS);
       applyOptimisticProductAdd(created);
@@ -811,6 +816,12 @@ export function ProductList({
       }
       invalidateVendorStorefrontsForProductVendorSelectionChange(
         prevVendors,
+        data?.selectedVendors,
+        vendorsList
+      );
+      // Specs/description edits don't change vendor assignment — still bust assigned vendor catalogs.
+      invalidateVendorStorefrontsForProductVendorSelectionChange(
+        data?.selectedVendors,
         data?.selectedVendors,
         vendorsList
       );

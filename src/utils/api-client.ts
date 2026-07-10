@@ -134,9 +134,11 @@ async function apiRequest<T = any>(
   const url = `${API_BASE_URL}${endpoint}`;
 
   // Prepare headers
+  const isFormData =
+    typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
   const actorUserId = resolveActorUserId();
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...getCloudBaseRequestHeaders(),
     ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
     ...(actorUserId ? { "x-actor-user-id": actorUserId } : {}),
@@ -331,6 +333,13 @@ export const apiClient = {
       ...options,
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
+    }),
+
+  postForm: <T = any>(endpoint: string, formData: FormData, options?: ApiRequestOptions) =>
+    apiRequest<T>(endpoint, {
+      ...options,
+      method: 'POST',
+      body: formData,
     }),
 
   put: <T = any>(endpoint: string, data?: any, options?: ApiRequestOptions) =>

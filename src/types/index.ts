@@ -91,6 +91,15 @@ export interface Product extends BaseEntity {
     width: number;
     height: number;
   };
+  /** Key-value product attributes (material, season, fit, etc.) */
+  specifications?: ProductSpecification[];
+  /** Rich HTML size chart (tables, images) */
+  sizeChart?: string;
+}
+
+export interface ProductSpecification {
+  label: string;
+  value: string;
 }
 
 export interface ProductListItem {

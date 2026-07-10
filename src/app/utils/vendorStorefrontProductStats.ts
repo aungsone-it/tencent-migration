@@ -1,4 +1,6 @@
 /** Stable mock sold count per product — avoids random values changing on every refresh. */
+import { normalizeProductSpecifications } from "./productDescriptionDisplay";
+
 export function stableVendorStorefrontSoldCount(product: {
   id?: string;
   sku?: string;
@@ -19,17 +21,18 @@ export function stableVendorStorefrontSoldCount(product: {
 
 export const VENDOR_STOREFRONT_MOCK_RATING = 4.8;
 
-export function normalizeVendorStorefrontProduct<T extends { id?: string; sku?: string; rating?: number; reviewCount?: number; salesVolume?: number }>(
+export function normalizeVendorStorefrontProduct<T extends { id?: string; sku?: string; rating?: number; reviewCount?: number; salesVolume?: number; specifications?: unknown }>(
   product: T
 ): T {
   return {
     ...product,
+    specifications: normalizeProductSpecifications(product.specifications),
     rating: VENDOR_STOREFRONT_MOCK_RATING,
     reviewCount: stableVendorStorefrontSoldCount(product),
   };
 }
 
-export function normalizeVendorStorefrontProducts<T extends { id?: string; sku?: string; rating?: number; reviewCount?: number; salesVolume?: number }>(
+export function normalizeVendorStorefrontProducts<T extends { id?: string; sku?: string; rating?: number; reviewCount?: number; salesVolume?: number; specifications?: unknown }>(
   products: T[]
 ): T[] {
   return products.map(normalizeVendorStorefrontProduct);

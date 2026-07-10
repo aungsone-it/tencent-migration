@@ -11,9 +11,9 @@ import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner";
-import { compressImageToDataURL, compressMultipleImagesToDataURL } from "../../utils/imageCompression";
+import { compressImageToDataURL, compressImageToFile } from "../../utils/imageCompression";
 import { RichTextEditor } from "./RichTextEditor";
-import { productsApi, uploadProductGalleryImage } from "../../utils/api";
+import { productsApi } from "../../utils/api";
 import { apiCache } from "../utils/cache";
 import {
   invalidateAdminAllProductsCache,
@@ -133,6 +133,16 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
   const { t } = useLanguage();
   const [title, setTitle] = useState(initialData?.name || "");
   const [description, setDescription] = useState(initialData?.description || "");
+  const [specifications, setSpecifications] = useState<{ label: string; value: string }[]>(() => {
+    const raw = initialData?.specifications;
+    if (Array.isArray(raw) && raw.length > 0) {
+      return raw.map((s: { label?: string; value?: string }) => ({
+        label: String(s.label ?? ""),
+        value: String(s.value ?? ""),
+      }));
+    }
+    return [{ label: "", value: "" }];
+  });
   const [price, setPrice] = useState(() => formatPriceForForm(initialData?.price) || "");
   const [compareAtPrice, setCompareAtPrice] = useState(initialData?.compareAtPrice?.replace("$", "") || "");
   const [costPerItem, setCostPerItem] = useState(initialData?.costPerItem?.replace("$", "") || "");
@@ -628,9 +638,14 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         toast.info("Uploading product images...", { duration: 3000 });
       }
 
+      const specificationsForSave = specifications
+        .map((s) => ({ label: s.label.trim(), value: s.value.trim() }))
+        .filter((s) => s.label.length > 0);
+
       const data = {
         name: title,
         description,
+        specifications: specificationsForSave,
         price: `$${finalPrice}`,
         compareAtPrice,
         costPerItem,
@@ -692,7 +707,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     const files = e.target.files;
     if (files) {
       setUploadingImages(true);
-      toast.info("Compressing images to 500KB...", { duration: 2000 });
+      toast.info("Compressing images...", { duration: 2000 });
       
       try {
         // Convert FileList to Array and filter only images
@@ -704,19 +719,19 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
           return;
         }
         
-        // Compress then upload to storage so saves only send URLs (avoids 413 payload limit)
-        const compressedDataUrls = await compressMultipleImagesToDataURL(imageFiles, 500);
-        toast.info("Uploading images to storage...", { duration: 2000 });
-        const uploadedUrls = await Promise.all(
-          compressedDataUrls.map((url) => uploadProductGalleryImage(url))
-        );
+        // Compress locally only — same as description editor. Storage upload happens on Save.
+        const dataUrls: string[] = [];
+        for (const file of imageFiles) {
+          dataUrls.push(await compressImageToDataURL(file, 500));
+        }
 
-        // Add uploaded images to the BEGINNING of the array (new images become cover)
-        setImages((prev) => [...uploadedUrls, ...prev]);
-        toast.success(`${uploadedUrls.length} image(s) uploaded!`);
+        setImages((prev) => [...dataUrls, ...prev]);
+        toast.success(`${dataUrls.length} image(s) added`);
       } catch (error) {
         console.error("Error uploading images:", error);
-        toast.error("Failed to upload images");
+        toast.error(
+          error instanceof Error ? error.message : "Failed to upload images"
+        );
       } finally {
         setUploadingImages(false);
         e.target.value = ''; // Reset input
@@ -736,7 +751,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     const files = e.dataTransfer.files;
     if (files && files.length > 0 && images.length < 10) {
       setUploadingImages(true);
-      toast.info("Compressing images to 500KB...", { duration: 2000 });
+      toast.info("Compressing images...", { duration: 2000 });
       
       try {
         // Convert FileList to Array and filter only images
@@ -752,18 +767,19 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         const availableSlots = 10 - images.length;
         const filesToProcess = imageFiles.slice(0, availableSlots);
         
-        // Compress then upload to storage so saves only send URLs (avoids 413 payload limit)
-        const compressedDataUrls = await compressMultipleImagesToDataURL(filesToProcess, 500);
-        toast.info("Uploading images to storage...", { duration: 2000 });
-        const uploadedUrls = await Promise.all(
-          compressedDataUrls.map((url) => uploadProductGalleryImage(url))
-        );
+        // Compress locally only — uploads to storage when you Save
+        const dataUrls: string[] = [];
+        for (const file of filesToProcess) {
+          dataUrls.push(await compressImageToDataURL(file, 500));
+        }
 
-        setImages((prev) => [...uploadedUrls, ...prev]);
-        toast.success(`${uploadedUrls.length} image(s) uploaded!`);
+        setImages((prev) => [...dataUrls, ...prev]);
+        toast.success(`${dataUrls.length} image(s) added`);
       } catch (error) {
         console.error("Error uploading images:", error);
-        toast.error("Failed to upload images");
+        toast.error(
+          error instanceof Error ? error.message : "Failed to upload images"
+        );
       } finally {
         setUploadingImages(false);
       }
@@ -858,12 +874,73 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
               </CardContent>
             </Card>
 
+            {/* Specifications */}
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('addProduct.specifications')}</CardTitle>
+                <CardDescription>{t('addProduct.specificationsCardHint')}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-slate-500">{t('addProduct.specificationsHint')}</p>
+                <div className="space-y-2">
+                  {specifications.map((spec, index) => (
+                    <div key={index} className="flex gap-2 items-start">
+                      <Input
+                        placeholder={t('addProduct.specLabelPlaceholder')}
+                        value={spec.label}
+                        onChange={(e) => {
+                          const next = [...specifications];
+                          next[index] = { ...next[index], label: e.target.value };
+                          setSpecifications(next);
+                        }}
+                        disabled={isReadOnly}
+                        className="flex-1"
+                      />
+                      <Input
+                        placeholder={t('addProduct.specValuePlaceholder')}
+                        value={spec.value}
+                        onChange={(e) => {
+                          const next = [...specifications];
+                          next[index] = { ...next[index], value: e.target.value };
+                          setSpecifications(next);
+                        }}
+                        disabled={isReadOnly}
+                        className="flex-1"
+                      />
+                      {!isReadOnly && specifications.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0 text-slate-500 hover:text-red-600"
+                          onClick={() => setSpecifications(specifications.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {!isReadOnly && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSpecifications([...specifications, { label: "", value: "" }])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    {t('addProduct.addSpecification')}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Media */}
             <Card>
               <CardHeader>
                 <CardTitle>{t('addProduct.media')}</CardTitle>
                 <CardDescription>
-                  Add up to 10 photos. Drag to reorder. First image will be the main product image.
+                  Add up to 10 photos. Drag to reorder. First image will be the main product image. Images upload to storage when you save.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

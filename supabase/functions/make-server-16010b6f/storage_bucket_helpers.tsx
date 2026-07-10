@@ -43,3 +43,21 @@ export async function ensureBucket(
   }
   names.add(bucketName);
 }
+
+/** FormData entry in CloudBase/Deno may be Blob-like — `File` is not always defined. */
+export type FormDataUpload = {
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  size: number;
+  type?: string;
+  name?: string;
+};
+
+export function getFormDataUpload(formData: FormData, field: string): FormDataUpload | null {
+  const entry = formData.get(field);
+  if (entry == null || typeof entry !== "object") return null;
+  const blob = entry as FormDataUpload;
+  if (typeof blob.arrayBuffer !== "function" || typeof blob.size !== "number") {
+    return null;
+  }
+  return blob;
+}

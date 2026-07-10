@@ -122,6 +122,7 @@ export type CategoryStatus = 'active' | 'hide';
 
 export interface Category extends BaseEntity {
   name: string;
+  names?: Partial<Record<"en" | "my", string>>;
   description: string;
   image?: string;
   coverPhoto?: string;

@@ -8,10 +8,11 @@ import {
 } from "./ui/dropdown-menu";
 import { isVendorUncategorizedSlug } from "../utils/vendorStoreCategory";
 import { useLanguage } from "../contexts/LanguageContext";
+import { localizedCategoryName, type CategoryLocaleNames } from "../utils/localizedCategoryName";
 
 export type VendorSubnavTab =
   | { id: "all" }
-  | { id: "category"; categoryId: string; name: string }
+  | { id: "category"; categoryId: string; name: string; names?: CategoryLocaleNames }
   | { id: "uncategorized" };
 
 const SUBNAV_TAB_GAP_PX = 10;
@@ -50,10 +51,14 @@ export function vendorSubnavTabKey(tab: VendorSubnavTab): string {
   return tab.id;
 }
 
-function vendorSubnavTabLabel(tab: VendorSubnavTab, t: (key: string) => string): string {
+function vendorSubnavTabLabel(
+  tab: VendorSubnavTab,
+  t: (key: string) => string,
+  language: ReturnType<typeof useLanguage>["language"]
+): string {
   if (tab.id === "all") return t("storefront.categories.all");
   if (tab.id === "uncategorized") return t("storefront.categories.uncategorized");
-  return tab.name;
+  return localizedCategoryName({ name: tab.name, names: tab.names }, language);
 }
 
 function isVendorSubnavTabActive(tab: VendorSubnavTab, routeSlug: string): boolean {
@@ -125,7 +130,7 @@ export function VendorStorefrontSubnav({
   showPhone,
   onTabSelect,
 }: VendorStorefrontSubnavProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const rowRef = useRef<HTMLDivElement>(null);
   const phoneRef = useRef<HTMLDivElement>(null);
   const moreMeasureRef = useRef<HTMLButtonElement>(null);
@@ -194,7 +199,7 @@ export function VendorStorefrontSubnav({
                   onClick={() => onTabSelect(tab)}
                   className={vendorSubnavTabClass(active)}
                 >
-                  {vendorSubnavTabLabel(tab, t)}
+                  {vendorSubnavTabLabel(tab, t, language)}
                 </button>
               );
             })}
@@ -226,7 +231,7 @@ export function VendorStorefrontSubnav({
                           active ? "font-semibold text-amber-800 focus:text-amber-800" : undefined
                         }`}
                       >
-                        {vendorSubnavTabLabel(tab, t)}
+                        {vendorSubnavTabLabel(tab, t, language)}
                       </DropdownMenuItem>
                     );
                   })}
@@ -290,7 +295,7 @@ export function VendorStorefrontSubnav({
             tabIndex={-1}
             className={vendorSubnavTabClass(false)}
           >
-            {vendorSubnavTabLabel(tab, t)}
+            {vendorSubnavTabLabel(tab, t, language)}
           </button>
         ))}
         <button ref={moreMeasureRef} type="button" tabIndex={-1} className={`${vendorSubnavTabClass(false)} gap-1.5`}>

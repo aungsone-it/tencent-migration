@@ -35,6 +35,7 @@ import {
   refsRemovedSinceUpdate,
 } from "./storage_delete_helpers.tsx";
 import { appendStaffActivity, isStaffAuditActor, isValidStaffActorId } from "./staff_activity_helpers.tsx";
+import { buildCategoryLocaleNames, ensureCategoryLocaleNames } from "./category_i18n.tsx";
 import {
   assertAdminMonitoringAllowed,
   assertDestructiveOperationAllowed,
@@ -13688,30 +13689,40 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
       });
     }
 
-    const categoriesWithCount = kvList.map((cat: any) => {
-      const assignedIds = Array.isArray(cat?.productIds)
-        ? cat.productIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
-        : [];
-      const assignedSet = new Set(assignedIds);
-      const productsInCategory = vendorProducts.filter(
-        (p: any) => assignedSet.has(String(p?.id || "").trim())
-      );
+    const categoriesWithCount = await Promise.all(
+      kvList.map(async (cat: any) => {
+        const assignedIds = Array.isArray(cat?.productIds)
+          ? cat.productIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+          : [];
+        const assignedSet = new Set(assignedIds);
+        const productsInCategory = vendorProducts.filter(
+          (p: any) => assignedSet.has(String(p?.id || "").trim())
+        );
 
-      return {
-        ...cat,
-        productCount: productsInCategory.length,
-        productIds: assignedIds,
-        products: productsInCategory.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          sku: p.sku,
-          price: p.price,
-          image: p.image,
-          status: p.status,
-          inventory: p.inventory,
-        })),
-      };
-    });
+        const localizedCategory = await ensureCategoryLocaleNames(cat);
+        const missingMy = !String(cat?.names?.my || "").trim() && String(localizedCategory?.names?.my || "").trim();
+        if (missingMy && localizedCategory?.id) {
+          kv.set(String(localizedCategory.id), localizedCategory).catch((error) => {
+            console.warn(`⚠️ Failed to persist category locale names for ${localizedCategory.id}:`, error);
+          });
+        }
+
+        return {
+          ...localizedCategory,
+          productCount: productsInCategory.length,
+          productIds: assignedIds,
+          products: productsInCategory.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            price: p.price,
+            image: p.image,
+            status: p.status,
+            inventory: p.inventory,
+          })),
+        };
+      })
+    );
 
     console.log(
       `✅ categories-details: ${categoriesWithCount.length} vendor-owned categories (vendor ${actualVendorId})`
@@ -13852,9 +13863,11 @@ app.post("/make-server-16010b6f/vendor/categories", async (c) => {
     console.log(`📁 Creating category for vendor ${actualVendorId}: ${categoryName}`);
     
     const categoryId = `category:${actualVendorId}:${Date.now()}`;
+    const names = await buildCategoryLocaleNames(categoryName);
     const category = {
       id: categoryId,
       name: categoryName,
+      names,
       description: description || "",
       coverPhoto: coverPhoto || "",
       status: status || "active",
@@ -13900,9 +13913,15 @@ app.put("/make-server-16010b6f/vendor/categories/:categoryId", async (c) => {
         ? await sanitizeVendorCategoryProductIds(actualVendorId, productIds)
         : (existingCategory.productIds || []);
     
+    const nextName = String(name || "").trim() || existingCategory.name;
+    const nameChanged = nextName !== String(existingCategory.name || "").trim();
+    const names = nameChanged
+      ? await buildCategoryLocaleNames(nextName)
+      : existingCategory.names || (await buildCategoryLocaleNames(nextName));
     const updatedCategory = {
       ...existingCategory,
-      name: String(name || "").trim() || existingCategory.name,
+      name: nextName,
+      names,
       description: description || "",
       coverPhoto: coverPhoto !== undefined ? coverPhoto : existingCategory.coverPhoto,
       status: status || existingCategory.status || "active",

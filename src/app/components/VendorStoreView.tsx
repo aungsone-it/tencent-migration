@@ -186,6 +186,11 @@ import {
   vendorCatalogFilterFromRouteSlug,
   vendorCategoryPathSegment,
 } from "../utils/vendorStoreCategory";
+import { localizedCategoryName, type CategoryLocaleNames } from "../utils/localizedCategoryName";
+import {
+  enrichVendorCategoriesWithLocaleNames,
+  vendorCategoriesNeedLocaleMy,
+} from "../utils/categoryLocaleTranslate";
 
 interface Product {
   id: string;
@@ -1174,6 +1179,27 @@ export function VendorStoreView({
   const [vendorCategories, setVendorCategories] = useState<any[]>(
     () => filterVendorCreatedCategories(vendorHomeSnapshot.vendorCategories, vendorId)
   );
+
+  useEffect(() => {
+    if (language !== "my" || !vendorCategoriesNeedLocaleMy(vendorCategories)) return;
+    let cancelled = false;
+    void enrichVendorCategoriesWithLocaleNames(vendorCategories).then((enriched) => {
+      if (cancelled) return;
+      const changed = enriched.some(
+        (category, index) =>
+          String(category?.names?.my || "").trim() !==
+          String(vendorCategories[index]?.names?.my || "").trim()
+      );
+      if (!changed) return;
+      setVendorCategories(enriched);
+      writePersistedJson(lsVendorCategoriesKey(vendorId), enriched);
+      moduleCache.prime(CACHE_KEYS.vendorCategories(vendorId), enriched);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, vendorId, vendorCategories]);
+
   const buildVendorCategoryProductIdMap = useCallback((categories: any[]) => {
     const map = new Map<string, Set<string>>();
     for (const category of filterVendorCreatedCategories(categories || [], vendorId)) {
@@ -1350,9 +1376,9 @@ export function VendorStoreView({
    * into a vendor storefront after a product is assigned to the vendor.
    */
   const subnavCategoryItems = useMemo(() => {
-    const byLower = new Map<string, { id: string; name: string; status?: string }>();
+    const byLower = new Map<string, { id: string; name: string; names?: CategoryLocaleNames; status?: string }>();
 
-    const add = (row: { id?: string; name?: string; status?: string }) => {
+    const add = (row: { id?: string; name?: string; names?: CategoryLocaleNames; status?: string }) => {
       const name = String(row?.name || "").trim();
       if (!name) return;
       if (name.toLowerCase() === VENDOR_STORE_UNCATEGORIZED_SLUG) return;
@@ -1364,12 +1390,13 @@ export function VendorStoreView({
       byLower.set(k, {
         id: rid || `catalog-cat:${k}`,
         name,
+        names: row.names,
         status: row.status,
       });
     };
 
     for (const c of filterVendorCreatedCategories(vendorCategories || [], vendorId)) {
-      add(c as { id?: string; name?: string; status?: string });
+      add(c as { id?: string; name?: string; names?: CategoryLocaleNames; status?: string });
     }
     return [...byLower.values()].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
@@ -1722,6 +1749,7 @@ export function VendorStoreView({
         id: "category" as const,
         categoryId: category.id,
         name: category.name,
+        names: category.names,
       })),
       { id: "uncategorized" },
     ];
@@ -2757,7 +2785,7 @@ export function VendorStoreView({
                     }`}
                     onClick={() => selectVendorCategoryNav(category.name)}
                   >
-                    {category.name}
+                    {localizedCategoryName(category, language)}
                   </Button>
                 ))}
                 <Button
@@ -4220,19 +4248,25 @@ export function VendorStoreView({
               moduleCache.prime(CACHE_KEYS.vendorCategories(vendorId), cleanedCategories);
               categoriesData = cleanedCategories;
               categoriesFromLs = cleanedCategories.length > 0;
-              shouldForceCategoryFetch = cleanedCategories.length === 0;
+              shouldForceCategoryFetch =
+                cleanedCategories.length === 0 || vendorCategoriesNeedLocaleMy(cleanedCategories);
             }
           }
-          if (forceRefresh || !categoriesFromLs) {
+          if (forceRefresh || !categoriesFromLs || shouldForceCategoryFetch) {
             categoriesData = await moduleCache.get(
               CACHE_KEYS.vendorCategories(vendorId),
               () => fetchVendorCategories(vendorId),
-              shouldForceCategoryFetch
+              forceRefresh || shouldForceCategoryFetch
             );
             categoriesData = filterVendorCreatedCategories(categoriesData, vendorId);
-            if (!forceRefresh && Array.isArray(categoriesData)) {
-              writePersistedJson(catLsKey, categoriesData);
-            }
+          }
+
+          if (vendorCategoriesNeedLocaleMy(categoriesData)) {
+            categoriesData = await enrichVendorCategoriesWithLocaleNames(categoriesData);
+          }
+
+          if (Array.isArray(categoriesData)) {
+            writePersistedJson(catLsKey, categoriesData);
           }
         } catch (catErr) {
           console.warn("⚠️ [VENDOR STORE] Categories fetch failed (non-fatal):", catErr);

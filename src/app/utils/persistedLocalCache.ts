@@ -206,7 +206,7 @@ export function lsVendorCatalogPage1Key(
 
 /** Vendor categories list (raw API array). */
 export function lsVendorCategoriesKey(vendorId: string): string {
-  return `migoo-ls-vendor-cats-${encodeURIComponent(String(vendorId))}-v1`;
+  return `migoo-ls-vendor-cats-${encodeURIComponent(String(vendorId))}-v2-locale`;
 }
 
 /** Vendor /saved grid — one page of POST wishlist-vendor-page (per user + storefront + wishlist revision). */

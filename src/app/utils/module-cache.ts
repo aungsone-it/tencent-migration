@@ -45,6 +45,10 @@ import {
   hyphenSlugFromDisplayName,
   parseSubdomainSlugMap,
 } from './subdomainSlugMap';
+import {
+  enrichVendorCategoriesWithLocaleNames,
+  vendorCategoriesNeedLocaleMy,
+} from './categoryLocaleTranslate';
 
 const API_ROOT = cloudbaseApiBaseUrl;
 
@@ -1702,7 +1706,10 @@ export async function fetchVendorCategories(vendorId: string) {
   }
 
   const data = await response.json();
-  return filterVendorCreatedCategories(data.categories || [], vendorId).filter((c: any) => c.status === 'active');
+  const active = filterVendorCreatedCategories(data.categories || [], vendorId).filter(
+    (c: any) => c.status === "active"
+  );
+  return enrichVendorCategoriesWithLocaleNames(active);
 }
 
 // Fetch vendor orders (vendor admin)

@@ -385,8 +385,9 @@ export function Settings() {
   const [userPhone, setUserPhone] = useState("");
   const [userRole, setUserRole] = useState("data-entry");
   const [userStoreId, setUserStoreId] = useState("");
-  const [userAvatar, setUserAvatar] = useState("");
+  const [userAvatarFile, setUserAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState("");
+  const avatarPreviewUrlRef = useRef<string | null>(null);
   const [tempPassword, setTempPassword] = useState("");
   const [showTempPassword, setShowTempPassword] = useState(false);
   const [addUserFormErrors, setAddUserFormErrors] = useState<AddUserFormErrors>({});
@@ -883,13 +884,48 @@ export function Settings() {
     };
   }, [activeTab, user?.role, loadActivities]);
 
+  const revokeAvatarPreview = useCallback(() => {
+    if (avatarPreviewUrlRef.current?.startsWith("blob:")) {
+      URL.revokeObjectURL(avatarPreviewUrlRef.current);
+    }
+    avatarPreviewUrlRef.current = null;
+  }, []);
+
+  useEffect(() => () => revokeAvatarPreview(), [revokeAvatarPreview]);
+
+  const uploadNewUserProfileImage = async (userId: string, file: File): Promise<string | undefined> => {
+    const formData = new FormData();
+    formData.append("image", file);
+    const response = await fetch(
+      `${cloudbaseApiBaseUrl}/auth/user/${encodeURIComponent(userId)}/profile-image`,
+      {
+        method: "POST",
+        headers: {
+          ...getCloudBaseRequestHeaders(),
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+        },
+        body: formData,
+      }
+    );
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || "Failed to upload profile image");
+    }
+    const data = await response.json();
+    return typeof data.profileImageUrl === "string" ? data.profileImageUrl : undefined;
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrl = await compressImage(file, 500);
-      setUserAvatar(dataUrl);
-      setAvatarPreview(dataUrl);
+      const { compressImageToFile } = await import("../../utils/imageCompression");
+      const compressedFile = await compressImageToFile(file, 500);
+      revokeAvatarPreview();
+      const previewUrl = URL.createObjectURL(compressedFile);
+      avatarPreviewUrlRef.current = previewUrl;
+      setUserAvatarFile(compressedFile);
+      setAvatarPreview(previewUrl);
     } catch (err: any) {
       toast.error(err?.message || "Could not process image");
     }
@@ -943,7 +979,8 @@ export function Settings() {
     setUserPhone("");
     const choices = assignableRolesForCreator(user?.role);
     setUserRole(choices[0] || "data-entry");
-    setUserAvatar("");
+    revokeAvatarPreview();
+    setUserAvatarFile(null);
     setAvatarPreview("");
     setAddUserFormErrors({});
     setError("");
@@ -1020,9 +1057,6 @@ export function Settings() {
       if (normalized.phone) {
         createPayload.phone = normalized.phone;
       }
-      if (typeof userAvatar === "string" && userAvatar.startsWith("data:image")) {
-        createPayload.profileImage = userAvatar;
-      }
 
       const response = await fetch(
         `${cloudbaseApiBaseUrl}/auth/create-user`,
@@ -1046,6 +1080,20 @@ export function Settings() {
       const data = await response.json();
       console.log('✅ User created:', data);
 
+      let profileImageUrl =
+        typeof data.profileImageUrl === "string" ? data.profileImageUrl : undefined;
+      if (userAvatarFile) {
+        try {
+          profileImageUrl = await uploadNewUserProfileImage(data.userId, userAvatarFile);
+        } catch (uploadErr: any) {
+          console.warn("Profile image upload after create-user failed:", uploadErr);
+          toast.warning(
+            uploadErr?.message ||
+              "User was created, but the profile image could not be uploaded. Add it from the user profile."
+          );
+        }
+      }
+
       const fallbackAv =
         `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(normalized.email || normalized.name || "user")}`;
       const newUser = {
@@ -1056,8 +1104,8 @@ export function Settings() {
         role: normalized.role,
         storeId: user?.storeId || '',
         status: "active",
-        profileImageUrl: data.profileImageUrl,
-        avatar: data.profileImageUrl || fallbackAv,
+        profileImageUrl: profileImageUrl,
+        avatar: profileImageUrl || fallbackAv,
         lastActive: new Date().toISOString().split("T")[0],
       };
       setUsers([...users, newUser]);
@@ -1883,10 +1931,10 @@ export function Settings() {
                         }}
                         className="relative size-[100px] shrink-0 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50/80 hover:border-slate-400 hover:bg-slate-50 transition-colors cursor-pointer overflow-hidden group outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
                       >
-                        {avatarPreview || userAvatar ? (
+                        {avatarPreview ? (
                           <>
                             <img
-                              src={avatarPreview || userAvatar}
+                              src={avatarPreview}
                               alt=""
                               className="w-full h-full object-cover"
                             />
@@ -1901,7 +1949,8 @@ export function Settings() {
                               className="absolute top-1 right-1 h-6 w-6 rounded-full bg-white/90 text-slate-700 shadow flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white z-10"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setUserAvatar("");
+                                revokeAvatarPreview();
+                                setUserAvatarFile(null);
                                 setAvatarPreview("");
                               }}
                               aria-label={t('settings.users.dialog.removeImage')}

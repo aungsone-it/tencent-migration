@@ -15,7 +15,13 @@ export function toInvoiceSheetOrder(order: {
   couponCode?: string;
   notes?: string;
   vendor?: string;
+  vendorName?: string;
+  storeName?: string;
 }): InvoiceSheetOrder {
+  const vendorLabel = String(
+    order.vendorName || order.vendor || order.storeName || ""
+  ).trim();
+
   return {
     orderNumber: order.orderNumber,
     date: order.date,
@@ -29,6 +35,8 @@ export function toInvoiceSheetOrder(order: {
     discount: order.discount,
     couponCode: order.couponCode,
     notes: order.notes,
-    vendor: order.vendor,
+    vendor: vendorLabel || order.vendor,
+    vendorName: order.vendorName,
+    storeName: order.storeName,
   };
 }

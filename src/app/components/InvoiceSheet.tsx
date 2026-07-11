@@ -24,6 +24,13 @@ export interface InvoiceSheetOrder {
   couponCode?: string;
   notes?: string;
   vendor?: string;
+  vendorName?: string;
+  storeName?: string;
+}
+
+function resolveInvoiceBrandName(order: InvoiceSheetOrder): string {
+  const name = String(order.vendorName || order.vendor || order.storeName || "").trim();
+  return name || BRANDING.APP_NAME || "our store";
 }
 
 function formatCurrency(amount: number): string {
@@ -79,8 +86,7 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
       ? order.customer
       : order.customer?.fullName || order.customer?.name || "Guest Customer";
 
-  const vendorName =
-    String(order.vendor || "").trim() || BRANDING.APP_NAME || "our store";
+  const vendorName = resolveInvoiceBrandName(order);
 
   const barcodeProps = { width: 1, height: 35, fontSize: 20, margin: 6 };
 
@@ -89,7 +95,7 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
       <div className="invoice-body">
       <div className="invoice-header">
         <div className="brand">
-          <h1 className="brand-name">{BRANDING.APP_NAME}</h1>
+          <h1 className="brand-name">{vendorName}</h1>
           <p className="order-date">Date: {formatDate(order.date)}</p>
         </div>
         <div className="barcode-section">

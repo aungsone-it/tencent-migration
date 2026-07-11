@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +10,34 @@ const migrationsDir = path.join(root, "supabase", "migrations");
 const targetUrl = process.env.TENCENT_DATABASE_URL || process.env.TENCENTDB_DATABASE_URL || "";
 const sourceUrl = process.env.SOURCE_POSTGRES_URL || process.env.SOURCE_DATABASE_URL || "";
 const skipData = process.env.SKIP_DATA_COPY === "1";
+
+/** Supabase-only roles/publications do not exist on TencentDB. */
+function sanitizeMigrationSql(sql) {
+  let out = sql;
+  out = out.replace(/\bTO service_role\b/gi, "TO PUBLIC");
+  out = out.replace(/\bTO anon, authenticated\b/gi, "TO PUBLIC");
+  out = out.replace(
+    /DO \$\$[\s\S]*?ALTER PUBLICATION supabase_realtime[\s\S]*?END\s*\$\$;/g,
+    "-- skipped supabase_realtime publication (not used on TencentDB)\n",
+  );
+  return out;
+}
+
+/** KV backfill INSERTs are data migration — skip when only applying schema (TCB-first redeploy). */
+const KV_BACKFILL_MIGRATION = "20260616070000_backfill_app_read_models.sql";
+
+function prepareMigrationSql(name, sql) {
+  let out = sanitizeMigrationSql(sql);
+  if (skipData && name === KV_BACKFILL_MIGRATION) {
+    const marker = "-- Vendors";
+    const idx = out.indexOf(marker);
+    if (idx !== -1) {
+      out = `${out.slice(0, idx).trimEnd()}\n`;
+      console.log("  (SKIP_DATA_COPY: skipping KV backfill INSERTs, keeping helper functions)");
+    }
+  }
+  return out;
+}
 
 function run(command, args, opts = {}) {
   const result = spawnSync(command, args, {
@@ -35,10 +64,22 @@ const migrations = fs
   .sort();
 
 console.log(`Applying ${migrations.length} SQL migration(s) to TencentDB...`);
-for (const name of migrations) {
-  const file = path.join(migrationsDir, name);
-  console.log(`\n==> ${name}`);
-  run("psql", [targetUrl, "-v", "ON_ERROR_STOP=1", "-f", file]);
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tencentdb-migrate-"));
+try {
+  for (const name of migrations) {
+    const file = path.join(migrationsDir, name);
+    console.log(`\n==> ${name}`);
+    const sql = prepareMigrationSql(name, fs.readFileSync(file, "utf8"));
+    const tmpFile = path.join(tmpDir, name);
+    fs.writeFileSync(tmpFile, sql);
+    run("psql", [targetUrl, "-v", "ON_ERROR_STOP=1", "-f", tmpFile]);
+  }
+} finally {
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    // ignore cleanup errors
+  }
 }
 
 if (skipData) {

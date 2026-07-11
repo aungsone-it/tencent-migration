@@ -11,7 +11,8 @@ import {
   ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT,
   ADMIN_VENDOR_APPLICATIONS_UPDATED_STORAGE_KEY,
 } from '../utils/module-cache';
-import { PENDING_ORDER_STATUSES, POLLING_INTERVALS_MS } from '../../constants';
+import { POLLING_INTERVALS_MS } from '../../constants';
+import { normalizeAdminOrderStatusForBadge } from '../utils/normalizeOrderBadgeStatus';
 import { SmartCache } from '../../utils/cache';
 import { badgeCircuitBreaker } from '../../utils/circuit-breaker';
 import { subscribeAdminInbox } from '../utils/chatRealtime';
@@ -130,10 +131,9 @@ export function useBadgeCounts() {
       }
 
       const ordersList = ordersPayload.orders ?? [];
-      const pendingStatuses: readonly string[] = PENDING_ORDER_STATUSES;
       /** Empty list from a successful payload means zero pending — do not keep a stale sidebar/bell count. */
       const pendingOrdersCount = ordersList.filter((order: any) =>
-        pendingStatuses.includes(order.status)
+        normalizeAdminOrderStatusForBadge(order.status) === "pending"
       ).length;
 
       // Get unread chat messages count with silent mode to avoid error toasts

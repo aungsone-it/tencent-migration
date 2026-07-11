@@ -7,6 +7,24 @@ import { normalizeOrderShippingFields, applyNormalizedShippingToOrderBody } from
 
 const DRAFT_KEY_PREFIX = "kpay_pwa_draft:";
 
+export function resolveMerchantOrderIdFromOrder(order: Record<string, unknown>): string {
+  const kpay =
+    order.kpay && typeof order.kpay === "object"
+      ? (order.kpay as Record<string, unknown>)
+      : undefined;
+  const fromKpay = text(kpay?.merchantOrderId);
+  if (fromKpay) return fromKpay;
+  const orderNumber = text(order.orderNumber);
+  if (/^ORD-/i.test(orderNumber)) return orderNumber;
+  return "";
+}
+
+export async function deletePwaCheckoutDraft(merchantOrderId: string): Promise<void> {
+  const id = text(merchantOrderId);
+  if (!id) return;
+  await kv.del(`${DRAFT_KEY_PREFIX}${id}`).catch(() => undefined);
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -122,6 +140,31 @@ export async function getPwaCheckoutDraft(
   return row;
 }
 
+function looksLikeBadRecoveryCustomerName(value: string): boolean {
+  const v = value.trim();
+  if (!v || v.length < 2) return true;
+  if (v.startsWith("/")) return true;
+  if (/^https?:\/\//i.test(v)) return true;
+  return false;
+}
+
+function resolveRecoveryCustomerName(
+  draftName: unknown,
+  shipFullName: unknown,
+  email: unknown,
+): string {
+  const candidates = [
+    text(shipFullName),
+    text(draftName),
+    text(email).split("@")[0] || "",
+    "KBZPay Guest",
+  ];
+  for (const c of candidates) {
+    if (!looksLikeBadRecoveryCustomerName(c)) return c;
+  }
+  return "KBZPay Guest";
+}
+
 function buildOrderBodyFromDraft(
   merchantOrderId: string,
   draft: PwaCheckoutDraftRecord,
@@ -142,11 +185,13 @@ function buildOrderBodyFromDraft(
     country: ship.country || "",
   });
 
+  const customerName = resolveRecoveryCustomerName(d.customerName, ship.fullName, d.email);
+
   return {
     orderNumber: merchantOrderId,
     userId: d.userId ?? null,
-    customer: d.customerName || ship.fullName || "",
-    customerName: d.customerName || ship.fullName || "",
+    customer: customerName,
+    customerName,
     email: d.email || "",
     phone: d.phone || ship.phone || "",
     status: "pending",
@@ -305,6 +350,7 @@ export async function finalizePwaCheckoutOrder(
   if (typeof mapped === "string" && mapped.trim()) {
     const existing = (await kv.get(`order:${mapped.trim()}`)) as Record<string, unknown> | null;
     if (existing) {
+      await deletePwaCheckoutDraft(id);
       return { ok: true, created: false, duplicate: true, order: existing };
     }
   }
@@ -350,6 +396,8 @@ export async function finalizePwaCheckoutOrder(
       message: result.message,
     };
   }
+
+  await deletePwaCheckoutDraft(id);
 
   return {
     ok: true,

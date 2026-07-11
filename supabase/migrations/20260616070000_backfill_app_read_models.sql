@@ -62,6 +62,12 @@ EXCEPTION WHEN others THEN
 END;
 $$;
 
+-- Keep bigserial in sync when rows were loaded with explicit ids (pg_dump / prior backfill).
+SELECT setval(
+  pg_get_serial_sequence('public.app_order_items', 'id'),
+  COALESCE((SELECT MAX(id) FROM public.app_order_items), 0)
+);
+
 -- Vendors
 INSERT INTO public.app_vendors (
   id,

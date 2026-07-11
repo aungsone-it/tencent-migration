@@ -8,7 +8,6 @@ import {
   finalizePwaCheckoutOrderApi,
   type OrphanedPwaDraftRow,
 } from "../utils/kpayClient";
-import { invalidateAdminOrdersCache, invalidateVendorOrdersCache } from "../utils/module-cache";
 import { projectId, publicAnonKey } from "../../../utils/supabase/info";
 
 type PwaOrphanedOrdersRecoveryProps = {
@@ -37,8 +36,8 @@ export function PwaOrphanedOrdersRecovery({
     return /^ORD-/i.test(q) ? q.toUpperCase() : "";
   }, [searchQuery]);
 
-  const loadDrafts = useCallback(async () => {
-    setLoading(true);
+  const loadDrafts = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const rows = await fetchOrphanedPwaDrafts({
         vendorId,
@@ -49,9 +48,9 @@ export function PwaOrphanedOrdersRecovery({
       setDrafts(rows);
     } catch (error) {
       console.warn("[PwaOrphanedOrdersRecovery] load failed", error);
-      setDrafts([]);
+      if (!opts?.silent) setDrafts([]);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [vendorId, searchOrderId]);
 
@@ -74,12 +73,9 @@ export function PwaOrphanedOrdersRecovery({
         return;
       }
       toast.success(`Order ${merchantOrderId} registered successfully`);
-      invalidateAdminOrdersCache();
-      if (vendorId?.trim()) {
-        invalidateVendorOrdersCache(vendorId.trim());
-      }
+      setDrafts((prev) => prev.filter((d) => d.merchantOrderId !== merchantOrderId));
       onRecovered?.(result.order);
-      await loadDrafts();
+      void loadDrafts({ silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Recovery failed");
     } finally {

@@ -749,6 +749,31 @@ async function requestPwaFinalize(
   return { response, data };
 }
 
+function looksLikeBadRecoveryCustomerName(value: string): boolean {
+  const v = value.trim();
+  if (!v || v.length < 2) return true;
+  if (v.startsWith("/")) return true;
+  if (/^https?:\/\//i.test(v)) return true;
+  return false;
+}
+
+function resolveRecoveryCustomerName(
+  draftName: unknown,
+  shipFullName: unknown,
+  email: unknown,
+): string {
+  const candidates = [
+    String(shipFullName ?? "").trim(),
+    String(draftName ?? "").trim(),
+    String(email ?? "").split("@")[0]?.trim() || "",
+    "KBZPay Guest",
+  ];
+  for (const c of candidates) {
+    if (!looksLikeBadRecoveryCustomerName(c)) return c;
+  }
+  return "KBZPay Guest";
+}
+
 async function recoverPwaDraftViaDirectOrderCreate(
   params: KPayBaseParams & { merchantOrderId: string },
 ): Promise<{
@@ -770,11 +795,13 @@ async function recoverPwaDraftViaDirectOrderCreate(
       ? (d.shippingInfo as Record<string, unknown>)
       : {};
 
+  const customerName = resolveRecoveryCustomerName(d.customerName, ship.fullName, d.email);
+
   const orderPayload: Record<string, unknown> = {
     orderNumber: params.merchantOrderId,
     userId: d.userId ?? null,
-    customer: d.customerName || ship.fullName || "",
-    customerName: d.customerName || ship.fullName || "",
+    customer: customerName,
+    customerName,
     email: d.email || "",
     phone: d.phone || ship.phone || "",
     status: "pending",
@@ -856,7 +883,10 @@ export async function finalizePwaCheckoutOrderApi(
 
   if (shouldFallback) {
     const direct = await recoverPwaDraftViaDirectOrderCreate(params);
-    if (direct.ok) return direct;
+    if (direct.ok) {
+      await requestPwaFinalize(merchantOrderId, true).catch(() => {});
+      return direct;
+    }
     return {
       ok: false,
       error: direct.error || parsed.error || "recovery_failed",

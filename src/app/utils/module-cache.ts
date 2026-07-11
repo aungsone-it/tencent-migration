@@ -2549,28 +2549,148 @@ export async function getCachedAdminOrdersPayload(forceRefresh = false) {
   return moduleCache.get(CACHE_KEYS.ADMIN_ORDERS, () => fetchAdminOrdersPayload(), forceRefresh);
 }
 
+export type AdminOrderStatusPatch = {
+  orderId: string;
+  orderNumber?: string;
+  status: string;
+  paymentStatus?: string;
+  shippingStatus?: string;
+};
+
 /** Optimistic status change — keeps pending-order badge in sync before server round-trip. */
 export function patchAdminOrdersCacheStatuses(
-  updates: Array<{ orderId: string; status: string }>
+  updates: Array<AdminOrderStatusPatch>
 ): void {
   if (updates.length === 0) return;
-  const payload = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
-  if (!payload?.orders || !Array.isArray(payload.orders)) return;
-
-  const byId = new Map(updates.map((u) => [String(u.orderId), String(u.status)]));
+  const byId = new Map(updates.map((u) => [String(u.orderId), u]));
+  const byOrderNumber = new Map(
+    updates
+      .filter((u) => String(u.orderNumber || "").trim())
+      .map((u) => [String(u.orderNumber).trim().toLowerCase(), u])
+  );
   const now = new Date().toISOString();
-  const orders = payload.orders.map((raw) => {
-    const o = raw as Record<string, unknown>;
-    const id = String(o?.id ?? "");
-    const nextStatus = byId.get(id);
-    if (!nextStatus) return raw;
-    return { ...o, status: nextStatus, updatedAt: now };
-  });
 
-  moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, { ...payload, orders });
+  const resolvePatch = (raw: Record<string, unknown>) => {
+    const id = String(raw?.id ?? "");
+    const onum = String(raw?.orderNumber ?? "").trim().toLowerCase();
+    return byId.get(id) ?? (onum ? byOrderNumber.get(onum) : undefined);
+  };
+
+  const patchOrderRows = (orders: unknown[]): unknown[] =>
+    orders.map((raw) => {
+      const o = raw as Record<string, unknown>;
+      const patch = resolvePatch(o);
+      if (!patch) return raw;
+      return {
+        ...o,
+        status: patch.status,
+        ...(patch.paymentStatus ? { paymentStatus: patch.paymentStatus } : {}),
+        ...(patch.shippingStatus ? { shippingStatus: patch.shippingStatus } : {}),
+        updatedAt: now,
+      };
+    });
+
+  const payload = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
+  if (payload?.orders && Array.isArray(payload.orders)) {
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, {
+      ...payload,
+      orders: patchOrderRows(payload.orders),
+    });
+  }
+
+  for (const key of moduleCache.getStats().keys) {
+    if (!key.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
+    const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(key);
+    if (!pagePayload?.orders || !Array.isArray(pagePayload.orders)) continue;
+    moduleCache.prime(key, {
+      ...pagePayload,
+      orders: patchOrderRows(pagePayload.orders),
+    });
+  }
+
   SmartCache.delete("badge_counts");
   if (typeof window !== "undefined") {
     notifyAdminOrdersUpdated("patch-admin-orders-status");
+  }
+}
+
+function recoveredOrderCacheKey(order: Record<string, unknown>): string {
+  return String(order.orderNumber || order.id || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isRecoveredOrderPending(order: Record<string, unknown>): boolean {
+  const s = String(order.status || "pending")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/_/g, "-");
+  return s === "pending" || s === "pending-payment";
+}
+
+function prependUniqueOrderRow(list: unknown[], order: Record<string, unknown>): {
+  orders: unknown[];
+  inserted: boolean;
+} {
+  const key = recoveredOrderCacheKey(order);
+  if (!key) return { orders: list, inserted: false };
+  const had = list.some((raw) => recoveredOrderCacheKey(raw as Record<string, unknown>) === key);
+  const filtered = list.filter(
+    (raw) => recoveredOrderCacheKey(raw as Record<string, unknown>) !== key
+  );
+  return { orders: [order, ...filtered], inserted: !had };
+}
+
+/** KBZPay draft recover — prepend row to session caches without invalidating the orders grid. */
+export function insertRecoveredOrderIntoAdminCaches(order: Record<string, unknown>): void {
+  const key = recoveredOrderCacheKey(order);
+  if (!key) return;
+
+  const full = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
+  if (full?.orders && Array.isArray(full.orders)) {
+    const { orders } = prependUniqueOrderRow(full.orders, order);
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, { ...full, orders });
+  } else {
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, { orders: [order] });
+  }
+
+  const pendingBump = isRecoveredOrderPending(order) ? 1 : 0;
+
+  for (const cacheKey of moduleCache.getStats().keys) {
+    if (!cacheKey.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
+    const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(cacheKey);
+    if (!pagePayload?.orders || !Array.isArray(pagePayload.orders)) continue;
+
+    const { orders: nextOrders, inserted } = prependUniqueOrderRow(pagePayload.orders, order);
+    const breakdown = pagePayload.aggregates?.statusBreakdown;
+    moduleCache.prime(cacheKey, {
+      ...pagePayload,
+      orders: nextOrders,
+      total: inserted ? pagePayload.total + 1 : pagePayload.total,
+      aggregates: pagePayload.aggregates
+        ? {
+            ...pagePayload.aggregates,
+            filteredCount: inserted
+              ? pagePayload.aggregates.filteredCount + 1
+              : pagePayload.aggregates.filteredCount,
+            statusBreakdown: breakdown
+              ? {
+                  ...breakdown,
+                  pending:
+                    inserted && pendingBump
+                      ? (breakdown.pending ?? 0) + 1
+                      : (breakdown.pending ?? 0),
+                }
+              : breakdown,
+          }
+        : pagePayload.aggregates,
+    });
+  }
+
+  SmartCache.delete("badge_counts");
+  if (typeof window !== "undefined") {
+    notifyAdminOrdersUpdated("pwa-order-recovered");
   }
 }
 

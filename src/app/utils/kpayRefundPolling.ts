@@ -1,7 +1,6 @@
 import { toast } from "sonner";
 import { ordersApi } from "../../utils/api";
 import { notifyAdminOrdersUpdated } from "./adminOrdersRealtime";
-import { invalidateAdminOrdersCache } from "./module-cache";
 
 export type KPayOrderLike = {
   paymentStatus?: string;
@@ -53,8 +52,7 @@ export function pollKPayRefundAfterCancel(options: {
               (full as { order?: Record<string, unknown> }).order ??
               (full as Record<string, unknown>);
             if (shouldContinue() && orderData && typeof orderData === "object") {
-              invalidateAdminOrdersCache();
-              notifyAdminOrdersUpdated("kpay-refund-settled");
+              notifyAdminOrdersUpdated("kpay-refund-payment-updated");
               onSuccess?.(orderData as Record<string, unknown>);
               const label =
                 orderNumber ||

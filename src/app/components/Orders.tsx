@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { DateRange } from "react-day-picker";
-import { Download, Eye, Printer, Package, Clock, CheckCircle, XCircle, Calendar, TrendingUp, DollarSign, ShoppingCart, X, Truck, CreditCard, MapPin, Phone, Mail, FileText, User, ChevronLeft, ChevronRight } from "lucide-react";
+import { Download, Eye, Printer, Package, Clock, CheckCircle, XCircle, Calendar, TrendingUp, DollarSign, ShoppingCart, X, Truck, CreditCard, MapPin, Phone, Mail, FileText, User, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -45,6 +45,8 @@ import { useLanguage } from "../contexts/LanguageContext";
 import {
   getCachedAdminOrdersPage,
   patchAdminOrdersCacheStatuses,
+  insertRecoveredOrderIntoAdminCaches,
+  invalidateAdminOrdersCache,
   ADMIN_ORDERS_PAGE_DEFAULT,
   moduleCache,
   adminOrdersPageCacheKey,
@@ -144,13 +146,15 @@ function aggregatesBreakdownLooksStale(
     | undefined,
   total: number,
 ): boolean {
-  if (!breakdown || rows.length === 0 || total <= 0) return false;
+  if (!breakdown || total <= 0) return false;
   const sum =
     Number(breakdown.pending ?? 0) +
     Number(breakdown.processing ?? 0) +
     Number(breakdown.fulfilled ?? 0) +
     Number(breakdown.cancelled ?? 0);
-  return sum === 0;
+  if (sum > 0) return false;
+  // All-zero breakdown with orders in the filtered set — only trust page rows when they cover the full total.
+  return rows.length > 0 && total <= rows.length;
 }
 
 
@@ -209,21 +213,57 @@ interface OrderItem {
 type PendingOrderStatusDraft = {
   status: OrderStatus;
   at: number;
+  paymentStatus?: PaymentStatus;
+  shippingStatus?: ShippingStatus;
 };
 
 // Keeps just-updated statuses stable across fast section switches/remounts.
 const pendingOrderStatusDrafts = new Map<string, PendingOrderStatusDraft>();
 const PENDING_ORDER_STATUS_TTL_MS = 90_000;
 
-function applyPendingStatusDrafts(rows: OrderItem[]): OrderItem[] {
+function prunePendingStatusDrafts(): void {
   const now = Date.now();
-  for (const [id, draft] of pendingOrderStatusDrafts.entries()) {
-    if (now - draft.at > PENDING_ORDER_STATUS_TTL_MS) pendingOrderStatusDrafts.delete(id);
+  for (const [key, draft] of pendingOrderStatusDrafts.entries()) {
+    if (now - draft.at > PENDING_ORDER_STATUS_TTL_MS) pendingOrderStatusDrafts.delete(key);
   }
+}
+
+function getPendingDraftForRow(row: OrderItem): PendingOrderStatusDraft | undefined {
+  return (
+    pendingOrderStatusDrafts.get(row.id) ??
+    pendingOrderStatusDrafts.get(row.orderNumber) ??
+    undefined
+  );
+}
+
+function rememberPendingStatusDraft(
+  orderId: string,
+  orderNumber: string | undefined,
+  draft: PendingOrderStatusDraft,
+): void {
+  pendingOrderStatusDrafts.set(orderId, draft);
+  const num = String(orderNumber || "").trim();
+  if (num && num !== orderId) pendingOrderStatusDrafts.set(num, draft);
+}
+
+function forgetPendingStatusDraft(orderId: string, orderNumber?: string): void {
+  pendingOrderStatusDrafts.delete(orderId);
+  const num = String(orderNumber || "").trim();
+  if (num) pendingOrderStatusDrafts.delete(num);
+}
+
+function applyPendingStatusDrafts(rows: OrderItem[]): OrderItem[] {
+  prunePendingStatusDrafts();
   if (pendingOrderStatusDrafts.size === 0) return rows;
   return rows.map((row) => {
-    const draft = pendingOrderStatusDrafts.get(row.id);
-    return draft ? { ...row, status: draft.status } : row;
+    const draft = getPendingDraftForRow(row);
+    if (!draft) return row;
+    return {
+      ...row,
+      status: draft.status,
+      ...(draft.paymentStatus ? { paymentStatus: draft.paymentStatus } : {}),
+      ...(draft.shippingStatus ? { shippingStatus: draft.shippingStatus } : {}),
+    };
   });
 }
 
@@ -653,6 +693,7 @@ export function Orders({
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<OrderStatus>("processing");
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
+  const [isDeletingOrders, setIsDeletingOrders] = useState(false);
   
   const initialOrdersPayload = useMemo(
     () =>
@@ -880,9 +921,65 @@ export function Orders({
     ]
   );
 
-  const handlePwaOrderRecovered = useCallback(() => {
-    void loadOrders(true);
-  }, [loadOrders]);
+  const handlePwaOrderRecovered = useCallback(
+    (recovered?: Record<string, unknown>) => {
+      if (!recovered || typeof recovered !== "object") {
+        onOrderUpdate?.();
+        return;
+      }
+
+      insertRecoveredOrderIntoAdminCaches(recovered);
+      const mapped = dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems([recovered]));
+      if (mapped.length === 0) {
+        onOrderUpdate?.();
+        return;
+      }
+
+      const row = mapped[0];
+      const rowKey = (row.orderNumber || row.id).trim().toLowerCase();
+      const shouldPrependVisible = ordersPage === 1 && sortOrder === "newest";
+      const pendingBump = row.status === "pending" ? 1 : 0;
+
+      setOrders((prev) => {
+        const exists = prev.some(
+          (o) => (o.orderNumber || o.id).trim().toLowerCase() === rowKey
+        );
+        if (exists) {
+          return prev.map((o) =>
+            (o.orderNumber || o.id).trim().toLowerCase() === rowKey ? { ...o, ...row } : o
+          );
+        }
+        if (!shouldPrependVisible) return prev;
+        return [row, ...prev];
+      });
+
+      const alreadyVisible = orders.some(
+        (o) => (o.orderNumber || o.id).trim().toLowerCase() === rowKey
+      );
+      if (!alreadyVisible && shouldPrependVisible) {
+        setOrdersTotal((total) => total + 1);
+        if (pendingBump > 0) {
+          setOrdersAggregates((agg) =>
+            agg
+              ? {
+                  ...agg,
+                  filteredCount: (agg.filteredCount ?? 0) + 1,
+                  statusBreakdown: {
+                    pending: (agg.statusBreakdown?.pending ?? 0) + 1,
+                    processing: agg.statusBreakdown?.processing ?? 0,
+                    fulfilled: agg.statusBreakdown?.fulfilled ?? 0,
+                    cancelled: agg.statusBreakdown?.cancelled ?? 0,
+                  },
+                }
+              : agg
+          );
+        }
+      }
+
+      onOrderUpdate?.();
+    },
+    [onOrderUpdate, orders, ordersPage, sortOrder]
+  );
 
   useEffect(() => {
     void loadOrders(false);
@@ -891,17 +988,34 @@ export function Orders({
   useEffect(() => {
     return subscribeOrderStatusUpdates(({ orderId, status, updatedAt }) => {
       const normalized = normalizeAdminOrderStatusForBadge(status) as OrderStatus;
-      pendingOrderStatusDrafts.set(orderId, { status: normalized, at: Date.now() });
-      setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, status: normalized, updatedAt: updatedAt || o.updatedAt } : o))
-      );
+      setOrders((prev) => {
+        const row = prev.find((o) => o.id === orderId || o.orderNumber === orderId);
+        rememberPendingStatusDraft(orderId, row?.orderNumber, {
+          status: normalized,
+          at: Date.now(),
+        });
+        return prev.map((o) =>
+          o.id === orderId || o.orderNumber === orderId
+            ? { ...o, status: normalized, updatedAt: updatedAt || o.updatedAt }
+            : o
+        );
+      });
       setOrderSaveState((prev) => (prev[orderId] ? prev : { ...prev, [orderId]: "saved" }));
     });
   }, []);
 
   /** Refetch when storefront/admin creates or mutates orders (same tab + other tabs via storage). */
   useEffect(() => {
-    const bump = () => {
+    const bump = (ev: Event) => {
+      const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
+      // Local optimistic status patches already updated the visible rows — skip full refetch blink.
+      if (
+        reason === "patch-admin-orders-status" ||
+        reason === "kpay-refund-payment-updated" ||
+        reason === "pwa-order-recovered"
+      ) {
+        return;
+      }
       void loadOrders(true);
     };
     const onStorage = (e: StorageEvent) => {
@@ -1096,8 +1210,35 @@ export function Orders({
           : order
       )
     );
-    patchAdminOrdersCacheStatuses([{ orderId, status: newStatus }]);
-    pendingOrderStatusDrafts.set(orderId, { status: newStatus, at: Date.now() });
+    patchAdminOrdersCacheStatuses([
+      {
+        orderId,
+        orderNumber: orderBeingUpdated?.orderNumber,
+        status: newStatus,
+        ...(isNowCancelled
+          ? {
+              paymentStatus:
+                orderBeingUpdated?.paymentStatus === "refunded"
+                  ? "refunded"
+                  : ("pending_refund" as PaymentStatus),
+              shippingStatus: "cancelled" as ShippingStatus,
+            }
+          : {}),
+      },
+    ]);
+    rememberPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber, {
+      status: newStatus,
+      at: Date.now(),
+      ...(isNowCancelled
+        ? {
+            paymentStatus:
+              orderBeingUpdated?.paymentStatus === "refunded"
+                ? "refunded"
+                : ("pending_refund" as PaymentStatus),
+            shippingStatus: "cancelled" as ShippingStatus,
+          }
+        : {}),
+    });
     clearOrderSaveState([orderId]);
 
     if (wasNotCancelled && isNowCancelled) {
@@ -1146,10 +1287,18 @@ export function Orders({
                 status: newStatus,
               },
             ])[0];
-            return row ? { ...o, ...row, status: newStatus } : o;
+            const merged = row ? { ...o, ...row, status: newStatus } : o;
+            rememberPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber, {
+              status: newStatus,
+              at: Date.now(),
+              paymentStatus: merged.paymentStatus,
+              shippingStatus: merged.shippingStatus,
+            });
+            return merged;
           })
         );
       }
+      markOrderSaved([orderId]);
       if (wasNotCancelled && isNowCancelled) {
         if (result?.refundPending) {
           toast.message("Order cancelled", {
@@ -1180,7 +1329,14 @@ export function Orders({
                   const row = mapApiOrdersToOrderItems([
                     { ...orderData, id: orderId, status: "cancelled" },
                   ])[0];
-                  return row ? { ...o, ...row, status: "cancelled" } : o;
+                  const merged = row ? { ...o, ...row, status: "cancelled" } : o;
+                  rememberPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber, {
+                    status: "cancelled",
+                    at: Date.now(),
+                    paymentStatus: merged.paymentStatus,
+                    shippingStatus: merged.shippingStatus,
+                  });
+                  return merged;
                 })
               );
             },
@@ -1239,7 +1395,7 @@ export function Orders({
           duration: 10000,
         });
       }
-      pendingOrderStatusDrafts.delete(orderId);
+      forgetPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber);
       clearOrderSaveState([orderId]);
       onOrderUpdate?.();
     }
@@ -1271,6 +1427,55 @@ export function Orders({
     a.href = url;
     a.download = `orders_${format(new Date(), "yyyy-MM-dd")}.csv`;
     a.click();
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error(t("orders.deleteSelectFirst") || "Select orders to delete first.");
+      return;
+    }
+
+    const count = selectedOrders.length;
+    const confirmMsg =
+      t("orders.bulkDeleteConfirm")?.replace("{count}", String(count)) ||
+      `Delete ${count} selected order(s)? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeletingOrders(true);
+    const orderIds = [...selectedOrders];
+    const previousOrders = [...orders];
+    const previousTotal = ordersTotal;
+
+    setOrders((prev) => prev.filter((order) => !orderIds.includes(order.id)));
+    setSelectedOrders([]);
+    setOrdersTotal((prev) => Math.max(0, prev - count));
+
+    try {
+      const results = await Promise.allSettled(orderIds.map((id) => ordersApi.delete(id)));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(`${failed} order delete(s) failed`);
+      }
+      invalidateAdminOrdersCache();
+      for (const id of orderIds) pendingOrderStatusDrafts.delete(id);
+      toast.success(
+        t("orders.bulkDeleteSuccess")?.replace("{count}", String(count)) ||
+          `Deleted ${count} order${count === 1 ? "" : "s"}.`
+      );
+      onOrderUpdate?.();
+      void loadOrders(true);
+    } catch (error: any) {
+      console.error("Failed to delete orders:", error);
+      setOrders(previousOrders);
+      setOrdersTotal(previousTotal);
+      toast.error(
+        t("orders.bulkDeleteError") ||
+          `Failed to delete orders: ${error?.message || "Unknown error"}`
+      );
+      void loadOrders(true);
+    } finally {
+      setIsDeletingOrders(false);
+    }
   };
 
   const pageStatusBreakdown = countOrderStatusBreakdown(orders);
@@ -1440,6 +1645,17 @@ export function Orders({
                       {t("orders.clearFilters")}
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleBulkDelete}
+                    disabled={isDeletingOrders || selectedOrders.length === 0}
+                    className="hidden border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {t("orders.delete")}
+                    {selectedOrders.length > 0 ? ` (${selectedOrders.length})` : ""}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={exportOrders}>
                     <Download className="w-4 h-4 mr-2" />
                     {t("orders.export")}

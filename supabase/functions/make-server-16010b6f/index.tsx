@@ -27,6 +27,10 @@ import {
   getKPayResolvedUrlsRoute,
   getKPayResolvedEndpointUrls,
 } from "./kpay_routes.tsx";
+import {
+  deletePwaCheckoutDraft,
+  resolveMerchantOrderIdFromOrder,
+} from "./pwa_finalize.ts";
 import { ensureBucket, getFormDataUpload } from "./storage_bucket_helpers.tsx";
 import { kvGetObject, verifyStorageToken } from "./kv_storage_backend.ts";
 import { absolutizeStorageObjectUrl, resolveClientImageUrl } from "./storage_url_helpers.tsx";
@@ -52,8 +56,10 @@ import {
 import {
   queueCustomerReadModelDelete,
   queueCustomerReadModelSync,
+  deleteOrderReadModel,
   queueOrderReadModelDelete,
   queueOrderReadModelSync,
+  syncOrderReadModel,
   queueProductReadModelDelete,
   queueProductReadModelSync,
   queueVendorReadModelDelete,
@@ -64,6 +70,7 @@ import {
   queueChatConversationReadModelSync,
   queueChatMessageReadModelSync,
 } from "./read_model.ts";
+import { getCached, setCache, clearCache } from "./server_cache.ts";
 
 // FIRST: Override console.error to filter out HTTP connection errors from Deno runtime
 const originalConsoleError = console.error;
@@ -1351,36 +1358,6 @@ function respondAndProcess<T>(
   }
   
   return response;
-}
-
-// ============================================
-// SERVER-SIDE CACHE
-// Prevent repeated slow DB queries
-// ============================================
-
-const serverCache = new Map<string, { data: any; timestamp: number }>();
-
-function getCached(key: string, maxAge = 10000): any | null {
-  const cached = serverCache.get(key);
-  if (cached && Date.now() - cached.timestamp < maxAge) {
-    console.log(`✅ Server cache HIT: ${key}`);
-    return cached.data;
-  }
-  return null;
-}
-
-function setCache(key: string, data: any): void {
-  serverCache.set(key, { data, timestamp: Date.now() });
-  // Clean old cache entries (keep last 50)
-  if (serverCache.size > 50) {
-    const oldestKey = serverCache.keys().next().value;
-    serverCache.delete(oldestKey);
-  }
-}
-
-function clearCache(key: string): void {
-  serverCache.delete(key);
-  console.log(`🗑️ Cache cleared: ${key}`);
 }
 
 // ============================================
@@ -5364,7 +5341,7 @@ app.get("/make-server-16010b6f/orders/:id/refund-status", async (c) => {
           8000,
         );
         if (synced) {
-          serverCache.delete("orders_minimal");
+          clearCache("orders_minimal");
           const refreshed = await withTimeout(kv.get(resolved.storageKey), 5000);
           if (refreshed && typeof refreshed === "object") {
             resolved = { ...resolved, record: refreshed };
@@ -5920,7 +5897,7 @@ async function applyOrderItemsStockDelta(items: any[], direction: "deduct" | "re
       queueProductReadModelSync(id, product);
     }
   }
-  serverCache.delete("all_products");
+  clearCache("all_products");
 }
 
 app.post("/make-server-16010b6f/orders", async (c) => {
@@ -6085,7 +6062,7 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     }
     
     // Clear cache when order is created
-    serverCache.delete('orders_minimal');
+    clearCache('orders_minimal');
     
     console.log(`✅ Order ${orderData.orderNumber} created successfully`);
 
@@ -6341,7 +6318,7 @@ app.put("/make-server-16010b6f/orders/:id", async (c) => {
     };
     
     await withTimeout(kv.set(storageKey, updatedOrder), 5000);
-    queueOrderReadModelSync(orderKvId, updatedOrder);
+    await syncOrderReadModel(orderKvId, updatedOrder);
 
     const nextPaymentStatus = String(updatedOrder.paymentStatus || "").toLowerCase();
     const nextKpayStatus = String((updatedOrder.kpay as Record<string, unknown> | undefined)?.status || "")
@@ -6354,7 +6331,7 @@ app.put("/make-server-16010b6f/orders/:id", async (c) => {
     }
     
     // Clear cache when order is updated
-    serverCache.delete('orders_minimal');
+    clearCache('orders_minimal');
 
     const statusChanged = prevNorm !== newNorm;
     const actorFromBody = pickValidActorIdFromRecord(body);
@@ -6431,15 +6408,21 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
       // Fallback to deleting only resolved key if scan fails.
     }
     await withTimeout(kv.mdel([...deleteKeys]), 10000);
-    if (canonicalId) {
-      queueOrderReadModelDelete(canonicalId);
-    }
+    await deleteOrderReadModel(canonicalId, canonicalOrderNumber);
+
     if (canonicalOrderNumber) {
       await withTimeout(kv.del(`order_num:${canonicalOrderNumber}`), 5000).catch(() => {});
     }
+
+    const merchantOrderId =
+      resolveMerchantOrderIdFromOrder(existingOrder as Record<string, unknown>) ||
+      canonicalOrderNumber;
+    if (merchantOrderId) {
+      await withTimeout(deletePwaCheckoutDraft(merchantOrderId), 5000).catch(() => {});
+    }
     
     // Clear cache when order is deleted
-    serverCache.delete('orders_minimal');
+    clearCache('orders_minimal');
     
     return c.json({ 
       success: true,
@@ -6468,7 +6451,7 @@ app.delete("/make-server-16010b6f/orders", async (c) => {
     }
     
     // Clear cache
-    serverCache.delete('orders_minimal');
+    clearCache('orders_minimal');
     
     return c.json({ 
       success: true,
@@ -6746,8 +6729,8 @@ app.post("/make-server-16010b6f/categories", async (c) => {
     });
     
     // Invalidate categories cache
-    serverCache.delete("categories");
-    serverCache.delete("platform_categories");
+    clearCache("categories");
+    clearCache("platform_categories");
     
     return c.json({ success: true, category });
   } catch (error) {
@@ -6796,8 +6779,8 @@ app.put("/make-server-16010b6f/categories/:id", async (c) => {
     });
     
     // Invalidate categories cache
-    serverCache.delete("categories");
-    serverCache.delete("platform_categories");
+    clearCache("categories");
+    clearCache("platform_categories");
     
     return c.json({ success: true, category: updated });
   } catch (error) {
@@ -6824,8 +6807,8 @@ app.delete("/make-server-16010b6f/categories/:id", async (c) => {
     console.log(`✅ Category deleted: ${deleteKey}`);
     
     // Invalidate categories cache
-    serverCache.delete("categories");
-    serverCache.delete("platform_categories");
+    clearCache("categories");
+    clearCache("platform_categories");
     
     return c.json({ success: true, message: "Category deleted" });
   } catch (error) {
@@ -6866,8 +6849,8 @@ app.post("/make-server-16010b6f/categories/bulk-delete", async (c) => {
     console.log(`✅ Deleted ${ids.length} categories successfully`);
     
     // Invalidate categories cache
-    serverCache.delete("categories");
-    serverCache.delete("platform_categories");
+    clearCache("categories");
+    clearCache("platform_categories");
     
     return c.json({ 
       success: true, 
@@ -6904,8 +6887,8 @@ app.delete("/make-server-16010b6f/categories/all", async (c) => {
     console.log(`✅ Deleted ${validCategories.length} categories successfully`);
     
     // Invalidate categories cache
-    serverCache.delete("categories");
-    serverCache.delete("platform_categories");
+    clearCache("categories");
+    clearCache("platform_categories");
     
     return c.json({ 
       success: true, 
@@ -7862,7 +7845,7 @@ app.delete("/make-server-16010b6f/vendors/:vendorId", async (c) => {
       }
     }
     if (deletedOrders > 0) {
-      serverCache.delete("orders_minimal");
+      clearCache("orders_minimal");
       console.log(`✅ Deleted ${deletedOrders} vendor-owned orders`);
     }
 
@@ -7944,7 +7927,7 @@ app.delete("/make-server-16010b6f/vendors/:vendorId", async (c) => {
       }
     }
     if (deletedVendorCategories > 0) {
-      serverCache.delete("categories");
+      clearCache("categories");
       console.log(`✅ Deleted ${deletedVendorCategories} vendor categories`);
     }
 
@@ -8005,7 +7988,7 @@ app.delete("/make-server-16010b6f/vendors/:vendorId", async (c) => {
     if (detachedCount > 0) {
       console.log(`✅ Detached deleted vendor ${vendorId} from ${detachedCount} products`);
       clearCache("products");
-      serverCache.delete("all_products");
+      clearCache("all_products");
     }
     
     // Delete vendor data
@@ -8020,9 +8003,9 @@ app.delete("/make-server-16010b6f/vendors/:vendorId", async (c) => {
     );
     
     // Clear vendor cache
-    serverCache.delete("vendors");
-    serverCache.delete("vendors_list_v4");
-    serverCache.delete(`vendor_by_slug:${vendorSettings?.storeSlug}`);
+    clearCache("vendors");
+    clearCache("vendors_list_v4");
+    clearCache(`vendor_by_slug:${vendorSettings?.storeSlug}`);
     
     return c.json({ 
       success: true,
@@ -11310,9 +11293,9 @@ app.post("/make-server-16010b6f/vendor/storefront", async (c) => {
       }
     }
 
-    serverCache.delete(`vendor_by_slug:${mergedSettings.storeSlug}`);
+    clearCache(`vendor_by_slug:${mergedSettings.storeSlug}`);
     if (prevStorefront?.storeSlug && prevStorefront.storeSlug !== mergedSettings.storeSlug) {
-      serverCache.delete(`vendor_by_slug:${prevStorefront.storeSlug}`);
+      clearCache(`vendor_by_slug:${prevStorefront.storeSlug}`);
     }
 
     console.log(`✅ Vendor storefront settings saved for vendor ${settings.vendorId} with slug: ${mergedSettings.storeSlug}`);

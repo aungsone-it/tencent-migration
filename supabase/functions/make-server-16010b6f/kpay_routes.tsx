@@ -13,6 +13,7 @@ import {
   postPwaReconcileRoute as runPwaReconcileRoute,
 } from "./pwa_reconcile.ts";
 import { queueOrderReadModelSync, syncOrderReadModel } from "./read_model.ts";
+import { clearCache } from "./server_cache.ts";
 import { queueMetaCapiPurchaseFromOrder } from "./meta_capi.tsx";
 
 type AnyRecord = Record<string, unknown>;
@@ -2367,6 +2368,8 @@ export async function postPwaFinalizeRoute(c: Context) {
     await syncOrderReadModel(orderId, result.order);
   }
 
+  clearCache("orders_minimal");
+
   return c.json({ success: true, adminRecover, ...result });
 }
 
@@ -2387,6 +2390,8 @@ export async function postPwaAdminRecoverRoute(c: Context) {
     const orderId = text((result.order as AnyRecord).id) || merchantOrderId;
     await syncOrderReadModel(orderId, result.order);
   }
+
+  clearCache("orders_minimal");
 
   return c.json({ success: true, adminRecover: true, ...result });
 }

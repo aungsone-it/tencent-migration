@@ -105,6 +105,16 @@ type AddUserFormErrors = {
   role?: string;
 };
 
+function formatCreateStaffUserError(message: string, t: (key: string) => string): string {
+  const raw = String(message || "").trim();
+  if (!raw) return t("settings.users.createFailedNotFound");
+  const normalized = raw.toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "not_found" || normalized === "notfound") {
+    return t("settings.users.createFailedNotFound");
+  }
+  return raw;
+}
+
 type StaffActivityRow = StaffActivityFeedRow;
 
 function parseActivityDateMs(value: unknown): number | null {
@@ -1003,11 +1013,13 @@ export function Settings() {
       const createPayload: Record<string, unknown> = {
         email: normalized.email,
         name: normalized.name,
-        phone: normalized.phone,
         role: normalized.role,
         storeId: user?.storeId || '',
         createdBy: user.id,
       };
+      if (normalized.phone) {
+        createPayload.phone = normalized.phone;
+      }
       if (typeof userAvatar === "string" && userAvatar.startsWith("data:image")) {
         createPayload.profileImage = userAvatar;
       }
@@ -1078,8 +1090,9 @@ export function Settings() {
       await loadUsers(true);
     } catch (err: any) {
       console.error('❌ Error saving user:', err);
-      setError(err.message || 'Failed to save user');
-      toast.error(err.message || 'Failed to save user');
+      const message = formatCreateStaffUserError(err.message || '', t);
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -1955,18 +1968,18 @@ export function Settings() {
                       <p className="text-xs text-red-600 mt-1">{addUserFormErrors.email}</p>
                     ) : null}
                     <p className="text-xs text-slate-500 mt-1">
-                      User will receive login credentials at this email
+                      {t('settings.users.dialog.emailHint')}
                     </p>
                   </div>
 
                   <div>
                     <Label htmlFor="userPhone" className="text-sm font-medium text-slate-900 mb-2 block">
-                      Phone number
+                      {t('settings.users.dialog.phone')}
                     </Label>
                     <Input
                       id="userPhone"
                       type="tel"
-                      placeholder="+95 9 XXX XXX XXX"
+                      placeholder={t('settings.users.dialog.phonePlaceholder')}
                       value={userPhone}
                       onChange={(e) => {
                         setUserPhone(e.target.value);
@@ -1979,7 +1992,11 @@ export function Settings() {
                     />
                     {addUserFormErrors.phone ? (
                       <p className="text-xs text-red-600 mt-1">{addUserFormErrors.phone}</p>
-                    ) : null}
+                    ) : (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {t('settings.users.dialog.phoneHint')}
+                      </p>
+                    )}
                   </div>
 
                   <div>

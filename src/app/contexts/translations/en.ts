@@ -181,6 +181,9 @@ export const enTranslations: Record<string, string> = {
     'settings.users.dialog.email': 'Email address',
     'settings.users.dialog.emailPlaceholder': 'john@example.com',
     'settings.users.dialog.emailHint': 'User will receive login credentials at this email',
+    'settings.users.dialog.phone': 'Phone number (optional)',
+    'settings.users.dialog.phonePlaceholder': '+95 9 XXX XXX XXX',
+    'settings.users.dialog.phoneHint': 'Leave blank if not needed',
     'settings.users.dialog.role': 'Role',
     'settings.users.dialog.avatar': 'Avatar',
     'settings.users.dialog.cancel': 'Cancel',
@@ -424,6 +427,8 @@ export const enTranslations: Record<string, string> = {
     'settings.users.created': 'User created successfully!',
     'settings.users.temporaryPassword': 'Temporary password:',
     'settings.users.sharePassword': 'Please share this with the user securely.',
+    'settings.users.createFailedNotFound':
+      'User creation failed on the server (not_found). Deploy the latest make-server-16010b6f Cloud Function, then try again.',
     'settings.appearance.heroBanners': 'Hero Banners',
     'settings.appearance.heroBannersDesc': 'Customize the hero banners displayed on your storefront homepage',
     'settings.appearance.bannerUpload': 'Upload',

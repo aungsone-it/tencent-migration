@@ -1067,6 +1067,7 @@ authApp.post("/update-temp-password", async (c) => {
 authApp.post("/create-user", async (c) => {
   try {
     const { name, email, phone, role, storeId, createdBy, profileImage } = await c.req.json();
+    const phoneValue = typeof phone === "string" ? phone.trim() : "";
 
     if (!createdBy || String(createdBy).trim() === "") {
       return c.json({ error: "createdBy is required" }, 400);
@@ -1118,7 +1119,7 @@ authApp.post("/create-user", async (c) => {
       id: userId,
       email: emailLower,
       name,
-      phone: phone || "",
+      phone: phoneValue,
       role: targetRole,
       storeId: storeId || "",
       tempPassword: true,

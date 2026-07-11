@@ -179,6 +179,9 @@ export const zhTranslations: Record<string, string> = {
     'settings.users.dialog.email': '电子邮箱',
     'settings.users.dialog.emailPlaceholder': 'zhangsan@example.com',
     'settings.users.dialog.emailHint': '用户将在此邮箱收到登录凭据',
+    'settings.users.dialog.phone': '电话号码（可选）',
+    'settings.users.dialog.phonePlaceholder': '+95 9 XXX XXX XXX',
+    'settings.users.dialog.phoneHint': '如不需要可留空',
     'settings.users.dialog.role': '角色',
     'settings.users.dialog.avatar': '头像',
     'settings.users.dialog.cancel': '取消',
@@ -422,6 +425,8 @@ export const zhTranslations: Record<string, string> = {
     'settings.users.created': '用户创建成功！',
     'settings.users.temporaryPassword': '临时密码：',
     'settings.users.sharePassword': '请安全地分享给该用户。',
+    'settings.users.createFailedNotFound':
+      '服务器创建用户失败（not_found）。请部署最新的 make-server-16010b6f 云函数后重试。',
     'settings.appearance.heroBanners': '首页横幅',
     'settings.appearance.heroBannersDesc': '自定义显示在店铺首页的横幅',
     'settings.appearance.bannerUpload': '上传',

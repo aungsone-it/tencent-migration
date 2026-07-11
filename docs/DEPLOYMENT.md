@@ -36,21 +36,30 @@ If deep links return 404, SPA fallback is misconfigured.
 
 ## 3) Backend deployment (CloudBase/Tencent)
 
-Deploy Edge Functions:
+### Option A — TCB console (recommended for first deploy)
 
 ```bash
-npm run deploy:edge
+npm run setup:tcb-first
 ```
 
-Or full CloudBase/Tencent rollout (DB + functions):
+Upload `.cloudbase/dist/make-server-16010b6f.zip` and `kpay-webhook.zip` in the TCB console. See [TCB_CONSOLE_SETUP.md](./TCB_CONSOLE_SETUP.md).
+
+### Option B — CLI
+
+```bash
+npm run deploy:functions
+```
+
+Or full rollout (DB + functions):
 
 ```bash
 npm run deploy:cloudbase
 ```
 
-Current active function paths include:
-- `cloudbase/functions/make-server-16010b6f`
-- `cloudbase/functions/kpay-webhook`
+Active function packages:
+
+- `make-server-16010b6f` (main Hono API — source in `supabase/functions/make-server-16010b6f/`)
+- `kpay-webhook` (KBZPay server callback)
 
 ## 4) Environment variables
 
@@ -58,7 +67,13 @@ Use `.env.example` for optional `VITE_*` overrides.
 
 ### CloudBase environment binding (required)
 
-Most of the app reads CloudBase API base URL and publishable key from **`utils/tencent/cloudbase.ts`**, not from `VITE_CLOUDBASE_API_BASE_URL`. When deploying to a new CloudBase environment, update `projectId` and `publicAnonKey` in that file (or refactor to env-based config).
+The app reads API URL and publishable key from **`VITE_CLOUDBASE_*` env vars**, resolved in `utils/tencent/cloudbase.ts` and re-exported via `utils/supabase/info.tsx` (compat shim during migration).
+
+Set in `.env` (local) and EdgeOne build settings (production):
+
+- `VITE_CLOUDBASE_ENV_ID`
+- `VITE_CLOUDBASE_API_BASE_URL`
+- `VITE_CLOUDBASE_PUBLISHABLE_KEY`
 
 ### Frontend envs (`VITE_*`, optional)
 

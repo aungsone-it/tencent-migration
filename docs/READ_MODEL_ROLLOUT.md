@@ -16,16 +16,24 @@ The values must match. Monitoring endpoints reject requests without `x-admin-ope
 1. Push database migrations:
 
    ```bash
+   npm run db:schema
+   ```
+
+   Or full schema + legacy data copy path:
+
+   ```bash
    npm run db:push
    ```
 
-2. Deploy Edge Functions:
+2. Deploy Cloud Functions (console upload or CLI):
 
    ```bash
-   npm run deploy:edge
+   npm run setup:tcb-first   # package zips for console
+   # or
+   npm run deploy:functions
    ```
 
-3. Deploy the frontend through the normal Vercel flow.
+3. Deploy the frontend (`npm run build` → EdgeOne / static host).
 
 ## 3. Validate
 

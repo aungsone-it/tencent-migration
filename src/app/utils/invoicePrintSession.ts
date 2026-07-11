@@ -95,8 +95,8 @@ export const INVOICE_PRINT_STYLES = `
   }
 
   body.invoice-print-active .barcode-section svg text {
-    font-size: max(3.6mm, 3.5vw) !important;
-    font-weight: 700 !important;
+    font-size: 20px !important;
+    font-weight: 600 !important;
     fill: #000 !important;
   }
 
@@ -318,6 +318,11 @@ export const INVOICE_PRINT_STYLES = `
 .barcode-section svg {
   max-width: 100%;
   height: auto;
+}
+
+.barcode-section svg text {
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .section-title {

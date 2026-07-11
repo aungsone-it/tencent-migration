@@ -7,6 +7,7 @@ import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { toast } from 'sonner';
 import { notifyMigooUserSessionChanged } from '../../constants';
+import { createTencentCloudBaseCompatClient } from '../../utils/tencentCloudbaseClient';
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [debugOtp, setDebugOtp] = useState('');
+  const [deliveryNotice, setDeliveryNotice] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
 
   const isVendorRoute = location.pathname.startsWith('/vendor/');
@@ -28,6 +30,7 @@ export function ResetPasswordPage() {
     : '/';
   const returnTo = searchParams.get('returnTo');
   const goBackPath = returnTo || storefrontBasePath;
+  const isAdminReturn = Boolean((returnTo || '').includes('/admin'));
 
   useEffect(() => {
     const prefillEmail = (searchParams.get('email') || '').trim();
@@ -60,7 +63,7 @@ export function ResetPasswordPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        const message = data.error || data.email_error || 'Failed to send OTP';
+        const message = data.email_error || data.error || 'Failed to send OTP';
         setError(message);
         toast.error(message);
         return false;
@@ -69,12 +72,25 @@ export function ResetPasswordPage() {
       setError('');
       if (data.debug_otp) {
         setDebugOtp(data.debug_otp);
+        setDeliveryNotice('');
       } else {
         setDebugOtp('');
+        if (data.emailSent === false) {
+          setDeliveryNotice(
+            data.message ||
+              'Email delivery is not configured on the server. Ask an admin to reset your password from Settings → Users.'
+          );
+        } else {
+          setDeliveryNotice('');
+        }
       }
 
       if (data.debug_otp) {
         toast.success('OTP generated (debug mode)');
+      } else if (data.emailSent === false) {
+        toast.warning(data.message || 'Reset code created, but email was not sent.');
+      } else if (data.message) {
+        toast.success(data.message);
       } else {
         toast.success('Password reset code sent to your email!');
       }
@@ -134,33 +150,49 @@ export function ResetPasswordPage() {
         return;
       }
 
-      // Auto-login after successful password reset for smoother storefront UX
+      // Auto-login after successful password reset
+      const accountKind = String(data.accountKind || '').trim();
+      const useStaffLogin = accountKind === 'staff' || (!accountKind && isAdminReturn);
+
       try {
-        const loginResponse = await fetch(
-          `${cloudbaseApiBaseUrl}/auth/login`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...getCloudBaseRequestHeaders(),
-
-              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-              'apikey': publicAnonKey,
-            },
-            body: JSON.stringify({
-              email: email.trim(),
-              password: newPassword,
-            }),
+        if (useStaffLogin) {
+          const client = createTencentCloudBaseCompatClient();
+          const { data: loginData, error: loginError } = await client.auth.signInStaffWithPassword({
+            email: email.trim(),
+            password: newPassword,
+          });
+          if (!loginError && loginData.user) {
+            toast.success('Password reset successful! You are now signed in.');
+          } else {
+            toast.success('Password reset successful! Please sign in with your new password.');
           }
-        );
-
-        const loginData = await loginResponse.json();
-        if (loginResponse.ok && loginData?.user) {
-          localStorage.setItem('migoo-user', JSON.stringify(loginData.user));
-          notifyMigooUserSessionChanged();
-          toast.success('Password reset successful! You are now signed in.');
         } else {
-          toast.success('Password reset successful! Please sign in with your new password.');
+          const loginResponse = await fetch(
+            `${cloudbaseApiBaseUrl}/auth/login`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...getCloudBaseRequestHeaders(),
+
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+                'apikey': publicAnonKey,
+              },
+              body: JSON.stringify({
+                email: email.trim(),
+                password: newPassword,
+              }),
+            }
+          );
+
+          const loginData = await loginResponse.json();
+          if (loginResponse.ok && loginData?.user) {
+            localStorage.setItem('migoo-user', JSON.stringify(loginData.user));
+            notifyMigooUserSessionChanged();
+            toast.success('Password reset successful! You are now signed in.');
+          } else {
+            toast.success('Password reset successful! Please sign in with your new password.');
+          }
         }
       } catch (autoLoginError) {
         console.warn('Auto-login after reset failed:', autoLoginError);
@@ -255,6 +287,13 @@ export function ResetPasswordPage() {
                 Enter the 6-digit code sent to {email}
               </p>
             </div>
+
+            {deliveryNotice && !debugOtp && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+                <p className="font-semibold">Email not sent</p>
+                <p className="mt-1">{deliveryNotice}</p>
+              </div>
+            )}
 
             {debugOtp && (
               <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">

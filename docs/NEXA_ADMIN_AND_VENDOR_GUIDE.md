@@ -62,15 +62,24 @@ The **Appearance** tab is hidden in the UI; branding fields live under **General
 - While the Activities tab is open, the client polls incrementally every **30 seconds** (`?since=` timestamp) — no full reload on every visit
 - Approve/reject/delete actions require the acting staff member’s CloudBase Auth UUID (`performedByUserId`) from the browser session
 
+### Orders
+
+- Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
+- **KBZPay draft recovery:** amber panel lists paid PWA checkouts that never became orders; **Recover order** creates the order and prepends it to the list without a full refetch
+- Status changes (including cancel on recovered KPay orders) use optimistic UI + cache patches
+- Bulk **Delete** is hidden in the toolbar (handler retained for future use)
+- Sidebar badge counts pending orders using normalized status (not raw KV strings)
+
 ### Typical daily flow
 
 1. Open `/admin`.
-2. Review order/customer/vendor alerts.
-3. Manage catalog and inventory updates.
-4. Process order lifecycle transitions.
-5. Review vendor applications via **Vendor → Review applications**; approve or reject (logged in Activities).
-6. Use **Settings → Users** for staff management (store owner only).
-7. Check **Settings → Activities** for a cross-platform audit trail when needed.
+2. Review order/customer/vendor alerts (sidebar badge = pending orders).
+3. On **Orders**, check the KBZPay drafts panel if present — recover any paid orphans.
+4. Manage catalog and inventory updates.
+5. Process order lifecycle transitions (pending → processing → fulfilled / cancelled).
+6. Review vendor applications via **Vendor → Review applications**; approve or reject (logged in Activities).
+7. Use **Settings → Users** for staff management (store owner only).
+8. Check **Settings → Activities** for a cross-platform audit trail when needed.
 
 Platform branding (name, logo) is editable under **Settings → General** and appears on the apex landing page, admin shell, and default tab titles.
 

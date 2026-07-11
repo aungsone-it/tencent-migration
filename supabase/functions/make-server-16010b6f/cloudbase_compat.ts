@@ -377,6 +377,28 @@ class PostgrestQuery<T = unknown> implements PromiseLike<QueryResult<T>> {
   }
 }
 
+function normalizeAuthUserRecord(user: unknown): Record<string, unknown> {
+  if (!user || typeof user !== "object") return {};
+  const rec = user as Record<string, unknown>;
+  const id = String(rec.id || rec.sub || rec.uid || rec.Uid || "").trim();
+  const email = rec.email ?? rec.Email ?? rec.username ?? rec.Username;
+  return {
+    ...rec,
+    ...(id ? { id } : {}),
+    ...(email != null ? { email: String(email) } : {}),
+  };
+}
+
+function normalizeAuthUserList(data: unknown): Record<string, unknown>[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data.map(normalizeAuthUserRecord);
+  if (typeof data !== "object") return [];
+  const rec = data as Record<string, unknown>;
+  const nested = rec.users ?? rec.list ?? rec.items ?? (rec.data as Record<string, unknown> | undefined)?.users;
+  if (Array.isArray(nested)) return nested.map(normalizeAuthUserRecord);
+  return [];
+}
+
 async function postJson<T = unknown>(url: string, body: unknown): Promise<QueryResult<T>> {
   try {
     const res = await fetch(url, {
@@ -540,7 +562,10 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
         async listUsers(payload?: Record<string, unknown>) {
           const base = cloudbaseAuthBaseUrl();
           if (!base) return errorResult("CLOUDBASE_AUTH_API_BASE_URL is not configured");
-          return postJson(`${base}/admin/users/list`, payload || {});
+          const result = await postJson(`${base}/admin/users/list`, payload || {});
+          if (result.error) return result;
+          const users = normalizeAuthUserList(result.data);
+          return { data: { users }, error: null };
         },
       },
     },

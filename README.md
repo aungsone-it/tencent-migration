@@ -12,28 +12,56 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 - **Vendor-admin portal** — `/vendor/:slug/admin/*` (and legacy `/store/:slug/admin/*` redirects where configured)
 - **CloudBase/Tencent Edge backend** — auth, orders, products, payments, notifications
 
-## Recent Updates (June 2026)
+## Recent Updates (July 2026)
 
 | Area | What shipped |
 |------|----------------|
-| **Platform branding** | Rebrand to **NEXA Platform** — configurable name/logo in admin General settings; early head script avoids tab-title flash on vendor hosts |
-| **SQL read model** | KV writes sync to `app_*` tables (products, orders, vendors, customers); admin list endpoints prefer SQL RPCs with KV fallback |
-| **Realtime efficiency** | Replaced always-on global KV fanout with **pulse tables** (`app_order_pulse`, `app_kv_domain_pulse`, `app_vendor_application_pulse`); legacy KV channel used only as fallback |
-| **DB migrations** | Schema split into focused migration files under `cloudbase/migrations/` (catalog RPCs, read-model tables, pulse triggers, backfill) |
-| **Frontend performance** | Smaller route bundles, debounced admin search, `vendor-storefront-head.js` for sync branding before React paint |
-| **Cart & catalog** | Cart sync hardening, product listing and order section fixes, caching/reload race fixes |
-| **i18n / URLs** | Burmese text in URL segments handled correctly on category and product routes; storefront UI supports English/Burmese |
-| **Deployment** | Tencent Cloud custom-domain middleware adjustments; read-model validation script (`npm run validate:read-model`) |
-| **Legal pages** | Per-vendor Terms and Privacy from vendor settings; `/terms` and `/privacy` on vendor hosts |
-| **Languages** | Vendor storefront language menu is English + Burmese; admin/vendor-admin surfaces remain English + Simplified Chinese |
-| **KBZPay returns** | Unified post-payment summary on the platform apex (`walwal.online/summary`); vendor-scoped checkout paths |
-| **Payments** | Cash on Delivery, KBZPay QR + PWA checkout, webhook sync, refund/cancel flow (production refunds need gateway mTLS/certs) |
-| **Settings & audit** | **Activities** tab — global platform audit timeline (vendor approve/delete, users, products); **Appearance** tab hidden (branding stays under General) |
-| **Landing page** | Vendor partner **carousel** (logos, revenue-sorted, click opens store); **FloatingChat** on apex homepage |
-| **Vendor onboarding** | Application form: Myanmar phone (`+959…` / `09…`), store description ≥10 characters, live email availability check |
-| **Add to Home** | Vendor storefront **Add to Home** FAB (above chat) — Android Chrome native install when eligible; iOS/manual fallback; uses vendor name + logo |
-| **Storefront contact** | Store phone link offers **Dial** or **Viber**; mobile menu shows both actions directly |
-| **Admin UI polish** | Vendors added via **Review applications** only (no manual Add Vendor button); thinner scrollbars platform-wide |
+| **TencentDB migration** | Supabase → TencentDB for PostgreSQL: KV + SQL read-model tables imported; **KPay txn/draft** and **chat** KV skipped (KPay already on TCB). Scripts: `test:db`, `import:supabase-data`, `db:schema`, `setup:tcb-first` |
+| **TCB function deploy** | Console upload zips (`.cloudbase/dist/*.zip`); shared `server_cache.ts`; order delete syncs SQL read model synchronously |
+| **Super-admin Orders** | KBZPay **draft recovery** panel; optimistic list updates (no blink on recover/cancel); badge count normalization; bulk **Delete** hidden in UI (code retained) |
+| **Schema migrations** | `supabase/migrations/` applied to TencentDB; `setup:tcb-first` skips KV backfill INSERTs when `SKIP_DATA_COPY=1` (safe re-run on populated DB) |
+
+### Earlier (June 2026)
+
+| Area | What shipped |
+|------|----------------|
+| **Platform branding** | Rebrand to **NEXA Platform** — configurable name/logo in admin General settings |
+| **SQL read model** | KV writes sync to `app_*` tables; admin list endpoints prefer SQL RPCs with KV fallback |
+| **Realtime efficiency** | Pulse tables (`app_order_pulse`, `app_kv_domain_pulse`, `app_vendor_application_pulse`) |
+| **Frontend performance** | Smaller route bundles, debounced admin search, `vendor-storefront-head.js` |
+| **Payments** | Cash on Delivery, KBZPay QR + PWA, webhook sync, refund/cancel flow |
+| **KBZPay returns** | Unified post-payment summary on apex `/summary` |
+| **Add to Home** | Vendor storefront FAB — see [docs/VENDOR_ADD_TO_HOME.md](docs/VENDOR_ADD_TO_HOME.md) |
+
+## Migration status (Tencent Cloud)
+
+| Component | Status |
+|-----------|--------|
+| TencentDB schema | Applied via `npm run db:schema` / `setup:tcb-first` |
+| KV + read-model data | Imported via `import:supabase-data` (excludes `kpay_txn:*`, `kpay_pwa_draft:*`, `chat:*`) |
+| Cloud Functions | Package with `setup:tcb-first` → upload `.cloudbase/dist/*.zip` to TCB console |
+| Frontend API | `VITE_CLOUDBASE_API_BASE_URL` + publishable key in `.env` / EdgeOne build |
+| KPay on TCB | Already live — do not re-import Supabase KPay KV |
+| Chat KV | Not migrated — chat remains on prior store until cutover |
+| Supabase Storage images | Manual copy to CloudBase Storage still required |
+| Auth users | Separate migration / password reset may be needed |
+
+See [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) and [migration.md](migration.md).
+
+## Recent Updates (June 2026) — archive
+
+<details>
+<summary>June 2026 changelog (collapsed)</summary>
+
+| Area | What shipped |
+|------|----------------|
+| Cart & catalog | Cart sync hardening, product listing fixes, caching/reload race fixes |
+| i18n / URLs | Burmese text in URL segments; storefront English/Burmese |
+| Legal pages | Per-vendor Terms and Privacy from vendor settings |
+| Settings & audit | Activities tab; Appearance hidden (branding under General) |
+| Vendor onboarding | Myanmar phone, store description ≥10 chars, email availability check |
+
+</details>
 
 ## Current Product Surface
 
@@ -71,7 +99,8 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 ### Super Admin
 
 - Dashboard, products, categories, inventory, orders, customers, chat, marketing, finances, settings
-- Vendor management (**Review applications** only — no manual “Add vendor” button), promotions, collaborator flows
+- **Orders:** paginated SQL read model; KBZPay **orphaned draft recovery** (amber panel when paid drafts lack orders); status changes and recover use optimistic UI (no full-list blink)
+- Vendor management (**Review applications** only), promotions, collaborator flows
 - **Settings → General** — platform name, logo, support contact (formerly split with Appearance; Appearance tab is hidden)
 - **Settings → Users** — staff accounts (owner-only)
 - **Settings → Activities** — global audit timeline for all admin actions (visible to everyone who can open Settings)
@@ -150,9 +179,9 @@ Edge middleware (`middleware.ts`) maps vendor subdomains to the SPA; KBZ return 
 - **Frontend:** React 18 + TypeScript + Vite + Tailwind + Radix
 - **Customer storefront UI:** `VendorStorefrontPage`, `VendorStoreView`, `Checkout`
 - **Platform landing:** `LandingPage` (apex only)
-- **Backend:** CloudBase/Tencent Edge Functions (`make-server-16010b6f`, `kpay-webhook`) + CloudBase/Tencent Auth + Storage
-- **Primary datastore:** Postgres KV table `kv_store_16010b6f` (JSON documents) + **SQL read-model tables** (`app_products`, `app_orders`, etc.) synced on write
-- **CloudBase binding:** `utils/tencent/cloudbase.ts` (`cloudbaseApiBaseUrl`, `cloudbasePublishableKey`) — not `VITE_CLOUDBASE_*` for most API calls
+- **Backend:** CloudBase/Tencent HTTP Functions (`make-server-16010b6f`, `kpay-webhook`) + CloudBase Auth + Storage
+- **Database:** TencentDB for PostgreSQL — KV table `kv_store_16010b6f` + SQL read-model tables (`app_*`)
+- **API config:** `VITE_CLOUDBASE_API_BASE_URL` and `VITE_CLOUDBASE_PUBLISHABLE_KEY` in `.env` / EdgeOne (see `utils/tencent/cloudbase.ts`)
 - **Routing:** React Router — public vendor tree, super-admin, vendor-admin, vendor-host-specific routes
 - **Legacy note:** the old shared marketplace storefront components have been removed; customer shopping is only through `VendorStorefrontPage` / `VendorStoreView`
 
@@ -186,37 +215,53 @@ npm test
 | `npm run dev` | Start Vite dev server |
 | `npm run build` | Production build |
 | `npm test` | Run Vitest |
-| `npm run setup:tcb-first` | Schema-only DB push (if configured) + package CloudBase functions for console upload |
+| `npm run test:db` | Test `TENCENT_DATABASE_URL` and `SOURCE_POSTGRES_URL` from `.env` |
+| `npm run setup:tcb-first` | Schema-only DB push (if configured) + package CloudBase zips for console upload |
 | `npm run smoke:tcb` | Smoke-test `/health` and frontend env vars |
-| `npm run import:supabase` | Later: copy Supabase Postgres data into TencentDB |
+| `npm run db:schema` | Apply `supabase/migrations/` to TencentDB only (`SKIP_DATA_COPY=1`) |
+| `npm run db:push` | Migrations + optional Supabase table copy (legacy `migrate-to-tencentdb` data path) |
+| `npm run import:supabase-data` | Full import: schema + KV (excl. kpay/chat) + SQL read-model tables |
+| `npm run import:supabase-data-only` | KV import only (skip schema) |
+| `npm run import:supabase-sql-only` | SQL read-model tables only (skip schema + KV) |
+| `npm run import:vendor-product` | Import vendor + product data subset |
 | `npm run deploy:functions` | Deploy CloudBase functions via CLI (`tcb`) |
-| `npm run db:push` | Push DB migrations (+ optional Supabase data copy) |
-| `npm run db:schema` | Schema-only migration (`SKIP_DATA_COPY=1`) |
 | `npm run deploy:cloudbase` | DB push + functions deploy |
-| `npm run validate:read-model` | Validate KV ↔ SQL read-model counts (requires env secrets) |
+| `npm run validate:read-model` | Validate KV ↔ SQL read-model counts (requires `EDGE_ADMIN_OPERATION_SECRET`) |
+| `npm run kpay:urls` | Print resolved KBZPay gateway URLs from function env |
 
-**TCB-first console setup:** see [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md).
+**TCB-first console setup:** [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md)
 
 ## Environment
 
-Use `.env.example` for optional overrides. **Most API and Auth traffic uses `utils/tencent/cloudbase.ts`**, not `VITE_CLOUDBASE_*`.
+Copy `.env.example` → `.env`. Vite exposes only `VITE_*` variables.
 
-**CloudBase environment (required for API):**
+**Required for local dev / EdgeOne build:**
 
-- Set `projectId` and `publicAnonKey` in `utils/tencent/cloudbase.ts` for your CloudBase environment (autogenerated in Figma Make exports; update when forking)
+```bash
+VITE_CLOUDBASE_ENV_ID=nexa-mm-i0goiaxufc1521e43
+VITE_CLOUDBASE_REGION=ap-shanghai
+VITE_CLOUDBASE_API_BASE_URL=https://<env>.api.tcloudbasegateway.com/v1/functions/make-server-16010b6f
+VITE_CLOUDBASE_PUBLISHABLE_KEY=<Client Publishable Key>
+```
 
-**Optional frontend (`VITE_*` in `.env`):**
+Resolved in `utils/tencent/cloudbase.ts` and re-exported via `utils/supabase/info.tsx` (compat shim).
+
+**TencentDB migration (local scripts only):**
+
+```bash
+TENCENT_DATABASE_URL=postgresql://user:PASSWORD@HOST:PORT/postgres
+SOURCE_POSTGRES_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
+```
+
+Use URL-encoded passwords for special characters. TencentDB managed instances often use a non-5432 port (e.g. `23100`).
+
+**Optional `VITE_*`:**
 
 - `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN`, `VITE_VENDOR_SUBDOMAIN_SLUG_MAP`
-- `VITE_CLOUDBASE_THUMB_MAX` — image transform width override
-- `VITE_ADMIN_OPERATION_SECRET` — must match server `EDGE_ADMIN_OPERATION_SECRET` for destructive admin actions
-- `VITE_STRIPE_PUBLISHABLE_KEY` — only if experimenting with Stripe UI (not used in vendor checkout today)
+- `VITE_ADMIN_OPERATION_SECRET` — must match server `EDGE_ADMIN_OPERATION_SECRET`
+- `VITE_CLOUDBASE_THUMB_MAX` — image transform width
 
-**CloudBase/Tencent Edge Function secrets (server, set in CloudBase/Tencent dashboard):**
-
-- KBZPay gateway credentials and webhook signing key
-- `EDGE_ADMIN_OPERATION_SECRET`
-- `STRIPE_SECRET_KEY` (optional; not used in live checkout)
+**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, etc.
 
 ## Deployment
 
@@ -274,7 +319,7 @@ See [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) §9 for
 
 - Some internal identifiers still use `kpay` or `sec-` channel prefixes for backwards compatibility; user-facing copy uses **KBZPay** and **NEXA Platform**.
 - Legacy markdown in the repo root is outdated — see [docs/LEGACY_DOCS.md](docs/LEGACY_DOCS.md). **This README** and **`docs/`** are the source of truth.
-- CloudBase/Tencent URL/key for most calls come from **`utils/tencent/cloudbase.ts`**, not `.env` alone.
+- CloudBase/Tencent URL/key come from **`VITE_CLOUDBASE_*` in `.env`** (EdgeOne build settings), resolved in `utils/tencent/cloudbase.ts`.
 - Subdomain tenancy and custom domains require correct DNS + host env on both Vite and edge middleware (see `docs/DEPLOYMENT.md`).
 - Do not expect a shared marketplace product catalog at `/` or `/products`; customers shop on individual vendor storefront URLs.
 - Admin SQL read paths require migrations deployed; API keeps KV fallbacks if read models are empty or unavailable.

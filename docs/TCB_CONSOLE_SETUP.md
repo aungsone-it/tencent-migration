@@ -15,8 +15,12 @@ Greenfield setup: empty TencentDB, deploy CloudBase functions, deploy EdgeOne fr
 Add to `.env`:
 
 ```bash
-TENCENT_DATABASE_URL="postgresql://postgres:PASSWORD@HOST:5432/postgres"
+TENCENT_DATABASE_URL="postgresql://USER:URL_ENCODED_PASSWORD@HOST:PORT/postgres"
 ```
+
+Examples:
+- Managed TencentDB: `sg-postgres-xxxx.sql.tencentcdb.com:23100`
+- URL-encode `$`, `%`, and other special characters in passwords
 
 Run:
 
@@ -24,10 +28,12 @@ Run:
 npm run setup:tcb-first
 ```
 
+This applies `supabase/migrations/` with `SKIP_DATA_COPY=1` (schema + helper functions only). **KV backfill INSERTs are skipped** on re-run when the DB already has imported data — safe to run again before uploading function zips.
+
 Or schema-only only:
 
 ```bash
-TENCENT_DATABASE_URL="..." SKIP_DATA_COPY=1 npm run db:push
+npm run db:schema
 ```
 
 ---
@@ -68,6 +74,25 @@ Minimum:
 | `EDGE_ADMIN_OPERATION_SECRET` | Random secret for admin ops |
 
 `TENCENT_POSTGREST_URL` auto-defaults to `{envId}.api.tcloudbasegateway.com/v1/rdb/rest` when `CLOUDBASE_ENV_ID` is set on the function.
+
+### Email (password reset OTP)
+
+Password reset stores a code in KV, then sends it via [Resend](https://resend.com). Without these vars, **no email is sent** (the UI will warn instead of pretending delivery succeeded).
+
+| Variable | Value |
+|----------|-------|
+| `RESEND_API_KEY` | API key from Resend dashboard |
+| `RESEND_FROM_EMAIL` | Verified sender **email only**, e.g. `noreply@yourdomain.com` (not the display name) |
+| `RESEND_FROM_NAME` | Optional display name (default: `Migoo Marketplace`) |
+
+Verify delivery after deploy:
+
+```bash
+curl -sS "$VITE_CLOUDBASE_API_BASE_URL/auth/email-health" \
+  -H "Authorization: Bearer $VITE_CLOUDBASE_PUBLISHABLE_KEY"
+```
+
+Expect `"ok": true`. For local/staging without Resend, set `ALLOW_DEBUG_OTP=true` on the function — the reset page will show the code on screen.
 
 ### 4. Enable Authentication + Storage
 
@@ -184,17 +209,43 @@ Existing Supabase data will **not** appear until Phase 6.
 
 ---
 
-## Phase 6 — Import Supabase later
+## Phase 6 — Import Supabase data
 
-When ready:
+When ready, add to `.env`:
 
 ```bash
-# Add to .env:
-# SOURCE_POSTGRES_URL="postgresql://postgres:...@db....supabase.co:5432/postgres"
-
-npm run import:supabase
+SOURCE_POSTGRES_URL="postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres"
+TENCENT_DATABASE_URL="postgresql://...@HOST:PORT/postgres"
 ```
 
-Then migrate Storage objects and Auth users separately. Only delete Supabase after validation.
+Test connections:
 
-See also: [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md), [DEPLOYMENT.md](./DEPLOYMENT.md).
+```bash
+npm run test:db
+```
+
+### Full import (recommended)
+
+Imports schema (if not skipped), KV rows, and SQL read-model tables. **Skips** `kpay_txn:*`, `kpay_pwa_draft:*`, and `chat:*` (KPay already on TCB).
+
+```bash
+npm run import:supabase-data
+```
+
+### Partial imports
+
+| Command | What it does |
+|---------|----------------|
+| `npm run import:supabase-data-only` | KV only (`SKIP_SCHEMA=1`) |
+| `npm run import:supabase-sql-only` | `app_*` SQL tables only (`SKIP_SCHEMA=1 SKIP_KV=1`) |
+| `npm run import:vendor-product` | Vendor + product subset |
+
+Legacy alias: `npm run import:supabase` → `import-supabase-later.mjs` (see script for behavior).
+
+Then migrate Storage objects and Auth users separately. Only decommission Supabase after validation.
+
+```bash
+npm run validate:read-model
+```
+
+See also: [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md), [DEPLOYMENT.md](./DEPLOYMENT.md), [../migration.md](../migration.md).

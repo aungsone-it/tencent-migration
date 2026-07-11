@@ -207,6 +207,66 @@ async function createKvCustomerAuthUser(opts: {
   return userId;
 }
 
+type PasswordResetAccountKind = "staff" | "customer_kv" | "cloudbase";
+
+type PasswordResetAccount = {
+  userId: string;
+  kind: PasswordResetAccountKind;
+};
+
+async function findCloudbaseAuthUserByEmail(emailLower: string): Promise<{ id: string } | null> {
+  let page = 1;
+  const perPage = 200;
+  while (page <= 25) {
+    const { data, error } = await withTimeout(
+      supabaseAdmin.auth.admin.listUsers({ page, perPage }),
+      30000,
+    );
+    if (error) {
+      console.warn("[auth] listUsers failed during password reset lookup:", error.message);
+      return null;
+    }
+    const users = Array.isArray((data as { users?: { id?: string; email?: string }[] } | null)?.users)
+      ? (data as { users: { id?: string; email?: string }[] }).users
+      : [];
+    const match = users.find((u) => String(u.email || "").trim().toLowerCase() === emailLower);
+    if (match?.id) return { id: String(match.id) };
+    if (users.length < perPage) break;
+    page += 1;
+  }
+  return null;
+}
+
+async function resolvePasswordResetAccount(email: string): Promise<PasswordResetAccount | null> {
+  const emailLower = String(email || "").trim().toLowerCase();
+  if (!emailLower) return null;
+
+  const staffUser = await findStaffUserByEmail(emailLower);
+  if (staffUser?.id) {
+    return { userId: String(staffUser.id), kind: "staff" };
+  }
+
+  const customer = await findCustomerAuthByEmail(emailLower);
+  if (customer?.id) {
+    return { userId: customer.id, kind: "customer_kv" };
+  }
+
+  const cloudbaseUser = await findCloudbaseAuthUserByEmail(emailLower);
+  if (cloudbaseUser?.id) {
+    return { userId: cloudbaseUser.id, kind: "cloudbase" };
+  }
+
+  return null;
+}
+
+async function setCustomerAuthPassword(record: CustomerAuthRecord, plainPassword: string): Promise<void> {
+  await persistCustomerAuthRecord({
+    ...record,
+    password: await hashPasswordPlain(plainPassword),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 async function authUserExistsByEmail(authEmail: string): Promise<boolean> {
   const emailLower = authEmail.trim().toLowerCase();
   if (!emailLower) return false;
@@ -690,6 +750,45 @@ function generatePassword(): string {
   return password;
 }
 
+function stripEnvQuotes(value: string): string {
+  const v = String(value || "").trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+const EMAIL_ADDR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Build Resend `from` — accepts plain email or full `Name <email@domain>` in RESEND_FROM_EMAIL. */
+function buildResendFromAddress(
+  fromEmailRaw: string,
+  fromNameRaw: string,
+): { from: string } | { error: string } {
+  const fromEmail = stripEnvQuotes(fromEmailRaw);
+  const fromName = stripEnvQuotes(fromNameRaw);
+
+  const namedMatch = fromEmail.match(/^(.+?)\s*<([^<>]+)>$/);
+  if (namedMatch) {
+    const addr = namedMatch[2].trim();
+    if (!EMAIL_ADDR_RE.test(addr)) {
+      return { error: `Invalid RESEND_FROM_EMAIL address: ${addr}` };
+    }
+    return { from: fromEmail };
+  }
+
+  const plainEmail = fromEmail.replace(/^<|>$/g, "").trim();
+  if (EMAIL_ADDR_RE.test(plainEmail)) {
+    const safeName = (fromName || "Migoo Marketplace").replace(/[<>]/g, "").trim();
+    return { from: `${safeName} <${plainEmail}>` };
+  }
+
+  return {
+    error:
+      "Invalid RESEND_FROM_EMAIL. Set a plain address like noreply@yourdomain.com (recommended), not only a display name.",
+  };
+}
+
 // ============================================
 // CHECK IF SETUP IS NEEDED
 // ============================================
@@ -716,6 +815,8 @@ authApp.get("/email-health", async (c) => {
     const issues: string[] = [];
     if (!resendApiKey) issues.push("Missing RESEND_API_KEY");
     if (!resendFromEmail) issues.push("Missing RESEND_FROM_EMAIL");
+    const fromBuilt = resendFromEmail ? buildResendFromAddress(resendFromEmail, resendFromName) : null;
+    if (fromBuilt && "error" in fromBuilt) issues.push(fromBuilt.error);
 
     return c.json({
       ok: issues.length === 0,
@@ -723,6 +824,7 @@ authApp.get("/email-health", async (c) => {
       debugOtpEnabled: allowDebugOtp,
       fromEmailConfigured: !!resendFromEmail,
       fromName: resendFromName,
+      fromField: fromBuilt && "from" in fromBuilt ? fromBuilt.from : undefined,
       issues,
     }, issues.length === 0 ? 200 : 503);
   } catch (error: any) {
@@ -987,69 +1089,55 @@ authApp.post("/create-user", async (c) => {
       return c.json({ error: "You cannot assign this role" }, 403);
     }
 
-    // Generate temporary password
-    const tempPassword = generatePassword();
-
-    // Create user in Supabase Auth
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: {
-        name,
-        phone: phone || "",
-        role: targetRole,
-        storeId: storeId || "",
-      },
-    });
-
-    if (error || !data.user) {
-      console.error("Error creating user:", error);
-      return c.json({ error: error?.message || "Failed to create user" }, 500);
+    const emailLower = String(email || "").trim().toLowerCase();
+    if (!emailLower) {
+      return c.json({ error: "Email is required" }, 400);
     }
+
+    if (await findStaffUserByEmail(emailLower)) {
+      return c.json({ error: "A user with this email already exists" }, 409);
+    }
+    if (await findCustomerAuthByEmail(emailLower)) {
+      return c.json({ error: "This email is already used by a storefront customer account" }, 409);
+    }
+
+    // KV-backed staff auth (CloudBase Auth admin /admin/users returns not_found on TCB).
+    const tempPassword = generatePassword();
+    const userId =
+      typeof nodeCrypto.randomUUID === "function"
+        ? nodeCrypto.randomUUID()
+        : `user_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
     let profileImagePath: string | undefined;
     if (profileImage && typeof profileImage === "string" && profileImage.startsWith("data:image/")) {
-      const uploaded = await uploadProfileImage(data.user.id, profileImage);
+      const uploaded = await uploadProfileImage(userId, profileImage);
       if (uploaded) profileImagePath = uploaded;
     }
 
-    const kvProfile: Record<string, unknown> = {
-      id: data.user.id,
-      email,
+    const kvProfile: StaffKvUser = {
+      id: userId,
+      email: emailLower,
       name,
       phone: phone || "",
       role: targetRole,
       storeId: storeId || "",
       tempPassword: true,
+      password: await hashPasswordPlain(tempPassword),
       createdBy,
       createdAt: new Date().toISOString(),
     };
     if (profileImagePath) kvProfile.profileImage = profileImagePath;
 
-    await kv.set(`auth:user:${data.user.id}`, kvProfile);
-
-    if (profileImagePath) {
-      const { error: metaErr } = await supabaseAdmin.auth.admin.updateUserById(data.user.id, {
-        user_metadata: {
-          name,
-          phone: phone || "",
-          role: targetRole,
-          storeId: storeId || "",
-          profileImage: profileImagePath,
-        },
-      });
-      if (metaErr) console.error("⚠️ Auth metadata profileImage update:", metaErr);
-    }
+    await persistStaffUserRecord(kvProfile);
 
     // Add to users list
     const users = (await kv.get("auth:users-list")) || [];
-    users.push(data.user.id);
+    users.push(userId);
     await kv.set("auth:users-list", users);
 
-    console.log(`✅ User created: ${email} with role ${targetRole}`);
-    const createdName = String(name || email || "User").trim();
-    const createdMail = String(email || "").trim();
+    console.log(`✅ User created: ${emailLower} with role ${targetRole}`);
+    const createdName = String(name || emailLower || "User").trim();
+    const createdMail = emailLower;
     await appendStaffActivity(createdBy, {
       type: "user_created",
       action: "User created",
@@ -1064,7 +1152,7 @@ authApp.post("/create-user", async (c) => {
 
     return c.json({
       success: true,
-      userId: data.user.id,
+      userId,
       tempPassword, // Return this so admin can share it
       profileImageUrl,
     });
@@ -1487,42 +1575,29 @@ authApp.post("/send-email-otp", async (c) => {
     console.log(`📧 Generating OTP for email: ${email}`);
 
     const normalizedEmail = String(email || "").trim().toLowerCase();
-    const staffUser = await findStaffUserByEmail(normalizedEmail);
+    const account = await resolvePasswordResetAccount(normalizedEmail);
 
-    let userId = staffUser?.id ? String(staffUser.id) : "";
-
-    if (!userId) {
-      // Fallback: Supabase Auth users (storefront customers with auth accounts)
-      const { data: authUsers, error: userError } = await supabaseAdmin.auth.admin.listUsers();
-      if (userError) {
-        console.error("Error listing users:", userError);
-        return c.json({
-          error:
-            "No account found for this email. If you are a staff member, ask your admin to reset your password from Settings → Users.",
-        }, 404);
-      }
-      const user = authUsers.users.find((u) => u.email?.toLowerCase() === normalizedEmail);
-      if (!user) {
-        console.log(`❌ No user found with email: ${email}`);
-        return c.json({
-          error:
-            "This email is not registered. Use the email from admin setup, or contact your administrator.",
-        }, 404);
-      }
-      userId = user.id;
+    if (!account?.userId) {
+      console.log(`❌ No user found with email: ${email}`);
+      return c.json({
+        error:
+          "This email is not registered. Use the email from admin setup, or contact your administrator.",
+      }, 404);
     }
 
-    console.log(`✅ User found: ${userId} (${email})`);
+    const userId = account.userId;
+    console.log(`✅ User found: ${userId} (${email}, kind=${account.kind})`);
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
     // Store OTP in KV with expiry
-    await kv.set(`otp:email:${email.toLowerCase()}`, {
+    await kv.set(`otp:email:${normalizedEmail}`, {
       code: otp,
       expiresAt,
-      userId: userId,
+      userId,
+      accountKind: account.kind,
       createdAt: new Date().toISOString(),
     });
 
@@ -1540,14 +1615,18 @@ authApp.post("/send-email-otp", async (c) => {
         if (allowDebugOtp) {
           return c.json({
             success: true,
+            emailSent: false,
+            deliveryConfigured: false,
             message: "OTP generated (debug mode enabled)",
             debug_otp: otp,
           });
         }
         return c.json({
           success: true,
+          emailSent: false,
+          deliveryConfigured: false,
           message:
-            "If this email is registered, a reset code was generated. Email delivery is not configured — set RESEND_API_KEY on the Cloud Function, or ask an admin to reset your password.",
+            "Reset code was generated but email is not configured on the server. Set RESEND_API_KEY and RESEND_FROM_EMAIL on the Cloud Function, or ask an admin to reset your password from Settings → Users.",
         });
       }
 
@@ -1556,12 +1635,37 @@ authApp.post("/send-email-otp", async (c) => {
         if (allowDebugOtp) {
           return c.json({
             success: true,
+            emailSent: false,
+            deliveryConfigured: false,
             message: "OTP generated (debug mode enabled)",
             debug_otp: otp,
           });
         }
         return c.json({
+          emailSent: false,
+          deliveryConfigured: false,
           error: "Password reset sender is not configured. Please contact support.",
+        }, 503);
+      }
+
+      const fromBuilt = buildResendFromAddress(resendFromEmail, resendFromName);
+      if ("error" in fromBuilt) {
+        console.error("❌ Invalid RESEND_FROM_EMAIL:", fromBuilt.error);
+        if (allowDebugOtp) {
+          return c.json({
+            success: true,
+            emailSent: false,
+            deliveryConfigured: true,
+            message: "OTP generated (debug mode enabled)",
+            debug_otp: otp,
+            email_error: fromBuilt.error,
+          });
+        }
+        return c.json({
+          emailSent: false,
+          deliveryConfigured: true,
+          error: fromBuilt.error,
+          email_error: fromBuilt.error,
         }, 503);
       }
 
@@ -1572,7 +1676,7 @@ authApp.post("/send-email-otp", async (c) => {
           'Authorization': `Bearer ${resendApiKey}`,
         },
         body: JSON.stringify({
-          from: `${resendFromName} <${resendFromEmail}>`,
+          from: fromBuilt.from,
           to: [email],
           subject: 'Password Reset Code - Migoo',
           html: `
@@ -1645,24 +1749,27 @@ authApp.post("/send-email-otp", async (c) => {
 
       return c.json({
         success: true,
+        emailSent: true,
+        deliveryConfigured: true,
         message: "Password reset code sent to your email",
       });
     } catch (emailError: any) {
       console.error('Email sending error:', emailError);
       const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
-      const exposeEmailErrors = String(Deno.env.get("EXPOSE_EMAIL_ERRORS") || "").toLowerCase() === "true";
       if (allowDebugOtp) {
         return c.json({
           success: true,
+          emailSent: false,
+          deliveryConfigured: true,
           message: "OTP generated (debug mode enabled)",
           debug_otp: otp,
           email_error: emailError?.message || "Unknown email error",
         });
       }
       return c.json({
-        error: exposeEmailErrors
-          ? (emailError?.message || "Failed to send password reset email")
-          : "Failed to send password reset email. Please try again later.",
+        emailSent: false,
+        deliveryConfigured: true,
+        error: emailError?.message || "Failed to send password reset email. Please try again later.",
         email_error: emailError?.message || "Unknown email error",
       }, 502);
     }
@@ -1681,6 +1788,10 @@ authApp.post("/verify-otp-and-reset", async (c) => {
 
     if (!email || !otp || !newPassword) {
       return c.json({ error: "Email, OTP, and new password are required" }, 400);
+    }
+
+    if (String(newPassword).length < 8) {
+      return c.json({ error: "Password must be at least 8 characters" }, 400);
     }
 
     console.log(`🔐 Verifying OTP for: ${email}`);
@@ -1702,25 +1813,58 @@ authApp.post("/verify-otp-and-reset", async (c) => {
     }
 
     // Verify OTP
-    if (storedOtpData.code !== otp) {
+    const submittedOtp = String(otp || "").trim();
+    if (String(storedOtpData.code || "").trim() !== submittedOtp) {
       console.warn(`❌ Invalid OTP attempt for: ${normalizedEmail}`);
       return c.json({ error: "Invalid OTP code. Please check and try again." }, 400);
     }
 
     console.log(`✅ OTP verified for: ${normalizedEmail}`);
 
-    const staffProfile = await kv.get(`auth:user:${storedOtpData.userId}`);
-    if (staffProfile && typeof staffProfile === "object") {
-      await setStaffPassword(staffProfile as StaffKvUser, newPassword, false);
+    let accountKind = storedOtpData.accountKind as PasswordResetAccountKind | undefined;
+    if (!accountKind) {
+      const staffProfile = await kv.get(`auth:user:${storedOtpData.userId}`);
+      if (staffProfile && typeof staffProfile === "object") {
+        accountKind = "staff";
+      } else {
+        const customerRec = await kv.get(`customer_auth:${storedOtpData.userId}`);
+        accountKind = customerRec && typeof customerRec === "object" ? "customer_kv" : "cloudbase";
+      }
+    }
+
+    if (accountKind === "staff") {
+      const staffUser =
+        (await findStaffUserByEmail(normalizedEmail)) ||
+        ((await kv.get(`auth:user:${storedOtpData.userId}`)) as StaffKvUser | null);
+      if (!staffUser?.id) {
+        return c.json({ error: "Staff account not found" }, 404);
+      }
+      await setStaffPassword(staffUser, newPassword, false);
       await kv.del(`otp:email:${normalizedEmail}`);
       console.log(`✅ KV staff password updated for: ${normalizedEmail}`);
       return c.json({
         success: true,
         message: "Password updated successfully",
+        accountKind: "staff",
       });
     }
 
-    // Fallback: Supabase Auth account
+    if (accountKind === "customer_kv") {
+      const customerRec = (await kv.get(`customer_auth:${storedOtpData.userId}`)) as CustomerAuthRecord | null;
+      if (!customerRec?.id) {
+        return c.json({ error: "Customer account not found" }, 404);
+      }
+      await setCustomerAuthPassword(customerRec, newPassword);
+      await kv.del(`otp:email:${normalizedEmail}`);
+      console.log(`✅ KV customer password updated for: ${normalizedEmail}`);
+      return c.json({
+        success: true,
+        message: "Password updated successfully",
+        accountKind: "customer_kv",
+      });
+    }
+
+    // CloudBase Auth account
     const { error } = await supabaseAdmin.auth.admin.updateUserById(
       storedOtpData.userId,
       { password: newPassword }
@@ -1739,6 +1883,7 @@ authApp.post("/verify-otp-and-reset", async (c) => {
     return c.json({
       success: true,
       message: "Password updated successfully",
+      accountKind: "cloudbase",
     });
   } catch (error: any) {
     console.error("Verify OTP error:", error);

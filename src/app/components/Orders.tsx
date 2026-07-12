@@ -86,6 +86,7 @@ import {
   extractOrderShippingFields,
 } from "../utils/orderShippingAddress";
 import { OrderShippingAddressBlock } from "./OrderShippingAddressBlock";
+import { buildOrderExportCsv } from "../utils/orderExportCsv";
 
 type OrderStatus = "pending" | "processing" | "fulfilled" | "cancelled" | "ready-to-ship";
 type PaymentStatus = "paid" | "unpaid" | "refunded" | "pending_refund";
@@ -1412,48 +1413,9 @@ export function Orders({
 
   const hasActiveFilters = searchQuery || statusFilter !== "all" || paymentFilter !== "all" || vendorFilter !== "all" || dateFrom || dateTo;
 
-  const escapeCsvField = (v: unknown) => {
-    const s = String(v ?? "");
-    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-
   const exportOrders = () => {
-    const headers = [
-      "Order Number",
-      "Date",
-      "Customer",
-      "Email",
-      "Phone",
-      "Address",
-      "Vendor",
-      "Total",
-      "Items",
-      "Status",
-      "Payment",
-      "Shipping",
-    ];
-    const csvContent = [
-      headers.join(","),
-      ...displayOrders.map((o) =>
-        [
-          escapeCsvField(o.orderNumber),
-          escapeCsvField(o.date),
-          escapeCsvField(o.customer),
-          escapeCsvField(o.email),
-          escapeCsvField(o.phone),
-          escapeCsvField(o.shippingAddress),
-          escapeCsvField(o.vendor),
-          escapeCsvField(o.total),
-          escapeCsvField(o.items),
-          escapeCsvField(o.status),
-          escapeCsvField(o.paymentStatus),
-          escapeCsvField(o.shippingStatus),
-        ].join(",")
-      ),
-    ].join("\n");
-
-    const blob = new Blob([`\uFEFF${csvContent}`], { type: "text/csv;charset=utf-8" });
+    const csvContent = buildOrderExportCsv(displayOrders);
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

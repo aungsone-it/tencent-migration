@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
@@ -6,6 +6,7 @@ import { Badge } from "./ui/badge";
 import {
   fetchOrphanedPwaDrafts,
   finalizePwaCheckoutOrderApi,
+  invalidateOrphanedPwaDraftsCache,
   type OrphanedPwaDraftRow,
 } from "../utils/kpayClient";
 import { projectId, publicAnonKey } from "../../../utils/supabase/info";
@@ -27,9 +28,11 @@ export function PwaOrphanedOrdersRecovery({
   compact = false,
 }: PwaOrphanedOrdersRecoveryProps) {
   const [drafts, setDrafts] = useState<OrphanedPwaDraftRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [recoveringId, setRecoveringId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(!compact);
+  const hasLoadedOnceRef = useRef(false);
 
   const searchOrderId = useMemo(() => {
     const q = searchQuery.trim();
@@ -37,7 +40,9 @@ export function PwaOrphanedOrdersRecovery({
   }, [searchQuery]);
 
   const loadDrafts = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true);
+    if (opts?.silent) {
+      setRefreshing(true);
+    }
     try {
       const rows = await fetchOrphanedPwaDrafts({
         vendorId,
@@ -45,17 +50,22 @@ export function PwaOrphanedOrdersRecovery({
         limit: 25,
         merchantOrderId: searchOrderId || undefined,
       });
-      setDrafts(rows);
+      const paidDrafts = rows.filter(
+        (row) => row.txnStatus === "paid" && row.canRecover,
+      );
+      setDrafts(paidDrafts);
     } catch (error) {
       console.warn("[PwaOrphanedOrdersRecovery] load failed", error);
-      if (!opts?.silent) setDrafts([]);
+      setDrafts([]);
     } finally {
-      if (!opts?.silent) setLoading(false);
+      setChecked(true);
+      setRefreshing(false);
     }
   }, [vendorId, searchOrderId]);
 
   useEffect(() => {
-    void loadDrafts();
+    void loadDrafts({ silent: hasLoadedOnceRef.current });
+    hasLoadedOnceRef.current = true;
   }, [loadDrafts]);
 
   const handleRecover = async (merchantOrderId: string) => {
@@ -73,6 +83,7 @@ export function PwaOrphanedOrdersRecovery({
         return;
       }
       toast.success(`Order ${merchantOrderId} registered successfully`);
+      invalidateOrphanedPwaDraftsCache();
       setDrafts((prev) => prev.filter((d) => d.merchantOrderId !== merchantOrderId));
       onRecovered?.(result.order);
       void loadDrafts({ silent: true });
@@ -83,7 +94,8 @@ export function PwaOrphanedOrdersRecovery({
     }
   };
 
-  if (!loading && drafts.length === 0) {
+  // Stay invisible while probing and whenever there are no paid orphan drafts.
+  if (!checked || drafts.length === 0) {
     return null;
   }
 
@@ -108,10 +120,10 @@ export function PwaOrphanedOrdersRecovery({
             variant="outline"
             size="sm"
             className="border-amber-300 bg-white"
-            onClick={() => void loadDrafts()}
-            disabled={loading}
+            onClick={() => void loadDrafts({ silent: true })}
+            disabled={refreshing}
           >
-            {loading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
@@ -133,13 +145,7 @@ export function PwaOrphanedOrdersRecovery({
 
       {expanded ? (
         <div className="mt-3 overflow-x-auto">
-          {loading && drafts.length === 0 ? (
-            <div className="flex items-center gap-2 text-sm text-amber-900 py-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Checking for orphaned KBZPay drafts…
-            </div>
-          ) : (
-            <table className="w-full text-sm">
+          <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-amber-900/70 border-b border-amber-200">
                   <th className="py-2 pr-3 font-medium">Order ID</th>
@@ -192,7 +198,6 @@ export function PwaOrphanedOrdersRecovery({
                 ))}
               </tbody>
             </table>
-          )}
         </div>
       ) : null}
     </div>

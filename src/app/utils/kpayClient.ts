@@ -923,12 +923,42 @@ export type OrphanedPwaDraftRow = {
   canRecover: boolean;
 };
 
+const ORPHANED_PWA_DRAFTS_CACHE_MS = 60_000;
+const orphanedPwaDraftsCache = new Map<
+  string,
+  { at: number; rows: OrphanedPwaDraftRow[] }
+>();
+
+function orphanedPwaDraftsCacheKey(params?: {
+  vendorId?: string;
+  minAgeMinutes?: number;
+  limit?: number;
+  merchantOrderId?: string;
+}): string {
+  return [
+    params?.vendorId?.trim() || "",
+    params?.minAgeMinutes ?? "",
+    params?.limit ?? "",
+    params?.merchantOrderId?.trim() || "",
+  ].join("|");
+}
+
+export function invalidateOrphanedPwaDraftsCache(): void {
+  orphanedPwaDraftsCache.clear();
+}
+
 export async function fetchOrphanedPwaDrafts(params?: {
   vendorId?: string;
   minAgeMinutes?: number;
   limit?: number;
   merchantOrderId?: string;
 }): Promise<OrphanedPwaDraftRow[]> {
+  const cacheKey = orphanedPwaDraftsCacheKey(params);
+  const cached = orphanedPwaDraftsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ORPHANED_PWA_DRAFTS_CACHE_MS) {
+    return cached.rows;
+  }
+
   const qs = new URLSearchParams();
   if (params?.vendorId?.trim()) qs.set("vendorId", params.vendorId.trim());
   if (params?.minAgeMinutes != null) qs.set("minAgeMinutes", String(params.minAgeMinutes));
@@ -946,5 +976,7 @@ export async function fetchOrphanedPwaDrafts(params?: {
   if (!response.ok) {
     throw new Error(data.error || "Failed to load orphaned KBZPay drafts");
   }
-  return Array.isArray(data.drafts) ? data.drafts : [];
+  const rows = Array.isArray(data.drafts) ? data.drafts : [];
+  orphanedPwaDraftsCache.set(cacheKey, { at: Date.now(), rows });
+  return rows;
 }

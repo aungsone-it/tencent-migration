@@ -1645,7 +1645,7 @@ export function Orders({
                     size="sm"
                     onClick={handleBulkDelete}
                     disabled={isDeletingOrders || selectedOrders.length === 0}
-                    className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    className="hidden border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
                     {t("orders.delete")}

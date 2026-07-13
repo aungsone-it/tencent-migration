@@ -10,6 +10,7 @@ import { ordersApi } from "../../utils/api";
 import { ApiError } from "../../utils/api-client";
 import { useInvoicePrintJob } from "../utils/invoicePrintSession";
 import { toInvoiceSheetOrder } from "../utils/invoiceOrderMapper";
+import { formatOrderNumberDisplay } from "../utils/orderNumber";
 import type { InvoiceSheetOrder } from "./InvoiceSheet";
 import {
   refreshAdminInventoryAfterOrderStatusPut,
@@ -296,7 +297,7 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
               <div className="h-6 w-px bg-slate-200" />
               <div>
                 <h1 className="text-2xl font-semibold text-slate-900">
-                  Order {order.orderNumber}
+                  Order {formatOrderNumberDisplay(order.orderNumber)}
                 </h1>
                 <p className="text-sm text-slate-500 mt-1">
                   Placed on {order.date}

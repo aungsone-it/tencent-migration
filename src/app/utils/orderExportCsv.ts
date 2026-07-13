@@ -1,3 +1,5 @@
+import { formatOrderNumberDisplay } from "./orderNumber";
+
 export type OrderExportInput = {
   orderNumber: string;
   date: string;
@@ -134,7 +136,7 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
         [
           escapeCsvField(rowNo++),
           escapeCsvField(orderDate),
-          escapeCsvField(order.orderNumber),
+          escapeCsvField(formatOrderNumberDisplay(order.orderNumber)),
           escapeCsvField(customerName),
           escapeCsvField(order.phone),
           escapeCsvField(address),

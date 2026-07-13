@@ -5032,14 +5032,19 @@ function filterSortOrdersAdmin(minimalOrders: any[], opts: NonNullable<ReturnTyp
         typeof order.customer === "string"
           ? order.customer
           : JSON.stringify(order.customer ?? "");
+      const storedOrderNumber = String(order.orderNumber || "");
+      const displayOrderNumber = storedOrderNumber.replace(/^ord-/i, "mos-");
       const hay = [
-        String(order.orderNumber || "").toLowerCase(),
+        storedOrderNumber.toLowerCase(),
+        displayOrderNumber.toLowerCase(),
         String(customerHay || "").toLowerCase(),
         String(order.email || "").toLowerCase(),
         String(order.phone || "").toLowerCase(),
         String(order.id || "").toLowerCase(),
       ];
-      if (!hay.some((h) => h.includes(opts.q))) return false;
+      const q = opts.q.toLowerCase();
+      const qAlt = q.replace(/^mos-/, "ord-");
+      if (!hay.some((h) => h.includes(q) || (qAlt !== q && h.includes(qAlt)))) return false;
     }
     return true;
   });

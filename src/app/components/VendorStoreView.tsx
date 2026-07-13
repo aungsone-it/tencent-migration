@@ -38,6 +38,7 @@ import {
   writeSessionCatalogList,
 } from "../utils/persistedSessionCache";
 import { normalizeVendorStorefrontProducts } from "../utils/vendorStorefrontProductStats";
+import { formatOrderNumberDisplay } from "../utils/orderNumber";
 import {
   getCustomerOrderStatusColor,
   getCustomerOrderStatusLabel,
@@ -3333,7 +3334,7 @@ export function VendorStoreView({
                     <div className="flex flex-col gap-4">
                       <div className="flex items-start justify-between gap-3">
                         <h3 className="text-base sm:text-lg font-bold text-slate-900 break-all">
-                          {order.orderNumber || order.id}
+                          {formatOrderNumberDisplay(String(order.orderNumber || order.id || ""))}
                         </h3>
                         <Badge variant="default" className={`${getCustomerOrderStatusColor(order.status)} shrink-0 text-xs`}>
                           {getCustomerOrderStatusLabel(order.status)}

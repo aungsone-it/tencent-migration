@@ -31,6 +31,7 @@ import {
 } from "../ui/dialog";
 import { AdminDateRangeFilterPopover } from "../AdminDateRangeFilterPopover";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { formatOrderNumberDisplay } from "../../utils/orderNumber";
 import { Label } from "../ui/label";
 import { Separator } from "../ui/separator";
 import { format, startOfDay, endOfDay } from "date-fns";
@@ -1006,7 +1007,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
               <X className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Order {selectedOrder.orderNumber}</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Order {formatOrderNumberDisplay(selectedOrder.orderNumber)}</h1>
               <p className="text-sm text-slate-600">{selectedOrder.date}</p>
             </div>
           </div>
@@ -1579,7 +1580,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
                         </td>
                         <td className="py-3 px-4">
                           <div>
-                            <p className="text-sm font-medium text-slate-900">{order.orderNumber}</p>
+                            <p className="text-sm font-medium text-slate-900">{formatOrderNumberDisplay(order.orderNumber)}</p>
                             <p className="text-xs text-slate-500">
                               {order.items} {t("orders.items").toLowerCase()}
                               {order.deliveryService && (

@@ -1,3 +1,4 @@
+import { buildOrderNumber, ORDER_NUMBER_PREFIX } from "./orderNumber";
 import { resolveVendorPathSlug } from "./vendorStorePaths";
 import {
   isLocalDevHostname,
@@ -350,8 +351,8 @@ function readProviderErrorDetails(data: Record<string, any>): {
   };
 }
 
-export function buildMerchantOrderId(prefix = "ORD"): string {
-  return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+export function buildMerchantOrderId(prefix = ORDER_NUMBER_PREFIX): string {
+  return buildOrderNumber(prefix);
 }
 
 export async function createKPayQrSession(params: CreateKPayQrParams): Promise<KPaySession> {

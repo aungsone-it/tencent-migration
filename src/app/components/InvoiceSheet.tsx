@@ -1,5 +1,6 @@
 import { Barcode } from "./BarcodeLazy";
 import { BRANDING } from "../../constants";
+import { formatInvoiceBarcodeValue } from "../utils/orderNumber";
 
 export interface InvoiceLineItem {
   id?: string;
@@ -88,7 +89,7 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
 
   const vendorName = resolveInvoiceBrandName(order);
 
-  const barcodeProps = { width: 1, height: 35, fontSize: 20, margin: 6 };
+  const barcodeProps = { width: 1, height: 35, fontSize: 14, margin: 6 };
 
   return (
     <div className="invoice-page">
@@ -100,7 +101,7 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
         </div>
         <div className="barcode-section">
           <Barcode
-            value={order.orderNumber.replace("#", "").replace("ORD-", "MOS")}
+            value={formatInvoiceBarcodeValue(order.orderNumber)}
             width={barcodeProps.width}
             height={barcodeProps.height}
             fontSize={barcodeProps.fontSize}

@@ -11,6 +11,7 @@ import {
   CACHE_KEYS,
 } from "../utils/module-cache";
 import { productMatchesAdminLiveSearch } from "../utils/adminProductSearch";
+import { formatOrderNumberDisplay, orderNumberSearchTokens } from "../utils/orderNumber";
 import { formatMMK } from "../../utils/formatNumber";
 
 type AnyProduct = Record<string, unknown> & { id?: string; name?: string; sku?: string; price?: unknown };
@@ -30,6 +31,10 @@ function orderSearchBlob(order: Record<string, unknown>): string {
     }
   };
   push(order.orderNumber);
+  push(formatOrderNumberDisplay(String(order.orderNumber || "")));
+  for (const token of orderNumberSearchTokens(String(order.orderNumber || ""))) {
+    push(token);
+  }
   push(order.id);
   push(order.status);
   push(order.email);

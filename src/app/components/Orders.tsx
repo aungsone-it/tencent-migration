@@ -61,6 +61,7 @@ import { adminOrdersUpdatedStorageKey } from "../utils/adminOrdersRealtime";
 import { useAdminOrdersResyncOnVisible } from "../hooks/useAdminOrdersResyncOnVisible";
 import { PwaOrphanedOrdersRecovery } from "./PwaOrphanedOrdersRecovery";
 import { useAdminPortalDebouncedSearch } from "../utils/adminProductSearch";
+import { formatOrderNumberDisplay } from "../utils/orderNumber";
 import {
   refreshAdminInventoryAfterOrderStatusPut,
   syncAdminInventoryCacheAfterOrderStatusChange,
@@ -1826,7 +1827,7 @@ export function Orders({
                       </td>
                       <td className="py-3 px-4">
                         <div>
-                          <p className="text-sm font-medium text-slate-900">{order.orderNumber}</p>
+                          <p className="text-sm font-medium text-slate-900">{formatOrderNumberDisplay(order.orderNumber)}</p>
                           <p className="text-xs text-slate-500">
                             {order.items} {t("orders.items").toLowerCase()}
                             {order.deliveryService && (
@@ -2088,7 +2089,7 @@ export function Orders({
               <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
                 <div>
                   <p className="text-sm text-slate-500">Order Number</p>
-                  <p className="font-semibold text-slate-900 text-lg">{selectedOrder.orderNumber}</p>
+                  <p className="font-semibold text-slate-900 text-lg">{formatOrderNumberDisplay(selectedOrder.orderNumber)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-slate-500">Order Date</p>

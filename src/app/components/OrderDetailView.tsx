@@ -1,5 +1,6 @@
 import { Check, Package, ChevronLeft, CreditCard, MapPin, ShoppingBag, Tag } from "lucide-react";
 import { Button } from "./ui/button";
+import { formatOrderNumberDisplay } from "../utils/orderNumber";
 
 interface CartItem {
   sku: string;
@@ -110,7 +111,7 @@ export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailVi
             <div>
               <p className="mb-1 text-xs font-medium uppercase tracking-widest text-slate-500">Order number</p>
               <p className="font-mono text-2xl font-semibold tracking-tight text-slate-900">
-                {order.orderNumber || order.id}
+                {formatOrderNumberDisplay(String(order.orderNumber || order.id || ""))}
               </p>
               <p className="mt-1 text-xs text-slate-500">{createdAt}</p>
             </div>

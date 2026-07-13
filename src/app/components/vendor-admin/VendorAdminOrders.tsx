@@ -30,6 +30,7 @@ import {
 } from "../ui/dialog";
 import { AdminDateRangeFilterPopover } from "../AdminDateRangeFilterPopover";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { formatOrderNumberDisplay, orderNumberMatchesQuery } from "../../utils/orderNumber";
 import { Label } from "../ui/label";
 import { Separator } from "../ui/separator";
 import { format, startOfDay, endOfDay } from "date-fns";
@@ -328,7 +329,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = 
-      order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      orderNumberMatchesQuery(order.orderNumber, searchQuery) ||
       order.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.email.toLowerCase().includes(searchQuery.toLowerCase());
     
@@ -633,7 +634,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
               <X className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Order {selectedOrder.orderNumber}</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Order {formatOrderNumberDisplay(selectedOrder.orderNumber)}</h1>
               <p className="text-sm text-slate-600">{selectedOrder.date}</p>
             </div>
           </div>
@@ -1127,7 +1128,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
                         </td>
                         <td className="py-3 px-4">
                           <div>
-                            <p className="font-medium text-slate-900">{order.orderNumber}</p>
+                            <p className="font-medium text-slate-900">{formatOrderNumberDisplay(order.orderNumber)}</p>
                             <p className="text-xs text-slate-500">
                               {order.items} items
                               {order.deliveryService && (

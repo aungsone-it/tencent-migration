@@ -52,6 +52,7 @@ import {
   startKPayPwa,
   KPAY_PWA_PENDING_STORAGE_KEY,
 } from "../utils/kpayClient";
+import { buildOrderNumber, formatOrderNumberDisplay } from "../utils/orderNumber";
 import { resolveVendorSubdomainStoreSlug } from "../utils/vendorSubdomainHooks";
 import { useResolvedVendorHostSlug } from "../utils/vendorHostResolution";
 import {
@@ -1741,7 +1742,7 @@ export function Checkout({
       }
       const orderEmail = resolveOrderEmail();
       setKpayPwaLoading(true);
-      const merchantOrderId = buildMerchantOrderId("ORD");
+      const merchantOrderId = buildMerchantOrderId();
       const originPath =
         typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       const storefrontOrigin =
@@ -1844,7 +1845,7 @@ export function Checkout({
         return;
       }
       setKpayLoading(true);
-      const merchantOrderId = buildMerchantOrderId("ORD");
+      const merchantOrderId = buildMerchantOrderId();
       const session = await createKPayQrSession({
         projectId,
         publicAnonKey,
@@ -2001,7 +2002,7 @@ export function Checkout({
     const orderNum =
       paymentMethod === "KPay" && latestKpaySession?.merchantOrderId
         ? latestKpaySession.merchantOrderId
-        : `ORD-${Date.now().toString(36).toUpperCase()}`;
+        : buildOrderNumber();
     setOrderNumber(orderNum);
 
     try {
@@ -2312,7 +2313,7 @@ export function Checkout({
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/90 px-6 py-5">
               <div>
                 <p className="mb-1 text-xs font-medium uppercase tracking-widest text-slate-500">Order number</p>
-                <p className="font-mono text-2xl font-semibold tracking-tight text-slate-900">{orderNumber}</p>
+                <p className="font-mono text-2xl font-semibold tracking-tight text-slate-900">{formatOrderNumberDisplay(orderNumber)}</p>
               </div>
               <ShoppingBag className="h-8 w-8 text-slate-300" strokeWidth={1.5} aria-hidden />
             </div>

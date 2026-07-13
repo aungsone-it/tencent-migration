@@ -72,6 +72,7 @@ import {
   type VendorAssignPickerSession,
 } from "../utils/vendorAssignPickerSession";
 import { productMatchesAdminLiveSearch } from "../utils/adminProductSearch";
+import { formatOrderNumberDisplay } from "../utils/orderNumber";
 
 const PICKER_SEARCH_DEBOUNCE_MS = 350;
 
@@ -1570,7 +1571,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                         return (
                           <tr key={rowKey} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="p-3 text-sm font-medium text-slate-900">
-                              {textForTableCell(order.orderNumber) || "—"}
+                              {formatOrderNumberDisplay(textForTableCell(order.orderNumber)) || "—"}
                             </td>
                             <td className="p-3 text-sm text-slate-600">{textForTableCell(order.date) || "—"}</td>
                             <td className="p-3 text-sm text-slate-600">

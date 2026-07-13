@@ -10,6 +10,7 @@ import {
   type OrphanedPwaDraftRow,
 } from "../utils/kpayClient";
 import { projectId, publicAnonKey } from "../../../utils/supabase/info";
+import { normalizeOrderNumberSearch, formatOrderNumberDisplay } from "../utils/orderNumber";
 
 type PwaOrphanedOrdersRecoveryProps = {
   /** Limit list to one vendor (vendor admin). */
@@ -34,10 +35,10 @@ export function PwaOrphanedOrdersRecovery({
   const [expanded, setExpanded] = useState(!compact);
   const hasLoadedOnceRef = useRef(false);
 
-  const searchOrderId = useMemo(() => {
-    const q = searchQuery.trim();
-    return /^ORD-/i.test(q) ? q.toUpperCase() : "";
-  }, [searchQuery]);
+  const searchOrderId = useMemo(
+    () => normalizeOrderNumberSearch(searchQuery),
+    [searchQuery],
+  );
 
   const loadDrafts = useCallback(async (opts?: { silent?: boolean }) => {
     if (opts?.silent) {
@@ -159,7 +160,7 @@ export function PwaOrphanedOrdersRecovery({
               <tbody>
                 {drafts.map((draft) => (
                   <tr key={draft.merchantOrderId} className="border-b border-amber-100/80">
-                    <td className="py-2 pr-3 font-mono text-xs">{draft.merchantOrderId}</td>
+                    <td className="py-2 pr-3 font-mono text-xs">{formatOrderNumberDisplay(draft.merchantOrderId)}</td>
                     <td className="py-2 pr-3">{draft.vendor || draft.vendorId || "—"}</td>
                     <td className="py-2 pr-3 tabular-nums">
                       {draft.total != null ? `${Math.round(draft.total).toLocaleString()} MMK` : "—"}

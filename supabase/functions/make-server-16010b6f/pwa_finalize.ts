@@ -15,7 +15,7 @@ export function resolveMerchantOrderIdFromOrder(order: Record<string, unknown>):
   const fromKpay = text(kpay?.merchantOrderId);
   if (fromKpay) return fromKpay;
   const orderNumber = text(order.orderNumber);
-  if (/^ORD-/i.test(orderNumber)) return orderNumber;
+  if (/^(ORD|MOS)-/i.test(orderNumber)) return orderNumber;
   return "";
 }
 

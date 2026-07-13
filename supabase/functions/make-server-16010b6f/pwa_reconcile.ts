@@ -55,6 +55,15 @@ function draftMatchesVendorFilter(
   return vendor === filter || vendorId === filter || vendor.includes(filter) || vendorId.includes(filter);
 }
 
+function orderIdLookupVariants(id: string): string[] {
+  const trimmed = text(id).toUpperCase();
+  if (!trimmed) return [];
+  const match = trimmed.match(/^(ORD|MOS)-(.+)$/);
+  if (!match) return [trimmed];
+  const code = match[2];
+  return [`ORD-${code}`, `MOS-${code}`];
+}
+
 export async function listOrphanedPwaDrafts(options?: {
   minAgeMinutes?: number;
   limit?: number;
@@ -65,10 +74,18 @@ export async function listOrphanedPwaDrafts(options?: {
   const limit = Math.min(Math.max(options?.limit ?? 50, 1), 200);
   const vendorFilter = text(options?.vendorId);
   const exactId = text(options?.merchantOrderId);
+  const exactIdVariants = exactId ? orderIdLookupVariants(exactId) : [];
   const now = Date.now();
 
   const rows = exactId
-    ? [{ key: `${PWA_DRAFT_KEY_PREFIX}${exactId}`, value: await kv.get(`${PWA_DRAFT_KEY_PREFIX}${exactId}`) }]
+    ? (
+        await Promise.all(
+          exactIdVariants.map(async (id) => ({
+            key: `${PWA_DRAFT_KEY_PREFIX}${id}`,
+            value: await kv.get(`${PWA_DRAFT_KEY_PREFIX}${id}`),
+          })),
+        )
+      ).filter((row) => row.value)
     : await kv.getByPrefixWithKeys(PWA_DRAFT_KEY_PREFIX);
 
   const result: OrphanedPwaDraftRow[] = [];
@@ -78,7 +95,7 @@ export async function listOrphanedPwaDrafts(options?: {
     if (!row?.key?.startsWith(PWA_DRAFT_KEY_PREFIX)) continue;
 
     const merchantOrderId = row.key.slice(PWA_DRAFT_KEY_PREFIX.length);
-    if (!merchantOrderId || (exactId && merchantOrderId !== exactId)) continue;
+    if (!merchantOrderId || (exactId && !exactIdVariants.includes(merchantOrderId.toUpperCase()))) continue;
 
     const draft = row.value as PwaCheckoutDraftRecord | null;
     if (!draft || typeof draft !== "object") continue;

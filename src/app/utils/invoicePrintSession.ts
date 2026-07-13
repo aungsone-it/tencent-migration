@@ -95,8 +95,8 @@ export const INVOICE_PRINT_STYLES = `
   }
 
   body.invoice-print-active .barcode-section svg text {
-    font-size: 20px !important;
-    font-weight: 600 !important;
+    font-size: max(2.4mm, 1.75vw) !important;
+    font-weight: 400 !important;
     fill: #000 !important;
   }
 
@@ -208,11 +208,12 @@ export const INVOICE_PRINT_STYLES = `
   }
 
   body.invoice-print-active .thank-you {
-    font-size: max(3.1mm, 2.55vw) !important;
-    font-weight: 700 !important;
-    color: #222 !important;
+    font-size: max(2.4mm, 1.85vw) !important;
+    font-weight: 300 !important;
+    font-style: normal !important;
+    color: #444 !important;
     margin: 1vw 0 0 !important;
-    line-height: 1.4 !important;
+    line-height: 1.35 !important;
   }
 
   body.invoice-print-active .items-table thead {
@@ -277,7 +278,7 @@ export const INVOICE_PRINT_STYLES = `
   .invoice-screen-preview .notes-text { font-size: 8px; }
   .invoice-screen-preview .total-label,
   .invoice-screen-preview .total-amount { font-size: 12px; }
-  .invoice-screen-preview .thank-you { font-size: 9px; }
+  .invoice-screen-preview .thank-you { font-size: 7px; font-weight: 300; font-style: normal; }
 }
 
 .invoice-page {
@@ -321,8 +322,8 @@ export const INVOICE_PRINT_STYLES = `
 }
 
 .barcode-section svg text {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 400;
 }
 
 .section-title {
@@ -462,10 +463,11 @@ export const INVOICE_PRINT_STYLES = `
 }
 
 .thank-you {
-  font-weight: 400;
+  font-weight: 300;
+  font-size: 8px;
   margin: 0;
   color: #666;
-  font-style: italic;
+  font-style: normal;
 }
 `;
 

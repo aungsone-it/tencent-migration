@@ -52,6 +52,7 @@ import {
   pctChangePriorWindow,
 } from "../../utils/vendorAdminAnalytics";
 import { computeVendorCommissionEarned } from "../../utils/vendorCommissionEarned";
+import { formatOrderNumberDisplay } from "../../utils/orderNumber";
 
 type FinancesDateFilterKey = "revenue" | "commission" | "orders" | "avgOrder";
 
@@ -627,7 +628,7 @@ export function VendorAdminFinances({
                     <CreditCard className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium text-slate-900 truncate">{transaction.orderNumber}</p>
+                    <p className="font-medium text-slate-900 truncate">{formatOrderNumberDisplay(transaction.orderNumber)}</p>
                     <p className="text-sm text-slate-600 truncate">
                       {transaction.date} • {transaction.paymentMethod}
                     </p>

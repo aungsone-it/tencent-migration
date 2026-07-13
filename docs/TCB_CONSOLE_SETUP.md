@@ -177,8 +177,28 @@ VITE_CLOUDBASE_REGION=ap-shanghai
 VITE_CLOUDBASE_PUBLISHABLE_KEY=<Client Publishable Key>
 VITE_CLOUDBASE_API_BASE_URL=<HTTP Gateway URL>
 VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN=nexa-apex.online
+VITE_PLATFORM_RESERVED_APEX_DOMAINS=nexa-mm.com,nexa-apex.online
 VITE_DEPLOYMENT_PLATFORM=edgeone
 ```
+
+`VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN` — apex used for vendor subdomains (`gogo.<apex>`).
+
+`VITE_PLATFORM_RESERVED_APEX_DOMAINS` — every hostname that should show the **platform branding landing** at `/` (not custom-domain vendor lookup). Include both apex and any extra branding domains (e.g. `nexa-mm.com` even when subdomains use `nexa-apex.online`).
+
+### Platform apex DNS (nexa-mm.com, nexa-apex.online, …)
+
+EdgeOne assigns a **separate** CNAME/target per hostname. `www.nexa-mm.com` working while `nexa-mm.com` fails almost always means **apex DNS or EdgeOne domain binding is missing** — not an app bug.
+
+For each marketplace apex:
+
+1. EdgeOne Makers → **Domains** → add **`nexa-mm.com`** and **`www.nexa-mm.com`** (separate entries).
+2. At your DNS registrar:
+   - `www` → CNAME to EdgeOne’s value for `www.nexa-mm.com`
+   - `@` (apex) → A or ALIAS/ANAME to EdgeOne’s apex target (cannot always be a plain CNAME at root)
+3. Rebuild/redeploy after changing `VITE_PLATFORM_RESERVED_APEX_DOMAINS`.
+4. Confirm both URLs load the SPA (not registrar parking): `https://nexa-mm.com` and `https://www.nexa-mm.com`.
+
+Vendor custom domains (`shop.example.com`) follow the same apex vs www rule.
 
 ### 2. Build and deploy
 

@@ -2350,12 +2350,14 @@ export async function postPwaFinalizeRoute(c: Context) {
 
   await syncKPayTxnStatusFromProvider(merchantOrderId);
   let result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover });
-  if (!adminRecover) {
-    for (let attempt = 0; attempt < 3 && !result.ok && result.error === "payment_not_confirmed"; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await syncKPayTxnStatusFromProvider(merchantOrderId);
-      result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover });
-    }
+  for (
+    let attempt = 0;
+    attempt < 3 && !result.ok && result.error === "payment_not_confirmed";
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await syncKPayTxnStatusFromProvider(merchantOrderId);
+    result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover });
   }
 
   if (!result.ok) {
@@ -2373,13 +2375,22 @@ export async function postPwaFinalizeRoute(c: Context) {
   return c.json({ success: true, adminRecover, ...result });
 }
 
-/** Admin-only recovery: always finalize from draft without waiting for synced KBZPay status. */
+/** Admin-only recovery: finalize paid KBZ drafts that never became storefront orders. */
 export async function postPwaAdminRecoverRoute(c: Context) {
   const merchantOrderId = text(c.req.param("merchantOrderId"));
   if (!merchantOrderId) return c.json({ error: "merchantOrderId is required" }, 400);
 
   await syncKPayTxnStatusFromProvider(merchantOrderId);
-  const result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover: true });
+  let result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover: true });
+  for (
+    let attempt = 0;
+    attempt < 3 && !result.ok && result.error === "payment_not_confirmed";
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await syncKPayTxnStatusFromProvider(merchantOrderId);
+    result = await finalizePwaCheckoutOrder(merchantOrderId, { adminRecover: true });
+  }
 
   if (!result.ok) {
     const status = result.error === "payment_not_confirmed" ? 409 : 400;

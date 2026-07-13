@@ -877,11 +877,25 @@ export async function finalizePwaCheckoutOrderApi(
   if (parsed.ok && parsed.order) return parsed;
 
   const shouldFallback =
-    response.status === 404 ||
-    parsed.error === "payment_not_confirmed" ||
-    parsed.error === "cloudbase_env_missing";
+    response.status === 404 || parsed.error === "cloudbase_env_missing";
 
   if (shouldFallback) {
+    const statusRes = await fetch(
+      `${API_ROOT}/kpay/pwa/draft-status/${encodeURIComponent(merchantOrderId)}`,
+      { headers: cloudbaseHeaders() },
+    );
+    const statusData = (await statusRes.json().catch(() => ({}))) as {
+      canRecover?: boolean;
+      txnStatus?: string | null;
+    };
+    if (!statusData.canRecover) {
+      return {
+        ok: false,
+        error: "payment_not_confirmed",
+        message: statusData.txnStatus || "Payment not confirmed in KBZPay",
+      };
+    }
+
     const direct = await recoverPwaDraftViaDirectOrderCreate(params);
     if (direct.ok) {
       await requestPwaFinalize(merchantOrderId, true).catch(() => {});

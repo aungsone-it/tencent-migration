@@ -362,24 +362,20 @@ export async function finalizePwaCheckoutOrder(
 
   const txn = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
   const txnStatus = text(txn?.status).toLowerCase();
-  if (txnStatus !== "paid" && !options?.adminRecover) {
+  if (txnStatus !== "paid") {
     return { ok: false, error: "payment_not_confirmed", message: txnStatus || "pending" };
   }
 
   const body = buildOrderBodyFromDraft(id, draft, txn);
   if (!body) return { ok: false, error: "invalid_draft" };
 
-  if (options?.adminRecover && txnStatus !== "paid") {
-    // Admin is recovering a KBZPay checkout that was paid but never finalized.
-    body.paymentStatus = "paid";
+  if (options?.adminRecover) {
     const kpay =
       body.kpay && typeof body.kpay === "object"
         ? (body.kpay as Record<string, unknown>)
         : {};
     body.kpay = {
       ...kpay,
-      status: "paid",
-      providerStatus: text(txn?.providerStatus) || "paid",
       adminRecovered: true,
       recoveredAt: nowIso(),
     };

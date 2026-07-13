@@ -98,6 +98,8 @@ export async function listOrphanedPwaDrafts(options?: {
 
     const txn = (await kv.get(`kpay_txn:${merchantOrderId}`)) as Record<string, unknown> | null;
     const txnStatus = text(txn?.status).toLowerCase();
+    // Only paid KBZ transactions belong in recovery — prepayId only means checkout started.
+    if (txnStatus !== "paid") continue;
 
     result.push({
       merchantOrderId,
@@ -106,9 +108,9 @@ export async function listOrphanedPwaDrafts(options?: {
       vendor: text(draftOrder?.vendor) || undefined,
       vendorId: text(draftOrder?.vendorId) || text(draftOrder?.vendor) || undefined,
       total: Number(draftOrder?.total || 0) || undefined,
-      txnStatus: txnStatus || undefined,
+      txnStatus,
       hasOrder: false,
-      canRecover: txnStatus === "paid" || Boolean(text(draft.prepayId)),
+      canRecover: true,
     });
   }
 
@@ -249,8 +251,7 @@ export async function getPwaDraftStatusRoute(c: Context) {
       txnStatus: txnStatus || null,
       prepayId: text(draft?.prepayId) || text(txn?.prepayId) || null,
       savedAt: text(draft?.savedAt) || null,
-      canRecover: !hasOrder && Boolean(draft?.draftOrder) &&
-        (txnStatus === "paid" || Boolean(text(draft?.prepayId))),
+      canRecover: !hasOrder && Boolean(draft?.draftOrder) && txnStatus === "paid",
     });
   } catch (error) {
     console.error("getPwaDraftStatusRoute error", error);

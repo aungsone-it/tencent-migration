@@ -46,19 +46,43 @@ import { Store, ArrowLeft } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { seedStorefrontPolicyCacheFromVendorSettings } from "../hooks/useStorefrontPolicyData";
 
-function parseVendorDashPath(pathname: string): { storeName: string; tail: string[] } | null {
+function parseVendorStorePath(pathname: string): { storeName: string; tail: string[] } | null {
   const parts = pathname.split("/").filter(Boolean);
   const first = parts[0] || "";
-  if (!first.startsWith("vendor-")) return null;
-  const storeName = first.slice("vendor-".length).trim();
-  if (!storeName) return null;
-  return { storeName: decodeURIComponent(storeName), tail: parts.slice(1) };
+
+  if (first.startsWith("vendor-")) {
+    const storeName = first.slice("vendor-".length).trim();
+    if (!storeName) return null;
+    try {
+      return { storeName: decodeURIComponent(storeName), tail: parts.slice(1) };
+    } catch {
+      return { storeName, tail: parts.slice(1) };
+    }
+  }
+
+  if (first === "vendor" && parts.length >= 2) {
+    const reserved = new Set(["application", "setup", "login"]);
+    const storeName = parts[1] || "";
+    if (!storeName || reserved.has(storeName.toLowerCase())) return null;
+    try {
+      return { storeName: decodeURIComponent(storeName), tail: parts.slice(2) };
+    } catch {
+      return { storeName, tail: parts.slice(2) };
+    }
+  }
+
+  return null;
 }
 
 function vendorProfileOrderIdFromPathname(pathname: string, storeName: string): string | null {
-  const vendorDash = parseVendorDashPath(pathname);
-  if (vendorDash?.storeName === storeName && vendorDash.tail[0] === "profile" && vendorDash.tail[1] === "orders") {
-    const id = vendorDash.tail[2] || "";
+  const vendorStore = parseVendorStorePath(pathname);
+  if (
+    vendorStore &&
+    vendorPathStoreSlugsMatch(vendorStore.storeName, storeName) &&
+    vendorStore.tail[0] === "profile" &&
+    vendorStore.tail[1] === "orders"
+  ) {
+    const id = vendorStore.tail[2] || "";
     return id ? decodeURIComponent(id) : null;
   }
   const mRoot = matchPath({ path: "/profile/orders/:orderId", end: true }, pathname);
@@ -69,8 +93,8 @@ function vendorProfileOrderIdFromPathname(pathname: string, storeName: string): 
   const m =
     matchPath({ path: "/vendor/:storeName/profile/orders/:orderId", end: true }, pathname) ??
     matchPath({ path: "/vendor-:storeName/profile/orders/:orderId", end: true }, pathname);
-  if (m?.params?.storeName !== storeName) return null;
-  const id = m.params.orderId;
+  if (!vendorPathStoreSlugsMatch(m?.params?.storeName, storeName)) return null;
+  const id = m?.params?.orderId;
   return typeof id === "string" && id.trim() ? decodeURIComponent(id) : null;
 }
 
@@ -78,9 +102,13 @@ function vendorProfileSegmentFromPathname(
   pathname: string,
   storeName: string
 ): string | null {
-  const vendorDash = parseVendorDashPath(pathname);
-  if (vendorDash?.storeName === storeName && vendorDash.tail[0] === "profile") {
-    const seg = vendorDash.tail[1];
+  const vendorStore = parseVendorStorePath(pathname);
+  if (
+    vendorStore &&
+    vendorPathStoreSlugsMatch(vendorStore.storeName, storeName) &&
+    vendorStore.tail[0] === "profile"
+  ) {
+    const seg = vendorStore.tail[1];
     if (!seg) return "view";
     if (seg === "edit" || seg === "orders" || seg === "addresses" || seg === "security") return seg;
   }
@@ -103,8 +131,8 @@ function vendorProfileSegmentFromPathname(
   ] as const;
   for (const path of patterns) {
     const m = matchPath({ path, end: true }, pathname);
-    if (m?.params?.storeName === storeName) {
-      const section = m.params.profileSection;
+    if (vendorPathStoreSlugsMatch(m?.params?.storeName, storeName)) {
+      const section = m?.params?.profileSection;
       return typeof section === "string" ? section : "view";
     }
   }
@@ -130,9 +158,9 @@ function isReservedVendorPathSegment(seg: string): boolean {
 }
 
 function vendorCategorySlugFromPathname(pathname: string, storeName: string): string | null {
-  const vendorDash = parseVendorDashPath(pathname);
-  if (vendorDash && vendorPathStoreSlugsMatch(vendorDash.storeName, storeName)) {
-    const seg = vendorDash.tail[0] || "";
+  const vendorStore = parseVendorStorePath(pathname);
+  if (vendorStore && vendorPathStoreSlugsMatch(vendorStore.storeName, storeName)) {
+    const seg = vendorStore.tail[0] || "";
     const normalized = seg.trim().toLowerCase();
     if (normalized && !isReservedVendorPathSegment(normalized)) {
       return decodeURIComponent(seg);
@@ -232,12 +260,12 @@ export function VendorStorefrontPage() {
     return <div className="min-h-screen bg-white" aria-busy="true" />;
   }
 
-  const vendorDash = parseVendorDashPath(location.pathname);
+  const vendorStore = parseVendorStorePath(location.pathname);
   const subdomainSlug = resolveVendorSubdomainStoreSlug();
   const onVendorSubdomainHost = isOnVendorSubdomainHost();
   const { slug: customHostSlug, loading: customHostLoading } = useResolvedVendorHostSlug();
   const vendorHostSlug = subdomainSlug ?? customHostSlug ?? null;
-  const pathBasedStoreName = params.storeName ?? vendorDash?.storeName ?? undefined;
+  const pathBasedStoreName = params.storeName ?? vendorStore?.storeName ?? undefined;
   const unifiedSummaryRoute = isUnifiedKpaySummaryPath(location.pathname);
   const kpayReturnOrderId = useMemo(
     () => readKpayReturnQueryOrderId(location.search),
@@ -375,7 +403,7 @@ export function VendorStorefrontPage() {
   const productSlug =
     (typeof params.productSlug === "string" && params.productSlug) ||
     (typeof (params as { sku?: string }).sku === "string" && (params as { sku?: string }).sku) ||
-    (vendorDash?.tail[0] === "product" && typeof vendorDash.tail[1] === "string" ? vendorDash.tail[1] : undefined) ||
+    (vendorStore?.tail[0] === "product" && typeof vendorStore.tail[1] === "string" ? vendorStore.tail[1] : undefined) ||
     undefined;
   const navigate = useNavigate();
 
@@ -392,13 +420,13 @@ export function VendorStorefrontPage() {
 
   const savedPage = useMemo(() => {
     if (!resolvedStoreName) return false;
-    if (vendorDash?.storeName === resolvedStoreName && vendorDash.tail[0] === "saved") return true;
+    if (vendorStore && vendorPathStoreSlugsMatch(vendorStore.storeName, resolvedStoreName) && vendorStore.tail[0] === "saved") return true;
     if ((subdomainSlug || customHostSlug) && location.pathname === "/saved") return true;
     return (
       matchPath({ path: "/vendor/:storeName/saved", end: true }, location.pathname) != null ||
       matchPath({ path: "/vendor-:storeName/saved", end: true }, location.pathname) != null
     );
-  }, [resolvedStoreName, location.pathname, subdomainSlug, customHostSlug, vendorDash]);
+  }, [resolvedStoreName, location.pathname, subdomainSlug, customHostSlug, vendorStore]);
 
   const categorySlug = useMemo(() => {
     if (!resolvedStoreName) return null;

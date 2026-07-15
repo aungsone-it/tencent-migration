@@ -248,6 +248,10 @@ type VendorAccountViewMode =
   | "shipping-addresses"
   | "security-settings";
 
+function pathnameIsVendorProfileRoute(pathname: string): boolean {
+  return /\/profile(?:\/|$)/.test(String(pathname || ""));
+}
+
 function profileSegmentToMode(seg: string | null): VendorAccountViewMode | null {
   if (seg === null) return null;
   if (seg === "view") return "view-profile";
@@ -1508,6 +1512,8 @@ export function VendorStoreView({
   });
   const [storePhone, setStorePhone] = useState<string>(vendorHomeSnapshot.storePhone);
   const [metaPixelId, setMetaPixelId] = useState<string | undefined>(undefined);
+  /** Profile avatar dropdown (desktop). */
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   /** Slide-out nav on small screens (account, browse, wishlist — hamburger on the right like /store). */
   const [vendorMobileNavOpen, setVendorMobileNavOpen] = useState(false);
   /** Full-screen search on mobile — matches main marketplace header search icon. */
@@ -1594,12 +1600,14 @@ export function VendorStoreView({
 
   useEffect(() => {
     const mode = profileSegmentToMode(profileSegment ?? null);
-    if (mode === null) {
-      setVendorViewMode("storefront");
-    } else {
+    if (mode !== null) {
       setVendorViewMode(mode);
+      return;
     }
-  }, [profileSegment]);
+    if (!pathnameIsVendorProfileRoute(location.pathname)) {
+      setVendorViewMode("storefront");
+    }
+  }, [profileSegment, location.pathname]);
 
   useLayoutEffect(() => {
     document.title = buildVendorStorefrontDocumentTitle({
@@ -2265,13 +2273,16 @@ export function VendorStoreView({
 
     setIsAuthLoading(true);
     try {
-      const response = await authApi.login(authForm.email, authForm.password);
+      const identifier = authForm.email.trim();
+      const response = await authApi.login(identifier, authForm.password);
       const userData = response.user;
 
       lastAuthEventRef.current = "login";
       const sessionUser = buildCustomerSessionFromAuthResponse(
         userData as Record<string, unknown>,
-        { loginIdentifier: authForm.email.trim() }
+        identifier.includes("@")
+          ? { loginIdentifier: identifier, email: identifier }
+          : { loginIdentifier: identifier, phone: identifier }
       );
       if (!sessionUser) {
         throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
@@ -2571,6 +2582,10 @@ export function VendorStoreView({
   const handleProfileAction = (mode: VendorAccountViewMode) => {
     setSelectedProduct(null);
     setVendorMobileNavOpen(false);
+    setProfileMenuOpen(false);
+    if (mode !== "storefront") {
+      setVendorViewMode(mode);
+    }
     goToProfileMode(mode);
   };
 
@@ -2749,6 +2764,38 @@ export function VendorStoreView({
                 >
                   <Eye className="w-4 h-4 mr-2" />
                   {t("storefront.account.viewProfile")}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start hover:bg-slate-50"
+                  onClick={() => handleProfileAction("edit-profile")}
+                >
+                  <Pencil className="w-4 h-4 mr-2" />
+                  {t("storefront.account.editProfile")}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start hover:bg-slate-50"
+                  onClick={() => handleProfileAction("order-history")}
+                >
+                  <Package className="w-4 h-4 mr-2" />
+                  {t("storefront.account.orderHistory")}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start hover:bg-slate-50"
+                  onClick={() => handleProfileAction("shipping-addresses")}
+                >
+                  <MapPin className="w-4 h-4 mr-2" />
+                  {t("storefront.account.shippingAddresses")}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start hover:bg-slate-50"
+                  onClick={() => handleProfileAction("security-settings")}
+                >
+                  <Shield className="w-4 h-4 mr-2" />
+                  {t("storefront.account.securitySettings")}
                 </Button>
               </div>
             )}
@@ -5787,7 +5834,7 @@ export function VendorStoreView({
                 )}
 
                 {user && (
-                  <Popover>
+                  <Popover open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
                     <PopoverTrigger asChild>
                       <Button variant="ghost" size="icon" className="hidden md:flex hover:bg-slate-100 rounded-full w-10 h-10 p-0 shrink-0">
                         {userProfileImageUrl && !profileImageLoadFailed ? (
@@ -6515,7 +6562,7 @@ export function VendorStoreView({
               )}
 
               {user && (
-                <Popover>
+                <Popover open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
                   <PopoverTrigger asChild>
                     <Button variant="ghost" size="icon" className="hidden h-10 w-10 shrink-0 hover:bg-slate-100 md:flex p-0">
                       {userProfileImageUrl && !profileImageLoadFailed ? (

@@ -1940,56 +1940,8 @@ app.post("/make-server-16010b6f/admin/clear-test-data", async (c) => {
   }
 });
 
-// Login user
-app.post("/make-server-16010b6f/auth/login", async (c) => {
-  try {
-    const body = await c.req.json();
-    const { email, password } = body;
-    
-    if (!email || !password) {
-      return c.json({ error: "Email and password are required" }, 400);
-    }
-    
-    console.log(`🔐 Login attempt: ${email}`);
-    
-    const user = await withTimeout(kv.get(`user:${email}`), 5000);
-    if (!user || user.password !== password) {
-      return c.json({ error: "Invalid email or password" }, 401);
-    }
-    
-    console.log(`✅ User logged in: ${email}`);
-    
-    // Ensure userId mapping exists (create if missing)
-    if (user.id) {
-      const existingMapping = await withTimeout(kv.get(`userId:${user.id}`), 5000);
-      if (!existingMapping) {
-        console.log(`🔧 Creating missing userId mapping for ${user.id} -> ${email}`);
-        await withTimeout(kv.set(`userId:${user.id}`, { email }), 5000);
-      }
-    }
-    
-    // Return user without password
-    const { password: _, ...userWithoutPassword } = user;
-    
-    // Generate signed URL for profile image if exists
-    if (userWithoutPassword.profileImage) {
-      const signedUrl = await getSignedImageUrl(userWithoutPassword.profileImage);
-      if (signedUrl) {
-        userWithoutPassword.profileImageUrl = signedUrl;
-        console.log(`📸 Generated signed URL for profile image`);
-      }
-    }
-    
-    return c.json({ 
-      success: true,
-      user: userWithoutPassword,
-      message: "Login successful"
-    });
-  } catch (error) {
-    console.error("❌ Error logging in:", error);
-    return c.json({ error: "Failed to login", details: String(error) }, 500);
-  }
-});
+// Login user — handled by auth_routes authApp.post("/login") mounted above.
+// Legacy KV-only login removed so storefront email/phone resolution works consistently.
 
 // Sync users endpoint - for Settings component
 app.post("/make-server-16010b6f/auth/sync-users", async (c) => {

@@ -471,6 +471,66 @@ async function findCustomerByPhone(normalizedPhone: string): Promise<any | null>
   );
 }
 
+async function findCustomerByEmail(email: string): Promise<any | null> {
+  const emLower = String(email || "").trim().toLowerCase();
+  if (!emLower || isSyntheticAuthEmail(emLower)) return null;
+
+  const fromReadModel = await findCustomerByEmailFromReadModel(emLower);
+  if (fromReadModel) return fromReadModel;
+
+  const allCustomers = await withTimeout(kv.getByPrefix("customer:"), 30000);
+  if (!Array.isArray(allCustomers)) return null;
+  return (
+    allCustomers.find((c: any) => {
+      const ce = String(c?.email || "").trim().toLowerCase();
+      return ce && ce === emLower && !isSyntheticAuthEmail(ce);
+    }) ?? null
+  );
+}
+
+async function findCustomerAuthByUserId(userId: string): Promise<CustomerAuthRecord | null> {
+  const uid = String(userId || "").trim();
+  if (!uid) return null;
+  const rec = await kv.get(`customer_auth:${uid}`);
+  return rec && typeof rec === "object" ? (rec as CustomerAuthRecord) : null;
+}
+
+async function buildCustomerLoginAuthCandidates(identifier: string): Promise<string[]> {
+  const trimmed = String(identifier || "").trim();
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const add = (email: unknown) => {
+    const lower = String(email || "").trim().toLowerCase();
+    if (!lower || seen.has(lower)) return;
+    seen.add(lower);
+    candidates.push(lower);
+  };
+
+  const asPhone = normalizeMyanmarPhone(trimmed);
+  const customer = asPhone
+    ? await findCustomerByPhone(asPhone)
+    : trimmed.includes("@")
+      ? await findCustomerByEmail(trimmed)
+      : null;
+
+  if (customer?.userId) {
+    const authRec = await findCustomerAuthByUserId(String(customer.userId));
+    if (authRec?.email) add(authRec.email);
+  }
+
+  if (trimmed.includes("@")) add(trimmed);
+
+  const phone =
+    asPhone ||
+    (customer?.phone ? normalizeMyanmarPhone(String(customer.phone)) : null);
+  if (phone) add(phoneToAuthEmail(phone));
+
+  const displayEmail = String(customer?.email || "").trim();
+  if (displayEmail && !isSyntheticAuthEmail(displayEmail)) add(displayEmail);
+
+  return candidates;
+}
+
 async function resolveCustomerLoginEmail(
   identifier: string
 ): Promise<{ email: string; error?: string }> {
@@ -478,15 +538,72 @@ async function resolveCustomerLoginEmail(
   if (!trimmed) {
     return { email: "", error: "Email or phone number is required" };
   }
-  const asPhone = normalizeMyanmarPhone(trimmed);
-  if (asPhone) {
-    const customer = await findCustomerByPhone(asPhone);
-    if (customer?.email?.trim()) {
-      return { email: customer.email.trim() };
+
+  const candidates = await buildCustomerLoginAuthCandidates(trimmed);
+
+  for (const candidate of candidates) {
+    if (await findCustomerAuthByEmail(candidate)) {
+      return { email: candidate };
     }
-    return { email: phoneToAuthEmail(asPhone) };
   }
-  return { email: trimmed };
+
+  for (const candidate of candidates) {
+    if (await authUserExistsByEmail(candidate)) {
+      return { email: candidate };
+    }
+  }
+
+  if (candidates.length > 0) return { email: candidates[0] };
+
+  const asPhone = normalizeMyanmarPhone(trimmed);
+  if (asPhone) return { email: phoneToAuthEmail(asPhone).toLowerCase() };
+  if (trimmed.includes("@")) return { email: trimmed.toLowerCase() };
+
+  return { email: trimmed.toLowerCase() };
+}
+
+async function authenticateStorefrontCustomer(
+  identifier: string,
+  password: string
+): Promise<{
+  authUser: {
+    id: string;
+    email?: string | null;
+    user_metadata?: Record<string, unknown>;
+  };
+  loginEmail: string;
+  authSession?: { access_token?: string; refresh_token?: string };
+} | null> {
+  const candidates = await buildCustomerLoginAuthCandidates(identifier);
+  if (candidates.length === 0) return null;
+
+  for (const loginEmail of candidates) {
+    const kvAuth = await verifyKvCustomerPassword(loginEmail, password);
+    if (kvAuth) {
+      return {
+        authUser: {
+          id: kvAuth.id,
+          email: loginEmail,
+          user_metadata: { name: kvAuth.name, phone: kvAuth.phone, role: "customer" },
+        },
+        loginEmail,
+      };
+    }
+
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
+      email: loginEmail,
+      password,
+    });
+    if (!error && data.user) {
+      return {
+        authUser: data.user,
+        loginEmail,
+        authSession: data.session,
+      };
+    }
+  }
+
+  return null;
 }
 
 // Helper function to upload profile image to storage (multipart file)
@@ -1991,69 +2108,30 @@ authApp.post("/login", async (c) => {
 
     const emailLower = String(email || "").trim().toLowerCase();
 
-    const resolved = await resolveCustomerLoginEmail(email);
-    if (resolved.error || !resolved.email) {
-      return c.json({ error: resolved.error || "Invalid login" }, 400);
-    }
-    const loginEmail = resolved.email;
+    console.log(`🔐 Customer login attempt: ${email}`);
 
-    console.log(`🔐 Customer login attempt: ${email} → ${loginEmail}`);
-
-    // Sign in with CloudBase Auth (username/password)
-    let authUser: {
-      id: string;
-      email?: string | null;
-      user_metadata?: Record<string, unknown>;
-    } | null = null;
-    let authSession: { access_token?: string; refresh_token?: string } | undefined;
-
-    const { data, error } = await supabaseAuth.auth.signInWithPassword({
-      email: loginEmail,
-      password,
-    });
-
-    if (!error && data.user) {
-      authUser = data.user;
-      authSession = data.session;
-    } else {
-      const kvAuth = await verifyKvCustomerPassword(loginEmail, password);
-      if (kvAuth) {
-        console.log(`✅ KV customer auth successful for ${loginEmail}`);
-        authUser = {
-          id: kvAuth.id,
-          email: loginEmail,
-          user_metadata: { name: kvAuth.name, phone: kvAuth.phone, role: "customer" },
-        };
-      } else {
-        const staffUser = await findStaffUserByEmail(emailLower);
-        if (staffUser?.id && staffUser.password) {
-          const staffOk = await verifyPasswordPlain(password, staffUser.password);
-          if (staffOk) {
-            return c.json(
-              {
-                error:
-                  "This account is for staff. Sign in through the admin portal. To shop here, register a separate customer account.",
-                code: "STAFF_NOT_STOREFRONT",
-              },
-              403
-            );
-          }
+    const authenticated = await authenticateStorefrontCustomer(email, password);
+    if (!authenticated) {
+      const staffUser = await findStaffUserByEmail(emailLower);
+      if (staffUser?.id && staffUser.password) {
+        const staffOk = await verifyPasswordPlain(password, staffUser.password);
+        if (staffOk) {
+          return c.json(
+            {
+              error:
+                "This account is for staff. Sign in through the admin portal. To shop here, register a separate customer account.",
+              code: "STAFF_NOT_STOREFRONT",
+            },
+            403
+          );
         }
-
-        console.error(`❌ Login failed for ${email}:`, error?.message);
-        const msg = String(error?.message || "");
-        if (msg.includes("invalid_username_or_password") || msg.includes("Invalid login credentials")) {
-          return c.json({ error: "Invalid email or password" }, 401);
-        }
-        return c.json({ error: error?.message || "Invalid email or password" }, 401);
       }
+
+      return c.json({ error: "Invalid email or password" }, 401);
     }
 
-    if (!authUser) {
-      return c.json({ error: "Login failed" }, 401);
-    }
-
-    console.log(`✅ Auth successful for ${email}, user ID: ${authUser.id}`);
+    const { authUser, loginEmail, authSession } = authenticated;
+    console.log(`✅ Auth successful for ${email} → ${loginEmail}, user ID: ${authUser.id}`);
 
     // Find or create customer record
     let customer = null;

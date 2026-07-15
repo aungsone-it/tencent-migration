@@ -161,8 +161,8 @@ interface AdminBreadcrumbProps {
   listingCount?: number | null;
   /** Partner name segment on logistics profile / edit pages */
   logisticsPartnerLabel?: string;
-  /** Final segment e.g. Edit or Add partner */
-  logisticsDetailLabel?: string;
+  /** Logistics sub-route for breadcrumb labels */
+  logisticsRouteKind?: "create" | "edit" | "view";
   /** Slug for navigating to partner profile from breadcrumb */
   logisticsPartnerSlug?: string;
 }
@@ -172,14 +172,22 @@ export function AdminBreadcrumb({
   onNavigate,
   listingCount = null,
   logisticsPartnerLabel,
-  logisticsDetailLabel,
+  logisticsRouteKind,
   logisticsPartnerSlug,
 }: AdminBreadcrumbProps) {
   const { t } = useLanguage();
+  const detailLabelForCrumbs =
+    logisticsRouteKind === "create"
+      ? t("logistics.breadcrumb.addPartner")
+      : logisticsRouteKind === "view" || logisticsRouteKind === "edit"
+        ? logisticsPartnerLabel
+        : undefined;
+  const detailSuffixForCrumbs =
+    logisticsRouteKind === "edit" ? t("logistics.breadcrumb.edit") : undefined;
   const segments = crumbsForPage(
     currentPage,
-    logisticsDetailLabel === "Edit" ? logisticsPartnerLabel : logisticsDetailLabel || logisticsPartnerLabel,
-    logisticsDetailLabel === "Edit" ? logisticsDetailLabel : undefined
+    detailLabelForCrumbs,
+    detailSuffixForCrumbs
   );
   const ThumbIcon = breadcrumbThumbnailIcon(currentPage);
 

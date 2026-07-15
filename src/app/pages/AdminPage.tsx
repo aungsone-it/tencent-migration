@@ -935,12 +935,12 @@ export function AdminPage() {
                         ? formatLogisticsPartnerSlugLabel(logisticsRoute.slug)
                         : undefined
                     }
-                    logisticsDetailLabel={
-                      logisticsRoute.kind === "create"
-                        ? "Add partner"
-                        : logisticsRoute.kind === "edit"
-                          ? "Edit"
-                          : undefined
+                    logisticsRouteKind={
+                      logisticsRoute.kind === "create" ||
+                      logisticsRoute.kind === "edit" ||
+                      logisticsRoute.kind === "view"
+                        ? logisticsRoute.kind
+                        : undefined
                     }
                     logisticsPartnerSlug={
                       logisticsRoute.kind === "view" || logisticsRoute.kind === "edit"

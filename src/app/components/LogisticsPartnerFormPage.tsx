@@ -39,7 +39,7 @@ type LogisticsPartnerFormPageProps =
 
 export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
   const navigate = useNavigate();
-  const { language } = useLanguage();
+  const { t, language } = useLanguage();
   const isCreate = props.mode === "create";
   const slug = props.mode === "edit" ? props.slug : null;
 
@@ -139,22 +139,22 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      toast.error("Please upload an image file");
+      toast.error(t("logistics.form.logoUploadTypeError"));
       return;
     }
 
     setIsUploadingLogo(true);
-    toast.info("Compressing and uploading logo…", { duration: 2500 });
+    toast.info(t("logistics.form.logoCompressing"), { duration: 2500 });
 
     try {
       const compressedFile = await compressImageToFile(file, 500);
       const imageUrl = await logisticsApi.uploadPartnerLogo(compressedFile);
       setForm((f) => ({ ...f, logo: imageUrl }));
-      toast.success("Logo uploaded and compressed to 500KB");
+      toast.success(t("logistics.form.logoUploaded"));
     } catch (error) {
       console.error("Failed to upload logo:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to upload logo"
+        error instanceof Error ? error.message : t("logistics.form.logoUploadFailed")
       );
     } finally {
       setIsUploadingLogo(false);
@@ -183,14 +183,14 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
       });
       if (isCreate) {
         const res = await logisticsApi.createPartner(payload);
-        toast.success("Delivery partner added");
+        toast.success(t("logistics.form.added"));
         navigate(logisticsPartnerProfilePath(res.partner));
         return;
       }
 
       if (!editingId) return;
       const res = await logisticsApi.updatePartner(editingId, payload);
-      toast.success("Delivery partner updated");
+      toast.success(t("logistics.form.updated"));
       navigate(logisticsPartnerProfilePath(res.partner));
     } catch (error) {
       console.error("Failed to save delivery partner:", error);
@@ -204,7 +204,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-500">
         <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        Loading delivery partner…
+        {t("logistics.form.loading")}
       </div>
     );
   }
@@ -212,12 +212,12 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
   if (!isCreate && !partner) {
     return (
       <div className="p-8 max-w-lg space-y-4">
-        <h2 className="text-lg font-semibold text-slate-900">Delivery partner not found</h2>
+        <h2 className="text-lg font-semibold text-slate-900">{t("logistics.form.notFound")}</h2>
         <p className="text-sm text-slate-600">
-          No partner matches <code className="text-xs bg-slate-100 px-1 rounded">{slug}</code>.
+          {t("logistics.form.notFoundHint").replace("{slug}", slug ?? "")}
         </p>
         <Button variant="outline" onClick={() => navigate("/admin/logistics")}>
-          Back to Logistics
+          {t("logistics.form.backToLogistics")}
         </Button>
       </div>
     );
@@ -227,7 +227,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-500">
         <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        Preparing form…
+        {t("logistics.form.preparing")}
       </div>
     );
   }
@@ -243,20 +243,18 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
             onClick={() => navigate(cancelPath)}
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
-            Back
+            {t("logistics.form.back")}
           </Button>
           <h1 className="text-2xl font-bold text-slate-900">
-            {isCreate ? "Add delivery partner" : "Edit delivery partner"}
+            {isCreate ? t("logistics.form.titleCreate") : t("logistics.form.titleEdit")}
           </h1>
-          <p className="text-slate-500 mt-1">
-            Register a carrier and set delivery time and price range for each region you serve.
-          </p>
+          <p className="text-slate-500 mt-1">{t("logistics.form.subtitle")}</p>
         </div>
       </div>
 
       <div className="space-y-4">
         <div>
-          <Label>Logo (optional)</Label>
+          <Label>{t("logistics.form.logoOptional")}</Label>
           <div className="mt-2">
             <input
               ref={logoInputRef}
@@ -270,7 +268,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                 <div className="group relative h-[100px] w-[100px] overflow-hidden rounded-lg border border-slate-200 bg-white">
                   <img
                     src={form.logo}
-                    alt="Partner logo"
+                    alt={t("logistics.form.logoAlt")}
                     className="h-full w-full object-contain p-1"
                     onError={() => setForm((f) => ({ ...f, logo: "" }))}
                   />
@@ -282,7 +280,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                       className="h-8 w-8 bg-white hover:bg-slate-100"
                       disabled={isUploadingLogo}
                       onClick={() => logoInputRef.current?.click()}
-                      aria-label="Change logo"
+                      aria-label={t("logistics.form.changeLogo")}
                     >
                       {isUploadingLogo ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -297,7 +295,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                       className="h-8 w-8 bg-white hover:bg-slate-100"
                       disabled={isUploadingLogo}
                       onClick={() => setForm((f) => ({ ...f, logo: "" }))}
-                      aria-label="Remove logo"
+                      aria-label={t("logistics.form.removeLogo")}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -310,7 +308,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                 disabled={isUploadingLogo}
                 onClick={() => logoInputRef.current?.click()}
                 className="flex h-[100px] w-[100px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50/50 transition-colors hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Upload logo"
+                aria-label={t("logistics.form.uploadLogo")}
               >
                 {isUploadingLogo ? (
                   <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
@@ -319,17 +317,15 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                 )}
               </button>
             )}
-            <p className="mt-2 text-xs text-slate-500">
-              Any size — auto-compressed to max 500KB
-            </p>
+            <p className="mt-2 text-xs text-slate-500">{t("logistics.form.logoHint")}</p>
           </div>
         </div>
 
         <div>
-          <Label htmlFor="serviceName">Company / service name *</Label>
+          <Label htmlFor="serviceName">{t("logistics.form.companyName")}</Label>
           <Input
             id="serviceName"
-            placeholder="Ninja Van, DHL, local courier…"
+            placeholder={t("logistics.form.companyPlaceholder")}
             className="mt-2"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -337,7 +333,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
         </div>
 
         <div>
-          <Label htmlFor="status">Status</Label>
+          <Label htmlFor="status">{t("logistics.form.status")}</Label>
           <Select
             value={form.status}
             onValueChange={(value: "active" | "inactive") =>
@@ -348,8 +344,8 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="inactive">Inactive</SelectItem>
+              <SelectItem value="active">{t("logistics.status.active")}</SelectItem>
+              <SelectItem value="inactive">{t("logistics.status.inactive")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -370,19 +366,17 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
             />
             <div className="flex-1">
               <Label htmlFor="codSupported" className="cursor-pointer font-semibold">
-                Cash on delivery (COD)
+                {t("logistics.form.codTitle")}
               </Label>
-              <p className="text-sm text-slate-600 mt-1">
-                Allow COD for orders shipped with this partner.
-              </p>
+              <p className="text-sm text-slate-600 mt-1">{t("logistics.form.codDesc")}</p>
               {form.codSupported && (
                 <div className="mt-3">
                   <Label htmlFor="codFee" className="text-xs">
-                    COD fee (optional, ကျပ်)
+                    {t("logistics.form.codFee")}
                   </Label>
                   <Input
                     id="codFee"
-                    placeholder="500"
+                    placeholder={t("logistics.form.codFeePlaceholder")}
                     className="mt-1 max-w-xs"
                     value={form.codFee}
                     onChange={(e) => setForm((f) => ({ ...f, codFee: e.target.value }))}
@@ -394,11 +388,8 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
         </div>
 
         <div>
-          <Label>Regions &amp; rates *</Label>
-          <p className="text-sm text-slate-500 mt-1 mb-3">
-            Enable each region and set delivery time plus minimum cost. Max cost is optional —
-            leave it blank for a fixed price.
-          </p>
+          <Label>{t("logistics.form.regionsRates")}</Label>
+          <p className="text-sm text-slate-500 mt-1 mb-3">{t("logistics.form.regionsRatesHint")}</p>
           <div className="space-y-3">
             {LOGISTICS_REGION_OPTIONS.map((region) => {
               const enabled = region in form.regionRates;
@@ -421,9 +412,9 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                   {enabled && rate && (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 pl-6">
                       <div>
-                        <Label className="text-xs">Estimated delivery *</Label>
+                        <Label className="text-xs">{t("logistics.form.estimatedDelivery")}</Label>
                         <Input
-                          placeholder="2–3 days"
+                          placeholder={t("logistics.form.estimatedPlaceholder")}
                           className="mt-1"
                           value={rate.estimatedDays}
                           onChange={(e) =>
@@ -432,7 +423,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                         />
                       </div>
                       <div>
-                        <Label className="text-xs">Min cost (ကျပ်) *</Label>
+                        <Label className="text-xs">{t("logistics.form.minCost")}</Label>
                         <Input
                           placeholder="3000"
                           className="mt-1"
@@ -441,9 +432,9 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                         />
                       </div>
                       <div>
-                        <Label className="text-xs">Max cost (ကျပ်, optional)</Label>
+                        <Label className="text-xs">{t("logistics.form.maxCost")}</Label>
                         <Input
-                          placeholder="Leave blank for fixed price"
+                          placeholder={t("logistics.form.maxCostPlaceholder")}
                           className="mt-1"
                           value={rate.costMax}
                           onChange={(e) => updateRegionRate(region, "costMax", e.target.value)}
@@ -460,7 +451,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
 
       <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-200">
         <Button variant="outline" onClick={() => navigate(cancelPath)} disabled={saving || isUploadingLogo}>
-          Cancel
+          {t("logistics.form.cancel")}
         </Button>
         <Button
           className="bg-slate-900 hover:bg-slate-800"
@@ -470,12 +461,12 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
           {saving ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Saving…
+              {t("logistics.form.saving")}
             </>
           ) : isCreate ? (
-            "Add partner"
+            t("logistics.form.addPartner")
           ) : (
-            "Save changes"
+            t("logistics.form.saveChanges")
           )}
         </Button>
       </div>

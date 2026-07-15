@@ -91,7 +91,11 @@ function navKeyForLabel(label: string): string {
   return map[label] ?? label;
 }
 
-function crumbsForPage(currentPage: string): Crumb[] {
+function crumbsForPage(
+  currentPage: string,
+  detailLabel?: string,
+  detailSuffix?: string
+): Crumb[] {
   const PRODUCT_SUB = new Set(["Product", "Categories", "Inventory"]);
 
   if (currentPage === "Home") {
@@ -102,6 +106,23 @@ function crumbsForPage(currentPage: string): Crumb[] {
     return [
       { labelKey: navKeyForLabel("Home"), fallback: "Home", page: "Home" },
       { labelKey: navKeyForLabel("Search"), fallback: "Search", page: null },
+    ];
+  }
+
+  if (currentPage === "Logistics" && detailLabel && detailSuffix) {
+    return [
+      { labelKey: navKeyForLabel("Home"), fallback: "Home", page: "Home" },
+      { labelKey: navKeyForLabel("Logistics"), fallback: "Logistics", page: "Logistics" },
+      { labelKey: detailLabel, fallback: detailLabel, page: "__logistics_partner__" },
+      { labelKey: detailSuffix, fallback: detailSuffix, page: null },
+    ];
+  }
+
+  if (currentPage === "Logistics" && detailLabel) {
+    return [
+      { labelKey: navKeyForLabel("Home"), fallback: "Home", page: "Home" },
+      { labelKey: navKeyForLabel("Logistics"), fallback: "Logistics", page: "Logistics" },
+      { labelKey: detailLabel, fallback: detailLabel, page: null },
     ];
   }
 
@@ -138,15 +159,28 @@ interface AdminBreadcrumbProps {
   onNavigate: (page: string) => void;
   /** Total items for the current listing (e.g. products), shown as «n» after the last segment */
   listingCount?: number | null;
+  /** Partner name segment on logistics profile / edit pages */
+  logisticsPartnerLabel?: string;
+  /** Final segment e.g. Edit or Add partner */
+  logisticsDetailLabel?: string;
+  /** Slug for navigating to partner profile from breadcrumb */
+  logisticsPartnerSlug?: string;
 }
 
 export function AdminBreadcrumb({
   currentPage,
   onNavigate,
   listingCount = null,
+  logisticsPartnerLabel,
+  logisticsDetailLabel,
+  logisticsPartnerSlug,
 }: AdminBreadcrumbProps) {
   const { t } = useLanguage();
-  const segments = crumbsForPage(currentPage);
+  const segments = crumbsForPage(
+    currentPage,
+    logisticsDetailLabel === "Edit" ? logisticsPartnerLabel : logisticsDetailLabel || logisticsPartnerLabel,
+    logisticsDetailLabel === "Edit" ? logisticsDetailLabel : undefined
+  );
   const ThumbIcon = breadcrumbThumbnailIcon(currentPage);
 
   return (
@@ -164,7 +198,10 @@ export function AdminBreadcrumb({
       <Breadcrumb className="min-w-0 flex-1">
         <BreadcrumbList className="text-xs flex-wrap gap-x-1 gap-y-0.5 sm:gap-1.5">
           {segments.map((crumb, i) => {
-            const label = t(crumb.labelKey) || crumb.fallback;
+            const label =
+              crumb.labelKey === crumb.fallback && !crumb.labelKey.startsWith("nav.")
+                ? crumb.fallback
+                : t(crumb.labelKey) || crumb.fallback;
             const isLast = i === segments.length - 1;
 
             return (
@@ -188,6 +225,10 @@ export function AdminBreadcrumb({
                         type="button"
                         className="text-xs font-normal text-slate-600 hover:text-slate-900"
                         onClick={() => {
+                          if (crumb.page === "__logistics_partner__" && logisticsPartnerSlug) {
+                            onNavigate(`__logistics_profile__:${logisticsPartnerSlug}`);
+                            return;
+                          }
                           if (crumb.page) onNavigate(crumb.page);
                         }}
                       >

@@ -8,6 +8,7 @@ import blogEngagementApp from "./blog_engagement_routes.tsx";
 import customerApp from "./customer_routes.tsx";
 import userApp from "./user_routes.tsx";
 import socialProfileApp from "./social_profile_routes.tsx";
+import logisticsApp from "./logistics_routes.tsx";
 import { createPaymentIntent, verifyPayment } from "./stripe_routes.tsx";
 import {
   createKPayQr,
@@ -342,6 +343,7 @@ app.use("*", async (c, next) => {
   // Skip timeout for specific endpoints that need more time
   if (c.req.url.includes('/chat/upload-image') ||
       c.req.url.includes('/products/upload-image') ||
+      c.req.url.includes('/logistics/partners/upload-logo') ||
       c.req.url.includes('/health') ||
       c.req.url.includes('/stats') ||
       c.req.url.includes('/vendors') ||
@@ -1283,6 +1285,7 @@ app.route("/make-server-16010b6f", customerApp);
 // ============================================
 app.route("/make-server-16010b6f", userApp);
 app.route("/make-server-16010b6f", socialProfileApp);
+app.route("/make-server-16010b6f", logisticsApp);
 
 // ============================================
 // STRIPE PAYMENT ROUTES

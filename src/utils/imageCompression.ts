@@ -16,7 +16,8 @@ export async function compressImage(file: File, maxSizeKB: number = 500): Promis
     console.log(`📦 Original image size: ${(file.size / 1024).toFixed(2)} KB`);
 
     const maxBytes = maxSizeKB * 1024;
-    let maxWidthOrHeight = 1920;
+    let maxWidthOrHeight =
+      file.size > 15 * 1024 * 1024 ? 1024 : file.size > 8 * 1024 * 1024 ? 1280 : file.size > 3 * 1024 * 1024 ? 1600 : 1920;
     let compressedFile = file;
 
     for (let attempt = 0; attempt < 5; attempt++) {

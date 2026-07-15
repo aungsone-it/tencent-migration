@@ -1,5 +1,7 @@
 /** Myanmar states/regions and their townships — checkout cascading selects. */
 
+import { MYANMAR_REGION_LABELS_MY } from "./myanmarRegionLabelsMy";
+
 export const MYANMAR_REGIONS = [
   "Yangon",
   "Mandalay",
@@ -296,7 +298,12 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
   ],
 };
 
-const REGION_LOOKUP = new Map(MYANMAR_REGIONS.map((r) => [r.toLowerCase(), r]));
+const REGION_LOOKUP = new Map<string, MyanmarRegion>();
+for (const region of MYANMAR_REGIONS) {
+  REGION_LOOKUP.set(region.toLowerCase(), region);
+  const burmese = MYANMAR_REGION_LABELS_MY[region];
+  if (burmese) REGION_LOOKUP.set(burmese.toLowerCase(), region);
+}
 
 const TOWNSHIP_TO_REGION = new Map<string, MyanmarRegion>();
 for (const region of MYANMAR_REGIONS) {
@@ -310,6 +317,11 @@ function normalizeRegionKey(value?: string): MyanmarRegion | undefined {
   if (!trimmed) return undefined;
   const hit = REGION_LOOKUP.get(trimmed.toLowerCase());
   return hit;
+}
+
+/** Resolve checkout/admin region value to canonical English region key. */
+export function resolveMyanmarRegionKey(value?: string): MyanmarRegion | undefined {
+  return normalizeRegionKey(value);
 }
 
 /** Infer region when only a saved township/city is known. */

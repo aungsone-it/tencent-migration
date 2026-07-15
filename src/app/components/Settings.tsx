@@ -55,6 +55,10 @@ import {
 } from "./ui/dialog";
 import { UserProfile } from "./UserProfile";
 import { useLanguage } from "../contexts/LanguageContext";
+import {
+  translateActivityDetailPiece,
+  translateStaffActivityAction,
+} from "../utils/staffActivityLabels";
 import { useAuth } from "../contexts/AuthContext";
 import {
   assignableRolesForCreator,
@@ -329,8 +333,6 @@ export function Settings() {
   const [storeAddress, setStoreAddress] = useState("123 Main St, Yangon, Myanmar");
   const [termsContent, setTermsContent] = useState("");
   const [privacyPolicyContent, setPrivacyPolicyContent] = useState("");
-  const [currency, setCurrency] = useState("MMK");
-  const [timezone, setTimezone] = useState("Asia/Yangon");
   const [storeLogo, setStoreLogo] = useState("");
   const [storeLogoPreview, setStoreLogoPreview] = useState("");
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -446,8 +448,6 @@ export function Settings() {
           setStoreAddress(data.storeAddress || "123 Main St, Yangon, Myanmar");
           setTermsContent(data.termsContent || "");
           setPrivacyPolicyContent(data.privacyPolicyContent || "");
-          setCurrency(data.currency || "MMK");
-          setTimezone(data.timezone || "Asia/Yangon");
           setStoreLogo(data.storeLogo || "");
           setStoreLogoPreview(data.storeLogo || "");
         }
@@ -545,8 +545,8 @@ export function Settings() {
             storeAddress,
             termsContent,
             privacyPolicyContent,
-            currency,
-            timezone,
+            currency: "MMK",
+            timezone: "Asia/Yangon",
             storeLogo,
           }),
         }
@@ -1483,42 +1483,6 @@ export function Settings() {
               <h3 className="text-lg font-semibold text-slate-900 mb-4">{t('settings.general.regionalSettings')}</h3>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="currency" className="text-sm font-medium text-slate-900 mb-2 block">
-                    {t('settings.general.currency')}
-                  </Label>
-                  <Select value={currency} onValueChange={setCurrency}>
-                    <SelectTrigger className="h-10 max-w-md">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="MMK">{t('currency.MMK')}</SelectItem>
-                      <SelectItem value="CNY">{t('currency.CNY')}</SelectItem>
-                      <SelectItem value="USD">{t('currency.USD')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="timezone" className="text-sm font-medium text-slate-900 mb-2 block">
-                    {t('settings.general.timezone')}
-                  </Label>
-                  <Select value={timezone} onValueChange={setTimezone}>
-                    <SelectTrigger className="h-10 max-w-md">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="America/New_York">{t('timezone.America/New_York')}</SelectItem>
-                      <SelectItem value="America/Chicago">{t('timezone.America/Chicago')}</SelectItem>
-                      <SelectItem value="America/Denver">{t('timezone.America/Denver')}</SelectItem>
-                      <SelectItem value="America/Los_Angeles">{t('timezone.America/Los_Angeles')}</SelectItem>
-                      <SelectItem value="Europe/London">{t('timezone.Europe/London')}</SelectItem>
-                      <SelectItem value="Asia/Tokyo">{t('timezone.Asia/Tokyo')}</SelectItem>
-                      <SelectItem value="Asia/Yangon">{t('timezone.Asia/Yangon')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
                   <Label htmlFor="language" className="text-sm font-medium text-slate-900 mb-2 block">
                     <Globe className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
                     {t('settings.general.language')}
@@ -1731,7 +1695,7 @@ export function Settings() {
                               </div>
                               <div>
                                 <p className="text-sm font-medium text-slate-900">{roleInfo.label}</p>
-                                <p className="text-xs text-slate-500">{roleInfo.description}</p>
+                                <p className="text-xs text-slate-500 leading-relaxed">{roleInfo.description}</p>
                               </div>
                             </div>
                           </td>
@@ -1882,14 +1846,9 @@ export function Settings() {
                     </div>
                     <div className="flex-1">
                       <h4 className="font-semibold text-sm text-slate-900 mb-1">{t('role.warehouse')}</h4>
-                      <p className="text-xs text-slate-600 mb-2">
-                        {t('role.warehouse.permissions')}
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {t('role.warehouse.desc')}
                       </p>
-                      <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-                        <li>{t('role.warehouse.perm1')}</li>
-                        <li>{t('role.warehouse.perm2')}</li>
-                        <li>{t('role.warehouse.perm3')}</li>
-                      </ul>
                     </div>
                   </div>
                 </div>
@@ -2405,7 +2364,7 @@ export function Settings() {
                             {isVendorAction ? (
                               <>
                                 <p className="text-sm font-medium text-slate-900 leading-snug">
-                                  <span>{vendorAction}</span>
+                                  <span>{translateStaffActivityAction(vendorAction, t)}</span>
                                   {vendorContactLine ? (
                                     <>
                                       <span className="text-slate-400 font-normal mx-1.5" aria-hidden="true">
@@ -2419,7 +2378,9 @@ export function Settings() {
                               </>
                             ) : (
                               <>
-                                <p className="text-sm font-medium text-slate-900">{activity.action}</p>
+                                <p className="text-sm font-medium text-slate-900">
+                                  {translateStaffActivityAction(activity.action || "", t)}
+                                </p>
                                 {detailPieces.length > 0 ? (
                                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                                     {detailPieces.map((piece, pieceIdx) => (
@@ -2427,7 +2388,7 @@ export function Settings() {
                                         key={`${activity.id}-piece-${pieceIdx}`}
                                         className="inline-flex max-w-full items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600 break-words"
                                       >
-                                        {piece}
+                                        {translateActivityDetailPiece(piece, t)}
                                       </span>
                                     ))}
                                   </div>

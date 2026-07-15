@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { compressImage } from "../../utils/imageCompression";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { translateActivityDetailPiece, translateStaffActivityAction } from "../utils/staffActivityLabels";
+import { canonicalizeStaffRoleForSave } from "../utils/superAdminRolePermissions";
 import type { VendorUser } from "../contexts/VendorAuthContext";
 import {
   ArrowLeft,
@@ -656,41 +658,14 @@ export function UserProfile({
   };
 
   const getRoleInfo = (role: string) => {
-    switch (role) {
+    const r = String(role || "").trim().toLowerCase();
+    switch (r) {
       case "super-admin":
         return {
           label: t("role.superAdmin"),
           icon: ShieldCheck,
           color: "text-violet-600 bg-violet-100",
           description: t("role.superAdmin.desc"),
-        };
-      case "store-owner":
-        return {
-          label: t("role.storeOwner"),
-          icon: Store,
-          color: "text-purple-600 bg-purple-100",
-          description: t("role.storeOwner.desc"),
-        };
-      case "administrator":
-        return {
-          label: t("role.administrator"),
-          icon: ShieldCheck,
-          color: "text-blue-600 bg-blue-100",
-          description: t("role.administrator.desc"),
-        };
-      case "data-entry":
-        return {
-          label: t("role.dataEntry"),
-          icon: FileEdit,
-          color: "text-green-600 bg-green-100",
-          description: t("role.dataEntry.desc"),
-        };
-      case "warehouse":
-        return {
-          label: t("role.warehouse"),
-          icon: Warehouse,
-          color: "text-amber-600 bg-amber-100",
-          description: t("role.warehouse.desc"),
         };
       case "vendor-admin":
         return {
@@ -720,6 +695,38 @@ export function UserProfile({
           color: "text-pink-600 bg-pink-100",
           description: t("role.productManager.desc"),
         };
+    }
+
+    const canon = canonicalizeStaffRoleForSave(role);
+    switch (canon) {
+      case "store-owner":
+        return {
+          label: t("role.storeOwner"),
+          icon: Store,
+          color: "text-purple-600 bg-purple-100",
+          description: t("role.storeOwner.desc"),
+        };
+      case "administrator":
+        return {
+          label: t("role.administrator"),
+          icon: ShieldCheck,
+          color: "text-blue-600 bg-blue-100",
+          description: t("role.administrator.desc"),
+        };
+      case "data-entry":
+        return {
+          label: t("role.dataEntry"),
+          icon: FileEdit,
+          color: "text-green-600 bg-green-100",
+          description: t("role.dataEntry.desc"),
+        };
+      case "warehouse":
+        return {
+          label: t("role.warehouse"),
+          icon: Warehouse,
+          color: "text-amber-600 bg-amber-100",
+          description: t("role.warehouse.desc"),
+        };
       default:
         return {
           label: t("common.unknown"),
@@ -729,6 +736,8 @@ export function UserProfile({
         };
     }
   };
+
+  const canonicalRole = canonicalizeStaffRoleForSave(editedUser.role);
 
   const roleInfo = getRoleInfo(editedUser.role);
   const RoleIcon = roleInfo.icon;
@@ -803,8 +812,8 @@ export function UserProfile({
       if (atMs == null) continue;
       rows.push({
         id: `audit-${ev.id}`,
-        action: ev.action,
-        target: ev.detail || "",
+        action: translateStaffActivityAction(ev.action, t),
+        target: translateActivityDetailPiece(ev.detail || "", t),
         at: atMs,
         status: String(ev.type || "").includes("deleted") ? "neutral" : "success",
       });
@@ -993,11 +1002,16 @@ export function UserProfile({
                   </h2>
 
                   <div
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${roleInfo.color} mb-3`}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${roleInfo.color} mb-2`}
                   >
                     <RoleIcon className="w-4 h-4" />
                     <span className="text-sm font-medium">{roleInfo.label}</span>
                   </div>
+                  {roleInfo.description ? (
+                    <p className="text-xs text-slate-500 text-center px-2 mb-3 leading-relaxed">
+                      {roleInfo.description}
+                    </p>
+                  ) : null}
 
                   <div className="flex items-center gap-2 text-sm mb-4">
                     {editedUser.status === "active" ? (
@@ -1107,7 +1121,7 @@ export function UserProfile({
                       </div>
                     </>
                   )}
-                  {editedUser.role === "warehouse" && (
+                  {canonicalRole === "warehouse" && (
                     <>
                       <div className="flex items-start gap-2">
                         <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
@@ -1118,8 +1132,12 @@ export function UserProfile({
                         <span>{t("profile.permission.inventoryUpdates")}</span>
                       </div>
                       <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <span>{t("profile.permission.manageLogistics")}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
                         <XCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-                        <span>{t("profile.permission.limitedSettingsAccess")}</span>
+                        <span>{t("profile.permission.noProductsFinancesSettings")}</span>
                       </div>
                     </>
                   )}

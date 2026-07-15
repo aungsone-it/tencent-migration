@@ -56,12 +56,16 @@ const LEGACY_AS_ADMINISTRATOR = new Set([
   "developer",
 ]);
 
+function roleKey(role: string | undefined): string {
+  return String(role || "").trim().toLowerCase();
+}
+
 export function isOwnerRole(role: string | undefined): boolean {
-  return OWNER_ROLES.has(String(role || "").trim());
+  return OWNER_ROLES.has(roleKey(role));
 }
 
 export function isAdminTierRole(role: string | undefined): boolean {
-  const r = String(role || "").trim();
+  const r = roleKey(role);
   return (
     OWNER_ROLES.has(r) ||
     ADMINISTRATOR_ROLES.has(r) ||
@@ -76,7 +80,7 @@ export function effectiveStaffRole(role: string | undefined): string {
 
 /** Map stored KV role → permission tier (four-role model + legacy). */
 export function normalizeRoleForPermissions(role: string | undefined): string {
-  const r = effectiveStaffRole(role);
+  const r = roleKey(role);
   if (OWNER_ROLES.has(r)) return "store-owner";
   if (ADMINISTRATOR_ROLES.has(r) || LEGACY_AS_ADMINISTRATOR.has(r)) return "administrator";
   if (r === "data-entry" || r === "warehouse") return r;
@@ -110,7 +114,7 @@ export function getAllowedSuperAdminPages(role: string | undefined): Set<SuperAd
   }
 
   /** vendor-admin hitting super routes — treat as administrator */
-  if (effectiveStaffRole(role) === "vendor-admin") {
+  if (roleKey(role) === "vendor-admin") {
     return new Set(
       ALL_PAGES.filter((p) => p !== "Finances" && p !== "Settings")
     );
@@ -141,15 +145,16 @@ const CANONICAL_SET = new Set<string>(CANONICAL_STAFF_ROLES);
 
 /** Creators that are not owners but may invite (administrator + legacy admin roles). */
 function isAdministratorTierCreator(c: string): boolean {
-  return ADMINISTRATOR_ROLES.has(c) || LEGACY_AS_ADMINISTRATOR.has(c);
+  const key = roleKey(c);
+  return ADMINISTRATOR_ROLES.has(key) || LEGACY_AS_ADMINISTRATOR.has(key);
 }
 
 export function canAssignStaffRole(
   creatorRole: string | undefined,
   targetRole: string
 ): boolean {
-  const c = effectiveStaffRole(creatorRole);
-  const t = String(targetRole || "").trim();
+  const c = roleKey(creatorRole);
+  const t = roleKey(targetRole);
 
   if (!CANONICAL_SET.has(t)) {
     return false;
@@ -172,13 +177,13 @@ export function assignableRolesForCreator(creatorRole: string | undefined): stri
 
 /** True if this role may open the Users tab and invite/edit staff (with assign limits). */
 export function canManageStaffAccounts(role: string | undefined): boolean {
-  const r = effectiveStaffRole(role);
+  const r = roleKey(role);
   return OWNER_ROLES.has(r) || isAdministratorTierCreator(r);
 }
 
 /** When saving a profile, persist one of the four canonical roles. */
 export function canonicalizeStaffRoleForSave(role: string | undefined): string {
-  const r = effectiveStaffRole(role);
+  const r = roleKey(role);
   if (r === "super-admin") return "store-owner";
   if (LEGACY_AS_ADMINISTRATOR.has(r)) return "administrator";
   if (CANONICAL_SET.has(r)) return r;

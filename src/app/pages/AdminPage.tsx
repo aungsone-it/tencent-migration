@@ -331,6 +331,14 @@ export function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedAdminSection]);
 
+  /** Keep logistics sub-routes (partner profile, create, edit) on the Logistics page. */
+  useEffect(() => {
+    const path = location.pathname.replace(/\/+$/, "").toLowerCase();
+    if (path === "/admin/logistics" || path.startsWith("/admin/logistics/")) {
+      setCurrentPage(ADMIN_PAGES.LOGISTICS);
+    }
+  }, [location.pathname]);
+
   useEffect(() => {
     if (!authUser?.id) return;
     const ext = authUser as Record<string, unknown>;

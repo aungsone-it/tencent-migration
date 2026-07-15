@@ -37,12 +37,16 @@ import {
   logisticsPartnerEditPath,
   logisticsPartnerProfilePath,
 } from "../utils/logisticsPartnerSlug";
+import {
+  translateActivityDetailPiece,
+  translateStaffActivityAction,
+} from "../utils/staffActivityLabels";
 import { getMyanmarRegionLabel } from "../utils/myanmarRegionLabels";
 import { useLanguage } from "../contexts/LanguageContext";
 
 export function Logistics() {
   const navigate = useNavigate();
-  const { language } = useLanguage();
+  const { t, language } = useLanguage();
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -92,13 +96,15 @@ export function Logistics() {
   const codEnabledPartners = partners.filter((s) => s.codSupported).length;
 
   const handleDelete = async (partner: DeliveryPartner) => {
-    const ok = window.confirm(`Remove "${partner.name}" from delivery partners?`);
+    const ok = window.confirm(
+      t("logistics.removeConfirm").replace("{name}", partner.name)
+    );
     if (!ok) return;
 
     try {
       await logisticsApi.deletePartner(partner.id);
       setPartners((prev) => prev.filter((p) => p.id !== partner.id));
-      toast.success("Delivery partner removed");
+      toast.success(t("logistics.removed"));
     } catch (error) {
       console.error("Failed to delete delivery partner:", error);
       toast.error(logisticsApiErrorMessage(error, "delete"));
@@ -109,18 +115,15 @@ export function Logistics() {
     <div className="p-8 space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Logistics</h1>
-          <p className="text-slate-500 mt-1 max-w-[42rem]">
-            Manage delivery partners and carriers — set region-specific delivery times,
-            price ranges, and cash-on-delivery options.
-          </p>
+          <h1 className="text-3xl font-bold text-slate-900">{t("logistics.title")}</h1>
+          <p className="text-slate-500 mt-1 max-w-[42rem]">{t("logistics.subtitle")}</p>
         </div>
         <Button
           className="bg-slate-900 hover:bg-slate-800 shrink-0"
           onClick={() => navigate(LOGISTICS_PARTNER_CREATE_PATH)}
         >
           <Truck className="w-4 h-4 mr-2" />
-          Add delivery partner
+          {t("logistics.addPartner")}
         </Button>
       </div>
 
@@ -129,7 +132,7 @@ export function Logistics() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-500">Delivery partners</p>
+                <p className="text-sm font-medium text-slate-500">{t("logistics.stats.deliveryPartners")}</p>
                 <p className="text-3xl font-bold text-slate-900 mt-2">{totalPartners}</p>
               </div>
               <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -143,9 +146,11 @@ export function Logistics() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-500">Active carriers</p>
+                <p className="text-sm font-medium text-slate-500">{t("logistics.stats.activeCarriers")}</p>
                 <p className="text-3xl font-bold text-slate-900 mt-2">{activePartners}</p>
-                <p className="text-xs text-slate-500 mt-1">of {totalPartners} configured</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {t("logistics.stats.ofConfigured").replace("{count}", String(totalPartners))}
+                </p>
               </div>
               <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                 <Truck className="w-6 h-6 text-green-600" />
@@ -158,9 +163,9 @@ export function Logistics() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-500">COD-enabled</p>
+                <p className="text-sm font-medium text-slate-500">{t("logistics.stats.codEnabled")}</p>
                 <p className="text-3xl font-bold text-slate-900 mt-2">{codEnabledPartners}</p>
-                <p className="text-xs text-slate-500 mt-1">partners offer cash on delivery</p>
+                <p className="text-xs text-slate-500 mt-1">{t("logistics.stats.codPartnersHint")}</p>
               </div>
               <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
                 <Wallet className="w-6 h-6 text-amber-600" />
@@ -173,9 +178,9 @@ export function Logistics() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-500">Regions covered</p>
+                <p className="text-sm font-medium text-slate-500">{t("logistics.stats.regionsCovered")}</p>
                 <p className="text-3xl font-bold text-slate-900 mt-2">{uniqueRegionsCovered}</p>
-                <p className="text-xs text-slate-500 mt-1">unique regions across partners</p>
+                <p className="text-xs text-slate-500 mt-1">{t("logistics.stats.regionsHint")}</p>
               </div>
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                 <Globe className="w-6 h-6 text-blue-600" />
@@ -190,17 +195,17 @@ export function Logistics() {
           <div className="flex gap-4 flex-col sm:flex-row">
             <div className="flex-1">
               <AdminClearableSearchInput
-                placeholder="Search delivery partners by name..."
+                placeholder={t("logistics.searchPlaceholder")}
                 value={searchQuery}
                 onValueChange={setSearchQuery}
               />
             </div>
             <Select value={selectedRegion} onValueChange={setSelectedRegion}>
               <SelectTrigger className="w-full sm:w-64">
-                <SelectValue placeholder="Filter by region" />
+                <SelectValue placeholder={t("logistics.filterByRegion")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All regions</SelectItem>
+                <SelectItem value="all">{t("logistics.allRegions")}</SelectItem>
                 {LOGISTICS_REGION_OPTIONS.map((region) => (
                   <SelectItem key={region} value={region}>
                     {regionLabel(region)}
@@ -215,7 +220,7 @@ export function Logistics() {
           {loading ? (
             <div className="flex items-center justify-center py-16 text-slate-500">
               <Loader2 className="w-6 h-6 animate-spin mr-2" />
-              Loading delivery partners…
+              {t("logistics.loading")}
             </div>
           ) : filteredServices.length === 0 ? (
             <div className="text-center py-16 space-y-4">
@@ -224,12 +229,14 @@ export function Logistics() {
               </div>
               <div>
                 <p className="font-medium text-slate-900">
-                  {partners.length === 0 ? "No delivery partners yet" : "No partners match your filters"}
+                  {partners.length === 0
+                    ? t("logistics.empty.noneTitle")
+                    : t("logistics.empty.filteredTitle")}
                 </p>
                 <p className="text-sm text-slate-500 mt-1">
                   {partners.length === 0
-                    ? "Add your first carrier to start managing logistics."
-                    : "Try a different search or region filter."}
+                    ? t("logistics.empty.noneHint")
+                    : t("logistics.empty.filteredHint")}
                 </p>
               </div>
               {partners.length === 0 && (
@@ -238,7 +245,7 @@ export function Logistics() {
                   onClick={() => navigate(LOGISTICS_PARTNER_CREATE_PATH)}
                 >
                   <Plus className="w-4 h-4 mr-2" />
-                  Add delivery partner
+                  {t("logistics.addPartner")}
                 </Button>
               )}
             </div>
@@ -275,31 +282,40 @@ export function Logistics() {
                                   : "bg-slate-100 text-slate-700 border-slate-200"
                               }
                             >
-                              {service.status}
+                              {service.status === "active"
+                                ? t("logistics.status.active")
+                                : t("logistics.status.inactive")}
                             </Badge>
                             {service.codSupported && (
                               <Badge
                                 variant="secondary"
                                 className="bg-amber-100 text-amber-700 border-amber-200"
                               >
-                                COD available
+                                {t("logistics.codAvailable")}
                               </Badge>
                             )}
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
                             <div>
-                              <p className="text-xs text-slate-500">Coverage</p>
+                              <p className="text-xs text-slate-500">{t("logistics.coverage")}</p>
                               <p className="text-sm font-medium text-slate-900 mt-1">
-                                {regionKeys.length} regions
+                                {t("logistics.regionsCount").replace(
+                                  "{count}",
+                                  String(regionKeys.length)
+                                )}
                               </p>
                             </div>
                             <div>
-                              <p className="text-xs text-slate-500">Cash on delivery</p>
+                              <p className="text-xs text-slate-500">{t("logistics.cod")}</p>
                               {service.codSupported ? (
-                                <p className="text-sm font-medium text-green-600 mt-1">Yes</p>
+                                <p className="text-sm font-medium text-green-600 mt-1">
+                                  {t("logistics.yes")}
+                                </p>
                               ) : (
-                                <p className="text-sm font-medium text-slate-400 mt-1">Not available</p>
+                                <p className="text-sm font-medium text-slate-400 mt-1">
+                                  {t("logistics.notAvailable")}
+                                </p>
                               )}
                             </div>
                           </div>
@@ -313,7 +329,7 @@ export function Logistics() {
                               variant="outline"
                               size="icon"
                               className="h-9 w-9 rounded-lg border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                              title="Actions"
+                              title={t("logistics.actions")}
                             >
                               <Package className="w-4 h-4" />
                             </Button>
@@ -323,20 +339,20 @@ export function Logistics() {
                               onClick={() => navigate(logisticsPartnerProfilePath(service))}
                             >
                               <Eye className="w-4 h-4 mr-2" />
-                              View profile
+                              {t("logistics.viewProfile")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => navigate(logisticsPartnerEditPath(service))}
                             >
                               <Edit className="w-4 h-4 mr-2" />
-                              Edit
+                              {t("logistics.edit")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-red-600"
                               onClick={() => void handleDelete(service)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
-                              Remove
+                              {t("logistics.remove")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

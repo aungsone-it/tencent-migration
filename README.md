@@ -20,6 +20,8 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | **TCB function deploy** | Console upload zips (`.cloudbase/dist/*.zip`); shared `server_cache.ts`; order delete syncs SQL read model synchronously |
 | **Super-admin Orders** | KBZPay **draft recovery** panel; optimistic list updates (no blink on recover/cancel); badge count normalization; bulk **Delete** hidden in UI (code retained) |
 | **Schema migrations** | `supabase/migrations/` applied to TencentDB; `setup:tcb-first` skips KV backfill INSERTs when `SKIP_DATA_COPY=1` (safe re-run on populated DB) |
+| **Logistics admin** | Delivery partners CRUD, per-region rates, logo upload (~500KB compress), warehouse role access, Chinese UI on list/profile/form |
+| **Image storage** | **Production default:** files in TencentDB KV (`storage:obj:*` keys); entity records hold URLs only. Optional CloudBase object storage via `CLOUDBASE_STORAGE_API_BASE_URL` — not used on NEXA TCB env |
 
 ### Earlier (June 2026)
 
@@ -43,7 +45,8 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | Frontend API | `VITE_CLOUDBASE_API_BASE_URL` + publishable key in `.env` / EdgeOne build |
 | KPay on TCB | Already live — do not re-import Supabase KPay KV |
 | Chat KV | Not migrated — chat remains on prior store until cutover |
-| Supabase Storage images | Manual copy to CloudBase Storage still required |
+| Image uploads (new) | Stored in **TencentDB KV** + signed URLs; compress ~500KB on upload. Legacy Supabase Storage URLs in imported data may need re-upload |
+| CloudBase object storage | **Optional** — set `CLOUDBASE_STORAGE_API_BASE_URL` only if migrating off KV blobs later |
 | Auth users | Separate migration / password reset may be needed |
 
 See [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) and [migration.md](migration.md).
@@ -261,7 +264,7 @@ Use URL-encoded passwords for special characters. TencentDB managed instances of
 - `VITE_ADMIN_OPERATION_SECRET` — must match server `EDGE_ADMIN_OPERATION_SECRET`
 - `VITE_CLOUDBASE_THUMB_MAX` — image transform width
 
-**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, etc.
+**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, `CLOUDBASE_API_PUBLIC_BASE_URL`, etc. Image uploads use **TencentDB KV by default** (`CLOUDBASE_STORAGE_API_BASE_URL` optional). Details: [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md).
 
 ## Deployment
 

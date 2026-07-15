@@ -13,7 +13,8 @@ Status document for the NEXA platform backend cutover. **Runtime target: Tencent
 | SQL read-model import | **Done** | `app_*` tables via `import:supabase-sql-only` or full import |
 | Frontend API client | **Done** | `VITE_CLOUDBASE_API_BASE_URL` + publishable key |
 | Auth cutover | **Partial** | CloudBase Auth enabled; user password migration may need reset flow |
-| Storage images | **Pending** | Copy Supabase Storage objects → CloudBase Storage manually |
+| Image uploads (runtime) | **Done** | New uploads → TencentDB KV storage backend (`kv_storage_backend.ts`); URLs in entity JSON. Client compress ~500KB |
+| Legacy Supabase Storage URLs | **Partial** | Imported KV may still reference old Supabase URLs — re-upload via admin or batch fix |
 | Chat KV | **Deferred** | Not imported; chat still on Supabase KV until separate cutover |
 | Supabase decommission | **Pending** | Only after production validation on TCB |
 
@@ -24,8 +25,8 @@ flowchart LR
   ReactSpa["React Vite SPA"] --> ApiClient["src/utils/api-client.ts"]
   ApiClient --> CloudBaseHttp["CloudBase HTTP Functions"]
   CloudBaseHttp --> CloudBaseAuth["CloudBase Auth"]
-  CloudBaseHttp --> CloudBaseStorage["CloudBase Storage"]
-  CloudBaseHttp --> TencentPostgres["TencentDB PostgreSQL"]
+  CloudBaseHttp --> TencentPostgres["TencentDB PostgreSQL\n(KV + SQL read model\n+ KV image blobs default)"]
+  CloudBaseHttp -.->|"optional: CLOUDBASE_STORAGE_API_BASE_URL"| CloudBaseStorage["CloudBase Storage"]
   KbzWebhook["KBZPay Webhook"] --> CloudBaseWebhook["kpay-webhook function"]
   CloudBaseWebhook --> TencentPostgres
 ```
@@ -89,7 +90,8 @@ SOURCE_POSTGRES_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
 
 - **Auth:** Supabase password hashes may not import to CloudBase Auth — plan forced reset or migration login.
 - **Realtime:** Pulse tables + CloudBase Realtime differ from Supabase channels — monitor after cutover.
-- **Storage:** Product/vendor images must be copied; broken URLs until complete.
+- **Storage:** New uploads land in TencentDB KV (signed URLs). Legacy Supabase Storage links in imported rows may break until re-uploaded.
+- **Disk:** All KV + SQL + KV-stored images share TencentDB disk (scale instance when needed).
 - **Read-model drift:** Run `validate:read-model` after bulk imports; order DELETE now syncs SQL synchronously.
 
 ## Related docs

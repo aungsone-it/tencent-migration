@@ -15,7 +15,7 @@ For routing and host models, see [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_
 | **Payment webhook** | Separate function `kpay-webhook` (signature verified in handler) |
 | **Database** | TencentDB for PostgreSQL — KV table `kv_store_16010b6f` + SQL read-model `app_*` tables |
 | **Auth** | CloudBase/Tencent Auth for customer accounts; KV-backed vendor/staff auth for admin portals |
-| **Storage** | CloudBase/Tencent Storage for product images, uploads |
+| **Storage (images/files)** | **Default:** TencentDB KV object backend (`storage:obj:{bucket}:{path}` in `kv_store_16010b6f`, served via signed URLs). **Optional:** CloudBase Storage HTTP API when `CLOUDBASE_STORAGE_API_BASE_URL` is set on the function |
 | **Realtime** | CloudBase/Tencent Realtime on `kv_store_16010b6f` + pulse tables (`app_order_pulse`, `app_vendor_application_pulse`) |
 
 ---
@@ -88,6 +88,26 @@ Migrations under `supabase/migrations/` add normalized tables synced from KV:
 **Catalog (storefront):** Vendor pagination still uses dedicated RPCs (`rpc_storefront_catalog`, etc.) with partial indexes — separate from the admin read-model tables.
 
 The KV layer remains the write source; SQL tables are additive and do not replace KV storage yet.
+
+### Image and file storage (current production default)
+
+**NEXA production uses TencentDB for uploaded files** — not a separate object-storage env var. This matches the deployed TCB setup (`CLOUDBASE_STORAGE_API_BASE_URL` unset).
+
+| Step | What happens |
+|------|----------------|
+| **Client upload** | Admin/vendor UI compresses images client-side (target **~500KB** max for logos and gallery uploads) |
+| **API** | `make-server-16010b6f` upload routes (`/products/upload-image`, `/settings/upload-logo`, `/logistics/partners/upload-logo`, profile image routes, etc.) |
+| **File bytes** | Stored in **`kv_store_16010b6f`** under keys `storage:obj:{bucket}:{path}` as JSON `{ contentType, base64, size, createdAt }` — see `kv_storage_backend.ts` |
+| **Serving** | Signed URLs like `/make-server-16010b6f/storage/object?bucket=…&path=…&sig=…` (requires **`CLOUDBASE_API_PUBLIC_BASE_URL`** on the function so browsers get absolute links) |
+| **Entity records** | Products, logistics partners, settings, etc. store **URL strings only** — never embed base64 in partner/product JSON |
+
+**Logical buckets** (created lazily on first upload): `make-16010b6f-logistics-logos`, `make-16010b6f-profile-images`, `make-16010b6f-store-logos`, `make-16010b6f-banners`, product gallery bucket, etc.
+
+**Optional object storage (not required):** If `CLOUDBASE_STORAGE_API_BASE_URL` is set on `make-server-16010b6f`, the same upload code uses the CloudBase PG Storage HTTP API instead of KV blobs. Use this only when you outgrow DB disk or want CDN-backed objects. Leave unset for the current NEXA deployment.
+
+**Legacy Supabase Storage URLs** in imported KV rows may 404 until those assets are re-uploaded through the app or URLs are updated.
+
+**Capacity note:** TencentDB disk (e.g. 100GB on `postgres-jwrhnped`) holds **all** KV data, SQL read models, and KV-stored images. At ~500KB per compressed upload, image volume is manageable for typical catalog sizes; scale disk in TencentDB console when needed.
 
 ---
 
@@ -196,7 +216,7 @@ Do not document Stripe as a supported customer payment method unless it is integ
 | **Edge in-memory cache** | `server_cache.ts` (`getCached` / `setCache` / `clearCache`) | Per-isolate Map; cleared on order mutations |
 | **Client orders cache** | `module-cache.ts` | Paginated `admin-orders-page-*` keys; optimistic patches on status/recover (no full refetch) |
 | **CDN / static** | Vercel `vercel.json` headers | Long cache on `/assets/*`; short on `index.html` |
-| **Image transforms** | CloudBase/Tencent Storage render URLs | 480px grid, 128px logo, 960px banner |
+| **Image transforms** | Client-side compression + optional `VITE_CLOUDBASE_THUMB_MAX` | Upload target ~500KB; grid thumbs via transform width when CDN/storage render URLs are available |
 
 See [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md).
 

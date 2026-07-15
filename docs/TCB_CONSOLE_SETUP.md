@@ -94,10 +94,26 @@ curl -sS "$VITE_CLOUDBASE_API_BASE_URL/auth/email-health" \
 
 Expect `"ok": true`. For local/staging without Resend, set `ALLOW_DEBUG_OTP=true` on the function — the reset page will show the code on screen.
 
-### 4. Enable Authentication + Storage
+### 4. Enable Authentication (+ optional Cloud Storage)
 
 - **Authentication** → enable username/password login
-- **Cloud Storage** → create/default bucket for uploads
+- **Cloud Storage** in TCB console → optional. **NEXA production does not require it.** With `CLOUDBASE_STORAGE_API_BASE_URL` **unset**, uploads are stored in **TencentDB** (`kv_store_16010b6f`, keys `storage:obj:{bucket}:{path}`) and served via signed URLs from the function.
+
+**Required for image uploads to work (KV mode):**
+
+| Variable | Purpose |
+|----------|---------|
+| `TENCENT_DATABASE_URL` or PostgREST vars | KV writes for file blobs + metadata |
+| `CLOUDBASE_API_PUBLIC_BASE_URL` | Absolute signed URL base for browsers (see `function-env.template.env`) |
+| `CLOUDBASE_SERVICE_TOKEN` | API auth |
+
+**Optional — separate object storage later:**
+
+| Variable | When to set |
+|----------|-------------|
+| `CLOUDBASE_STORAGE_API_BASE_URL` | e.g. `https://{envId}.api.intl.tcloudbasegateway.com/v1/storages` (Singapore) — only if moving file bytes off TencentDB |
+
+Do **not** confuse standalone **Tencent COS console** bucket creation with this env var. TCB **Cloud Storage → File Management** confirms storage is enabled for the env; the app creates logical buckets (`make-16010b6f-*`) automatically on first upload.
 
 ### 5. KBZPay (KPay) secrets
 
@@ -221,7 +237,7 @@ Upload `dist/` to EdgeOne. Configure SPA fallback:
 - [ ] `npm run smoke:tcb` passes
 - [ ] Platform landing loads on EdgeOne
 - [ ] Create test admin/vendor account
-- [ ] Create test product + upload image
+- [ ] Create test product + upload image (check URL contains `/storage/object?bucket=` when using KV mode, or storage CDN URL if object storage is enabled)
 - [ ] Storefront shows test product
 - [ ] Place test order
 
@@ -262,7 +278,7 @@ npm run import:supabase-data
 
 Legacy alias: `npm run import:supabase` → `import-supabase-later.mjs` (see script for behavior).
 
-Then migrate Storage objects and Auth users separately. Only decommission Supabase after validation.
+Then re-upload or fix **legacy Supabase Storage URLs** in imported KV (new uploads already use TencentDB KV). Migrate Auth users separately. Only decommission Supabase after validation.
 
 ```bash
 npm run validate:read-model

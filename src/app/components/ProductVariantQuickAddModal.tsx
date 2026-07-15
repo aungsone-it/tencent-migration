@@ -125,7 +125,12 @@ export function ProductVariantQuickAddModal({
         <div className="px-5 pb-5 space-y-4 max-h-[min(70vh,520px)] overflow-y-auto">
           {opts.map((option) => (
             <div key={option.name} className="space-y-2">
-              <p className="text-sm font-medium text-slate-800">{option.name}</p>
+              <p className="text-sm font-medium text-slate-800">
+                {option.name}
+                {selections[option.name] ? (
+                  <span className="ml-1.5 font-normal text-slate-600">— {selections[option.name]}</span>
+                ) : null}
+              </p>
               <div className="flex flex-wrap gap-2">
                 {option.values.map((value) => {
                   const active = selections[option.name] === value;
@@ -134,10 +139,10 @@ export function ProductVariantQuickAddModal({
                       key={value}
                       type="button"
                       onClick={() => setSelections((s) => ({ ...s, [option.name]: value }))}
-                      className={`min-h-9 rounded-md border-2 px-3 text-sm font-medium transition ${
+                      className={`min-h-9 rounded-lg border-2 px-4 text-sm font-semibold transition-all ${
                         active
-                          ? "border-slate-900 bg-slate-50 text-slate-900"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                          ? "border-[#1a1d29] bg-[#1a1d29] text-white shadow-md ring-2 ring-[#1a1d29]/25 ring-offset-2"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-500"
                       }`}
                     >
                       {value}

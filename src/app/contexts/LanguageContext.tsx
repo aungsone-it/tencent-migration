@@ -1,5 +1,5 @@
 // Language Context - non-English bundles loaded on demand to shrink initial bundle
-import { useState, useEffect, useCallback, ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import { useLocation } from "react-router";
 import { Language, LanguageContext } from "./language-core";
 import { enTranslations } from "./translations/en";
@@ -9,12 +9,16 @@ type TranslationMap = Record<string, string>;
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [language, setLanguageState] = useState<Language>("en");
+  const [storefrontLanguageOverride, setStorefrontLanguageOverrideState] =
+    useState<Language | null>(null);
   const [zhMap, setZhMap] = useState<TranslationMap | null>(null);
   const [myMap, setMyMap] = useState<TranslationMap | null>(null);
   const isAdminRoute =
     location.pathname.startsWith("/admin") ||
     /\/admin(?:\/|$)/.test(location.pathname);
-  const effectiveLanguage: Language = isAdminRoute && language === "my" ? "en" : language;
+  const effectiveLanguage: Language =
+    storefrontLanguageOverride ??
+    (isAdminRoute && language === "my" ? "en" : language);
 
   useEffect(() => {
     try {
@@ -28,12 +32,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (storefrontLanguageOverride) return;
     try {
       localStorage.setItem("migoo-language", language);
     } catch {
       /* ignore */
     }
-  }, [language]);
+  }, [language, storefrontLanguageOverride]);
 
   useEffect(() => {
     if (effectiveLanguage !== "zh" || zhMap) return;
@@ -57,9 +62,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     };
   }, [effectiveLanguage, myMap]);
 
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
-  };
+  }, []);
+
+  const setStorefrontLanguageOverride = useCallback((lang: Language | null) => {
+    setStorefrontLanguageOverrideState(lang);
+  }, []);
 
   const t = useCallback(
     (key: string): string => {
@@ -74,10 +83,18 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     [effectiveLanguage, zhMap, myMap]
   );
 
+  const value = useMemo(
+    () => ({
+      language: effectiveLanguage,
+      setLanguage,
+      t,
+      setStorefrontLanguageOverride,
+    }),
+    [effectiveLanguage, setLanguage, t, setStorefrontLanguageOverride]
+  );
+
   return (
-    <LanguageContext.Provider value={{ language: effectiveLanguage, setLanguage, t }}>
-      {children}
-    </LanguageContext.Provider>
+    <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>
   );
 }
 

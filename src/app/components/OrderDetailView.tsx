@@ -1,6 +1,9 @@
 import { Check, Package, ChevronLeft, CreditCard, MapPin, ShoppingBag, Tag } from "lucide-react";
 import { Button } from "./ui/button";
 import { formatOrderNumberDisplay } from "../utils/orderNumber";
+import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
+import { formatMyanmarLocationLine } from "../utils/myanmarRegionLabels";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface CartItem {
   sku: string;
@@ -34,6 +37,7 @@ function normalizeSummaryPaymentMethodLabel(raw: unknown): string {
 }
 
 export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailViewProps) {
+  const { language } = useLanguage();
   if (!order) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center">
@@ -139,7 +143,7 @@ export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailVi
                     </p>
                   </div>
                   <p className="text-sm font-semibold text-slate-900">
-                    {Math.round(item.price * item.quantity)} MMK
+                    {formatStorefrontPrice(item.price * item.quantity)}
                   </p>
                 </div>
               ))}
@@ -150,7 +154,7 @@ export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailVi
             <div className="space-y-2.5">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-600">Subtotal</span>
-                <span className="font-medium text-slate-900">{safeSubtotal.toFixed(0)} MMK</span>
+                <span className="font-medium text-slate-900">{formatStorefrontPrice(safeSubtotal)}</span>
               </div>
               {safeDiscount > 0 && (
                 <div className="flex justify-between text-sm">
@@ -158,7 +162,7 @@ export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailVi
                     <Tag className="h-3.5 w-3.5" />
                     Discount {order.couponCode ? `(${order.couponCode})` : ""}
                   </span>
-                  <span className="font-medium text-emerald-600">-{safeDiscount.toFixed(0)} MMK</span>
+                  <span className="font-medium text-emerald-600">-{formatStorefrontPrice(safeDiscount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
@@ -167,7 +171,7 @@ export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailVi
               </div>
               <div className="flex justify-between border-t border-slate-200 pt-2">
                 <span className="text-base font-semibold text-slate-900">Total</span>
-                <span className="text-xl font-semibold tracking-tight text-slate-900">{safeTotal.toFixed(0)} MMK</span>
+                <span className="text-xl font-semibold tracking-tight text-slate-900">{formatStorefrontPrice(safeTotal)}</span>
               </div>
             </div>
           </div>
@@ -214,7 +218,12 @@ export function OrderDetailView({ order, onBack, formatPriceMMK }: OrderDetailVi
               <div className="col-span-2">
                 <p className="mb-1 text-xs uppercase tracking-wider text-slate-500">Delivery Address</p>
                 <p className="text-sm font-medium text-slate-900">
-                  {[shipping.address, shipping.city, shipping.state, shipping.zipCode, shipping.country]
+                  {[
+                    shipping.address,
+                    formatMyanmarLocationLine(shipping.city, shipping.state, language),
+                    shipping.zipCode,
+                    shipping.country,
+                  ]
                     .filter(Boolean)
                     .join(", ")}
                 </p>

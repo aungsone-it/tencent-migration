@@ -20,13 +20,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
 import { useCart } from "./CartContext";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -75,6 +69,7 @@ import {
 import { normalizeCheckoutStoragePath } from "../utils/vendorStorePaths";
 import { useIsMobile } from "./ui/use-mobile";
 import { useLanguage } from "../contexts/LanguageContext";
+import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 
 /** KV-backed customer session (authApi / migoo-user) — AuthContext only has CloudBase sessions */
 function getMigooCustomerFromStorage(): {
@@ -683,7 +678,7 @@ export function Checkout({
 }: CheckoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { items, totalPrice, clearCart } = useCart();
   const checkoutStoragePath = useMemo(
     () => normalizeCheckoutStoragePath(location.pathname),
@@ -2336,10 +2331,10 @@ export function Checkout({
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-slate-900">{item.sku}</p>
                       <p className="text-xs text-slate-500">
-                        {t("checkout.qty")}: {item.quantity} × {Math.round(Number(item.price) || 0)} MMK
+                        {t("checkout.qty")}: {item.quantity} × {formatStorefrontPrice(Number(item.price) || 0)}
                       </p>
                     </div>
-                    <p className="text-sm font-semibold text-slate-900">{Math.round((Number(item.price) || 0) * item.quantity)} MMK</p>
+                    <p className="text-sm font-semibold text-slate-900">{formatStorefrontPrice((Number(item.price) || 0) * item.quantity)}</p>
                   </div>
                 ))}
               </div>
@@ -2350,7 +2345,7 @@ export function Checkout({
               <div className="space-y-2.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.subtotal")}</span>
-                  <span className="font-medium text-slate-900">{(confirmedTotal + confirmedDiscount).toFixed(0)} MMK</span>
+                  <span className="font-medium text-slate-900">{formatStorefrontPrice(confirmedTotal + confirmedDiscount)}</span>
                 </div>
                 
                 {confirmedCoupon && confirmedDiscount > 0 && (
@@ -2359,7 +2354,7 @@ export function Checkout({
                       <Tag className="w-3.5 h-3.5" />
                       {t("checkout.discount")} ({confirmedCoupon.campaign?.code})
                     </span>
-                    <span className="font-medium text-emerald-600">-{confirmedDiscount.toFixed(0)} MMK</span>
+                    <span className="font-medium text-emerald-600">-{formatStorefrontPrice(confirmedDiscount)}</span>
                   </div>
                 )}
                 
@@ -2371,7 +2366,7 @@ export function Checkout({
                 <div className="flex justify-between border-t border-slate-200 pt-2">
                   <span className="text-base font-semibold text-slate-900">{t("checkout.total")}</span>
                   <span className="text-xl font-semibold tabular-nums tracking-tight text-slate-900">
-                    {confirmedTotal.toFixed(0)} MMK
+                    {formatStorefrontPrice(confirmedTotal)}
                   </span>
                 </div>
               </div>
@@ -2391,8 +2386,8 @@ export function Checkout({
                       {confirmedCoupon.campaign?.code} · 
                       {confirmedCoupon.campaign?.discountType === 'percentage' 
                         ? ` ${confirmedCoupon.campaign?.discount}% off` 
-                        : ` ${confirmedCoupon.campaign?.discount} MMK off`}
-                      {confirmedDiscount > 0 && ` · ${t("checkout.saved")} ${confirmedDiscount.toFixed(0)} MMK`}
+                        : ` ${formatStorefrontPrice(confirmedCoupon.campaign?.discount)}`}
+                      {confirmedDiscount > 0 && ` · ${t("checkout.saved")} ${formatStorefrontPrice(confirmedDiscount)}`}
                     </p>
                   </div>
                 </div>
@@ -2554,8 +2549,9 @@ export function Checkout({
                     <Label htmlFor="vs-state" className={checkoutLabelClass}>
                       {t("checkout.stateRegion")}
                     </Label>
-                    <Select
-                      value={shippingInfo.state || undefined}
+                    <MyanmarSearchableSelect
+                      id="vs-state"
+                      value={shippingInfo.state}
                       onValueChange={(value) =>
                         setShippingInfo({
                           ...shippingInfo,
@@ -2565,47 +2561,38 @@ export function Checkout({
                             : "",
                         })
                       }
-                    >
-                      <SelectTrigger id="vs-state" className={checkoutSelectClass}>
-                        <SelectValue placeholder={t("checkout.selectStateRegion")} />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60">
-                        {regionSelectOptions.map((state) => (
-                          <SelectItem key={state} value={state}>
-                            {state}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={regionSelectOptions}
+                      placeholder={t("checkout.selectStateRegion")}
+                      searchPlaceholder={t("checkout.searchStateRegion")}
+                      emptyText={t("checkout.noLocationResults")}
+                      className={checkoutSelectClass}
+                      language={language}
+                      kind="region"
+                    />
                   </div>
                   <div>
                     <Label htmlFor="vs-city" className={checkoutLabelClass}>
                       {t("checkout.township")}
                     </Label>
-                    <Select
-                      value={shippingInfo.city || undefined}
+                    <MyanmarSearchableSelect
+                      id="vs-city"
+                      value={shippingInfo.city}
                       onValueChange={(value) =>
                         setShippingInfo({ ...shippingInfo, city: value })
                       }
+                      options={townshipSelectOptions}
+                      placeholder={
+                        shippingInfo.state.trim()
+                          ? t("checkout.selectTownship")
+                          : t("checkout.selectStateFirst")
+                      }
+                      searchPlaceholder={t("checkout.searchTownship")}
+                      emptyText={t("checkout.noLocationResults")}
                       disabled={!shippingInfo.state.trim()}
-                    >
-                      <SelectTrigger id="vs-city" className={checkoutSelectClass}>
-                        <SelectValue
-                          placeholder={
-                            shippingInfo.state.trim()
-                              ? t("checkout.selectTownship")
-                              : t("checkout.selectStateFirst")
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60">
-                        {townshipSelectOptions.map((city) => (
-                          <SelectItem key={city} value={city}>
-                            {city}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      className={checkoutSelectClass}
+                      language={language}
+                      kind="township"
+                    />
                   </div>
                   <div>
                     <div className="mb-1.5 flex items-baseline justify-between">
@@ -2756,7 +2743,7 @@ export function Checkout({
                         )}
                         <div className="flex justify-between border-b border-slate-200 py-1">
                           <span className="text-slate-600">{t("checkout.amountToPay")}</span>
-                          <span className="font-semibold text-emerald-700">{finalTotal.toFixed(0)} MMK</span>
+                          <span className="font-semibold text-emerald-700">{formatStorefrontPrice(finalTotal)}</span>
                         </div>
                         {kpaySession?.qrContent && !kpaySession?.qrImageUrl && (
                           <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
@@ -2844,11 +2831,11 @@ export function Checkout({
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{item.sku}</p>
                         <p className="mt-1 text-sm font-medium text-slate-500">
-                          {t("checkout.qty")}: {item.quantity} × {Math.round(parseFloat(String(item.price)))} MMK
+                          {t("checkout.qty")}: {item.quantity} × {formatStorefrontPrice(parseFloat(String(item.price)))}
                         </p>
                       </div>
                       <p className="text-sm font-semibold text-slate-900">
-                        {Math.round(parseFloat(String(item.price)) * item.quantity)} MMK
+                        {formatStorefrontPrice(parseFloat(String(item.price)) * item.quantity)}
                       </p>
                     </div>
                   </div>
@@ -2858,7 +2845,7 @@ export function Checkout({
               <div className="space-y-3 border-t border-slate-200 pt-4">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.subtotal")}</span>
-                  <span className="font-semibold text-slate-900">{summaryDisplayTotal.toFixed(0)} MMK</span>
+                  <span className="font-semibold text-slate-900">{formatStorefrontPrice(summaryDisplayTotal)}</span>
                 </div>
 
                 <div className="flex justify-between text-sm">
@@ -2868,7 +2855,7 @@ export function Checkout({
 
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-sm font-semibold text-slate-900">{t("checkout.total")}</span>
-                  <span className="text-base font-bold text-slate-900">{finalTotal.toFixed(0)} MMK</span>
+                  <span className="text-base font-bold text-slate-900">{formatStorefrontPrice(finalTotal)}</span>
                 </div>
               </div>
               </div>
@@ -2897,7 +2884,7 @@ export function Checkout({
                 ) : paymentMethod === "KPay" ? (
                   kpayWebhookConfirmed ? t("checkout.placeOrderConfirmed") : t("checkout.completedPayment")
                 ) : paymentMethod === "KPay-PWA" ? (
-                  `${t("checkout.payWithKpay")} · ${finalTotal.toFixed(0)} MMK`
+                  `${t("checkout.payWithKpay")} · ${formatStorefrontPrice(finalTotal)}`
                 ) : paymentMethod === "COD" ? (
                   t("checkout.placeCodOrder")
                 ) : paymentMethod === "None" ? (

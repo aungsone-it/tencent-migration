@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Plus, Heart, Star } from "lucide-react";
+import { useLanguage } from "../contexts/LanguageContext";
 import { Card } from "./ui/card";
 import { LazyImage } from "./LazyImage";
 import {
@@ -53,6 +54,7 @@ export const ProductCard = ({
   viewType = "grid",
   priority = false,
 }: ProductCardProps) => {
+  const { t } = useLanguage();
   const [variantModalOpen, setVariantModalOpen] = useState(false);
 
   const defaultSelections = useMemo(
@@ -267,7 +269,7 @@ export const ProductCard = ({
                 <>
                   {product.name.substring(0, 30)}
                   <span className="text-slate-400">...</span>
-                  <span className="text-slate-400 text-xs">readmore</span>
+                  <span className="text-slate-400 text-xs"> {t("storefront.product.readMore")}</span>
                 </>
               ) : (
                 product.name
@@ -286,8 +288,7 @@ export const ProductCard = ({
 
             {/* Price */}
             <div className="text-sm text-slate-900">
-              <span className="text-base font-bold">{formatPriceMMK(displayPrice).replace(" MMK", "")}</span>
-              <span className="text-[11px] ml-1 font-semibold text-slate-900">MMK</span>
+              <span className="text-base font-bold">{formatPriceMMK(displayPrice)}</span>
             </div>
           </div>
         </Card>

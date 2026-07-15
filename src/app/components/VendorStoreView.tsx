@@ -151,6 +151,8 @@ import {
   isShippingAddressFormValid,
 } from "./ShippingAddressFormFields";
 import { resolveMyanmarRegionForTownship } from "../utils/myanmarRegions";
+import { formatMyanmarLocationLine } from "../utils/myanmarRegionLabels";
+import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 import { VendorStorefrontFooter } from "./VendorStorefrontFooter";
 import { VendorInstallFab } from "./VendorInstallFab";
 import { NotificationCenter } from "./NotificationCenter";
@@ -427,6 +429,17 @@ function cleanAsciiUrlSegment(value: unknown): string {
     .trim();
 }
 
+/** Match variant SKU to a URL path segment (exact, case-insensitive, or ASCII-normalized). */
+function variantSkuMatchesPathSegment(sku: unknown, pathSegment: string): boolean {
+  const s = String(sku || "").trim();
+  const p = String(pathSegment || "").trim();
+  if (!s || !p) return false;
+  if (s === p || s.toLowerCase() === p.toLowerCase()) return true;
+  const cleanSku = cleanAsciiUrlSegment(s);
+  const cleanPath = cleanAsciiUrlSegment(p);
+  return cleanSku.length > 0 && cleanSku === cleanPath;
+}
+
 function legacyNameUrlSegment(product: { name?: string }): string {
   return String(product.name || "")
     .trim()
@@ -523,11 +536,7 @@ function variantSelectionsFromSlug(product: Product, decodedSlug: string): Recor
   const variants = product.variants || [];
   if (!product.hasVariants || !variants.length || !variantOptions.length) return null;
 
-  const variant = variants.find(
-    (v: any) =>
-      v?.sku === decodedSlug ||
-      (typeof v?.sku === "string" && v.sku.toLowerCase() === decodedSlug.toLowerCase())
-  );
+  const variant = variants.find((v: any) => variantSkuMatchesPathSegment(v?.sku, decodedSlug));
   if (!variant) return null;
 
   const names = variantOptions.map((o: any) => o.name);
@@ -631,7 +640,7 @@ function resolveVendorProductFromSlug(products: Product[], decoded: string): Pro
     (p) =>
       p.hasVariants &&
       Array.isArray(p.variants) &&
-      p.variants.some((v: any) => String(v?.sku || "").trim().toLowerCase() === dec.toLowerCase())
+      p.variants.some((v: any) => variantSkuMatchesPathSegment(v?.sku, dec))
   );
 }
 
@@ -1015,10 +1024,6 @@ export function VendorStoreView({
   const location = useLocation();
   const { language, setLanguage, t } = useLanguage();
   const { chatUnreadCount, openFloatingChat } = useChatNotification();
-
-  useEffect(() => {
-    setLanguage("my");
-  }, [setLanguage]);
 
   const [canonicalStoreSlug, setCanonicalStoreSlug] = useState<string | null>(() => {
     const resolved = resolveVendorPathSlug(storeSlug || vendorId);
@@ -2994,10 +2999,7 @@ export function VendorStoreView({
         );
       }
 
-      const formatOrderDetailPrice = (price: string) => {
-        const numPrice = parseFloat(String(price).replace(/[^0-9.-]+/g, ""));
-        return `${Math.round(Number.isFinite(numPrice) ? numPrice : 0)} MMK`;
-      };
+      const formatOrderDetailPrice = (price: string) => formatStorefrontPrice(price);
 
       return (
         <div className="max-w-4xl mx-auto w-full">
@@ -3364,7 +3366,7 @@ export function VendorStoreView({
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-slate-600">{t("storefront.account.totalAmount")}</span>
                           <span className="text-lg sm:text-xl font-bold text-black">
-                            {Math.round(order.total || order.totalAmount || 0)} MMK
+                            {formatStorefrontPrice(order.total || order.totalAmount || 0)}
                           </span>
                         </div>
                       </div>
@@ -3577,8 +3579,7 @@ export function VendorStoreView({
                           <p>{address.addressLine1}</p>
                           {address.addressLine2 && <p>{address.addressLine2}</p>}
                           <p>
-                            {address.city}
-                            {address.state && `, ${address.state}`}
+                            {formatMyanmarLocationLine(address.city, address.state, language)}
                           </p>
                           <p>
                             {address.zipCode && `${address.zipCode}, `}
@@ -4841,11 +4842,7 @@ export function VendorStoreView({
     }
   };
 
-  // Format price in MMK format (matching main storefront)
-  const formatPriceMMK = (price: string | number): string => {
-    const numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]+/g, '')) : price;
-    return `${Math.round(numPrice)} MMK`;
-  };
+  const formatPriceMMK = (price: string | number): string => formatStorefrontPrice(price);
 
   // Wishlist — same API as main storefront (global product IDs)
   const [wishlist, setWishlist] = useState<string[]>([]);
@@ -6016,26 +6013,17 @@ export function VendorStoreView({
                             <Button
                               key={value}
                               type="button"
+                              variant="outline"
                               onClick={() => {
-                                const next = { ...vendorVariantSelections, [option.name]: value };
-                                setVendorVariantSelections(next);
-                                const v = findMatchingVariant(selectedProduct, next);
-                                if (v?.sku && typeof v.sku === "string" && v.sku.trim()) {
-                                  const segment = cleanAsciiUrlSegment(v.sku) || v.sku.trim();
-                                  navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
-                                    replace: true,
-                                    state: {
-                                      vendorProduct: selectedProduct,
-                                      vendorVariantNav: true,
-                                    },
-                                  });
-                                }
+                                setVendorVariantSelections({
+                                  ...vendorVariantSelections,
+                                  [option.name]: value,
+                                });
                               }}
-                              variant={vendorVariantSelections[option.name] === value ? "default" : "outline"}
-                              className={`min-w-[70px] h-9 text-sm font-medium px-4 ${
+                              className={`min-w-[70px] h-9 text-sm font-medium px-4 transition-all ${
                                 vendorVariantSelections[option.name] === value
-                                  ? "bg-[#1a1d29] hover:bg-slate-900 text-white"
-                                  : "border-slate-300 hover:border-slate-400"
+                                  ? "border-[#1a1d29] bg-[#1a1d29] hover:bg-slate-900 text-white ring-2 ring-[#1a1d29]/30 ring-offset-1 shadow-sm"
+                                  : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                               }`}
                             >
                               {value}

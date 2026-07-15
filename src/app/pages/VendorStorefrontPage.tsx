@@ -36,6 +36,7 @@ import {
   readCachedVendorProductName,
 } from "../utils/vendorStorefrontBrandingCache";
 import { AuthProvider } from "../contexts/AuthContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { CartProvider } from "../components/CartContext";
 import { VendorStoreView } from "../components/VendorStoreView";
 import { Checkout } from "../components/Checkout";
@@ -204,6 +205,12 @@ function VendorStoreNotFoundPanel({ onBackHome }: { onBackHome: () => void }) {
 export function VendorStorefrontPage() {
   const params = useParams();
   const location = useLocation();
+  const { setStorefrontLanguageOverride } = useLanguage();
+
+  useEffect(() => {
+    setStorefrontLanguageOverride("my");
+    return () => setStorefrontLanguageOverride(null);
+  }, [setStorefrontLanguageOverride]);
 
   useLayoutEffect(() => {
     if (isUnifiedKpaySummaryPath(location.pathname)) {

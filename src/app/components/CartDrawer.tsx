@@ -6,6 +6,7 @@ import { useCart } from "./CartContext";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
+import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -16,7 +17,7 @@ interface CartDrawerProps {
 }
 
 function formatMmk(amount: number): string {
-  return `${Math.round(amount)} MMK`;
+  return formatStorefrontPrice(amount);
 }
 
 /** Matches main marketplace cart sidebar: navy header, white list, slate footer */
@@ -139,7 +140,7 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
                             <img src={item.image} alt="" className="h-full w-full object-cover" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h3 className="mb-2 line-clamp-1 text-sm font-semibold text-slate-900">{item.sku}</h3>
+                            <h3 className="mb-2 line-clamp-1 text-sm font-semibold text-slate-900">{item.name || item.sku}</h3>
                             <div className="text-sm font-semibold text-slate-900">{formatMmk(lineTotal)}</div>
                             <div className="mt-2 flex items-center gap-1.5">
                               <Button

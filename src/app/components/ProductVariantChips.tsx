@@ -21,8 +21,9 @@ export type VariantRow = NonNullable<VariantProduct["variants"]>[number];
 
 export function initVariantSelections(product: VariantProduct): Record<string, string> {
   const out: Record<string, string> = {};
-  if (!product.hasVariants || !product.variantOptions?.length) return out;
-  for (const opt of product.variantOptions) {
+  const opts = getEffectiveVariantOptions(product);
+  if (!product.hasVariants || !opts.length) return out;
+  for (const opt of opts) {
     if (opt.values && opt.values.length > 0) {
       out[opt.name] = opt.values[0];
     }

@@ -3,7 +3,8 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Checkbox } from "./ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
+import { useLanguage } from "../contexts/LanguageContext";
 import {
   isTownshipInMyanmarRegion,
   myanmarRegionSelectOptions,
@@ -59,6 +60,7 @@ export function ShippingAddressFormFields({
   idPrefix = "shipping-addr",
   defaultCheckboxId = "shipping-addr-default",
 }: ShippingAddressFormFieldsProps) {
+  const { t, language } = useLanguage();
   const patch = (partial: Partial<ShippingAddressFormValue>) => onChange({ ...value, ...partial });
 
   const regionSelectOptions = useMemo(
@@ -75,11 +77,11 @@ export function ShippingAddressFormFields({
     <div className="space-y-6">
       <div>
         <Label htmlFor={`${idPrefix}-label`} className={labelClass}>
-          Address Label *
+          {t("storefront.account.addressLabel")}
         </Label>
         <Input
           id={`${idPrefix}-label`}
-          placeholder="e.g., Home, Office"
+          placeholder={t("storefront.account.addressLabelPlaceholder")}
           value={value.label}
           onChange={(e) => patch({ label: e.target.value })}
           className={inputClass}
@@ -88,16 +90,16 @@ export function ShippingAddressFormFields({
 
       <div>
         <h2 className="mb-3 text-lg font-semibold text-slate-900" style={{ fontFamily: "Rubik, sans-serif" }}>
-          Contact
+          {t("checkout.contact")}
         </h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
             <Label htmlFor={`${idPrefix}-name`} className={labelClass}>
-              Full Name *
+              {t("checkout.fullName")} *
             </Label>
             <Input
               id={`${idPrefix}-name`}
-              placeholder="Enter your full name"
+              placeholder={t("checkout.fullNamePlaceholder")}
               value={value.recipientName}
               onChange={(e) => patch({ recipientName: e.target.value })}
               className={inputClass}
@@ -105,7 +107,7 @@ export function ShippingAddressFormFields({
           </div>
           <div>
             <Label htmlFor={`${idPrefix}-phone`} className={labelClass}>
-              Phone Number *
+              {t("checkout.phoneNumber")} *
             </Label>
             <Input
               id={`${idPrefix}-phone`}
@@ -121,16 +123,16 @@ export function ShippingAddressFormFields({
 
       <div>
         <h2 className="mb-3 text-lg font-semibold text-slate-900" style={{ fontFamily: "Rubik, sans-serif" }}>
-          Address
+          {t("checkout.address")}
         </h2>
         <div className="space-y-4">
           <div>
             <Label htmlFor={`${idPrefix}-street`} className={labelClass}>
-              Address *
+              {t("checkout.address")} *
             </Label>
             <Input
               id={`${idPrefix}-street`}
-              placeholder="No. 123, Main Street"
+              placeholder={t("checkout.addressPlaceholder")}
               value={value.addressLine1}
               onChange={(e) => patch({ addressLine1: e.target.value })}
               className={inputClass}
@@ -138,59 +140,53 @@ export function ShippingAddressFormFields({
           </div>
           <div>
             <Label htmlFor={`${idPrefix}-state`} className={labelClass}>
-              State/Region *
+              {t("checkout.stateRegion")} *
             </Label>
-            <Select
-              value={value.state || undefined}
+            <MyanmarSearchableSelect
+              id={`${idPrefix}-state`}
+              value={value.state}
               onValueChange={(state) =>
                 patch({
                   state,
                   city: isTownshipInMyanmarRegion(state, value.city) ? value.city : "",
                 })
               }
-            >
-              <SelectTrigger id={`${idPrefix}-state`} className={selectClass}>
-                <SelectValue placeholder="Select state/region" />
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {regionSelectOptions.map((state) => (
-                  <SelectItem key={state} value={state}>
-                    {state}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={regionSelectOptions}
+              placeholder={t("checkout.selectStateRegion")}
+              searchPlaceholder={t("checkout.searchStateRegion")}
+              emptyText={t("checkout.noLocationResults")}
+              className={selectClass}
+              language={language}
+              kind="region"
+            />
           </div>
           <div>
             <Label htmlFor={`${idPrefix}-township`} className={labelClass}>
-              Township *
+              {t("checkout.township")} *
             </Label>
-            <Select
-              value={value.city || undefined}
+            <MyanmarSearchableSelect
+              id={`${idPrefix}-township`}
+              value={value.city}
               onValueChange={(city) => patch({ city })}
+              options={townshipSelectOptions}
+              placeholder={
+                value.state.trim() ? t("checkout.selectTownship") : t("checkout.selectStateFirst")
+              }
+              searchPlaceholder={t("checkout.searchTownship")}
+              emptyText={t("checkout.noLocationResults")}
               disabled={!value.state.trim()}
-            >
-              <SelectTrigger id={`${idPrefix}-township`} className={selectClass}>
-                <SelectValue
-                  placeholder={value.state.trim() ? "Select township" : "Select state/region first"}
-                />
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {townshipSelectOptions.map((city) => (
-                  <SelectItem key={city} value={city}>
-                    {city}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              className={selectClass}
+              language={language}
+              kind="township"
+            />
           </div>
           <div>
             <Label htmlFor={`${idPrefix}-notes`} className={labelClass}>
-              Notes
+              {t("checkout.notes")}
             </Label>
             <Textarea
               id={`${idPrefix}-notes`}
-              placeholder="Add notes..."
+              placeholder={t("checkout.notesPlaceholder")}
               value={value.addressLine2}
               onChange={(e) => patch({ addressLine2: e.target.value })}
               className="min-h-[80px] resize-none rounded-lg border-slate-200 bg-slate-50 text-sm focus:border-slate-900 focus:ring-0"
@@ -207,7 +203,7 @@ export function ShippingAddressFormFields({
           onCheckedChange={(checked) => patch({ isDefault: checked === true })}
         />
         <Label htmlFor={defaultCheckboxId} className="cursor-pointer">
-          Set as default address
+          {t("storefront.account.setDefaultAddress")}
         </Label>
       </div>
     </div>

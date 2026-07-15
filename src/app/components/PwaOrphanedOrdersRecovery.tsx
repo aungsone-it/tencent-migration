@@ -11,6 +11,7 @@ import {
 } from "../utils/kpayClient";
 import { projectId, publicAnonKey } from "../../../utils/supabase/info";
 import { normalizeOrderNumberSearch, formatOrderNumberDisplay } from "../utils/orderNumber";
+import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 
 type PwaOrphanedOrdersRecoveryProps = {
   /** Limit list to one vendor (vendor admin). */
@@ -163,7 +164,7 @@ export function PwaOrphanedOrdersRecovery({
                     <td className="py-2 pr-3 font-mono text-xs">{formatOrderNumberDisplay(draft.merchantOrderId)}</td>
                     <td className="py-2 pr-3">{draft.vendor || draft.vendorId || "—"}</td>
                     <td className="py-2 pr-3 tabular-nums">
-                      {draft.total != null ? `${Math.round(draft.total).toLocaleString()} MMK` : "—"}
+                      {draft.total != null ? formatStorefrontPrice(draft.total) : "—"}
                     </td>
                     <td className="py-2 pr-3">
                       <Badge

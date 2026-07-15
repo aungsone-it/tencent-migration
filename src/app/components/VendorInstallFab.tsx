@@ -162,7 +162,7 @@ export function VendorInstallFab({
     if (!deferredPrompt) {
       if (promptConsumed) {
         toast.message("Install prompt already used", {
-          description: "Reload this page and tap Add to Home again, or use Chrome menu (⋮).",
+          description: "Reload this page and tap App သွင်းပါ again, or use Chrome menu (⋮).",
         });
         return;
       }
@@ -181,7 +181,7 @@ export function VendorInstallFab({
         return;
       }
       toast.message("Install dismissed", {
-        description: "Tap Add to Home again after reloading, or use Chrome menu (⋮).",
+        description: "Tap App သွင်းပါ again after reloading, or use Chrome menu (⋮).",
       });
     } catch {
       setInstructionsOpen(true);
@@ -216,13 +216,13 @@ export function VendorInstallFab({
           onClick={() => void handleClick()}
           disabled={installing}
           size="sm"
-          aria-label={`Add ${storeName} to Home screen`}
-          title={`Add ${storeName} to Home screen`}
+          aria-label={`${storeName} App သွင်းပါ`}
+          title={`${storeName} App သွင်းပါ`}
           className="h-11 md:h-12 rounded-full shadow-2xl bg-white hover:bg-slate-50 border border-slate-200 transition-all duration-300 hover:scale-105 flex items-center gap-2 px-3 md:px-4"
         >
           <Download className="w-4 h-4 md:w-5 md:h-5 text-slate-700" />
           <span className="text-xs md:text-sm font-medium text-slate-700 whitespace-nowrap">
-            Add to Home
+            App သွင်းပါ
           </span>
         </Button>
       </div>
@@ -230,7 +230,7 @@ export function VendorInstallFab({
       <Dialog open={instructionsOpen} onOpenChange={setInstructionsOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add to Home Screen</DialogTitle>
+            <DialogTitle>App သွင်းပါ</DialogTitle>
             <DialogDescription>
               Android does not allow silent shortcut creation. Follow these steps in Chrome.
             </DialogDescription>

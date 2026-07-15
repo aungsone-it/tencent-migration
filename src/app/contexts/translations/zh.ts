@@ -119,6 +119,7 @@ export const zhTranslations: Record<string, string> = {
     'checkout.saved': '已节省',
     'checkout.shipping': '配送',
     'checkout.free': '免费',
+    'checkout.withinDays': '{days} 天内',
     'checkout.total': '总计',
     'checkout.processing': '处理中...',
     'checkout.redirectingKpay': '正在跳转到 KBZPay...',

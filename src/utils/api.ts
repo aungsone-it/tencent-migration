@@ -4,7 +4,7 @@
 // ============================================
 
 import { API_TIMEOUTS } from '../constants';
-import { apiClient, API_BASE_URL } from './api-client';
+import { apiClient, API_BASE_URL, ApiError } from './api-client';
 import { compressImageToFile } from './imageCompression';
 import { chatMessageTextForSend, sanitizeOptionalHttpUrl } from './chatConversation';
 import {
@@ -491,6 +491,82 @@ export const categoriesApi = {
    */
   deleteAll: async (): Promise<ApiResponse<void>> => {
     return apiClient.delete<ApiResponse<void>>('/categories/all');
+  },
+};
+
+// ============================================
+// LOGISTICS API
+// ============================================
+
+export type DeliveryPartnerRegionRate = {
+  estimatedDays: string;
+  costMin: string;
+  costMax: string;
+};
+
+export type DeliveryPartner = {
+  id: string;
+  name: string;
+  logo: string;
+  regionRates: Record<string, DeliveryPartnerRegionRate>;
+  status: "active" | "inactive";
+  codSupported: boolean;
+  codFee: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const logisticsApi = {
+  getPartners: async (): Promise<{ success: boolean; partners: DeliveryPartner[]; total: number }> => {
+    return apiClient.get<{ success: boolean; partners: DeliveryPartner[]; total: number }>(
+      "/logistics/partners"
+    );
+  },
+
+  createPartner: async (
+    data: Omit<DeliveryPartner, "id" | "createdAt" | "updatedAt">
+  ): Promise<{ success: boolean; partner: DeliveryPartner }> => {
+    return apiClient.post<{ success: boolean; partner: DeliveryPartner }>("/logistics/partners", data);
+  },
+
+  updatePartner: async (
+    id: string,
+    data: Omit<DeliveryPartner, "id" | "createdAt" | "updatedAt">
+  ): Promise<{ success: boolean; partner: DeliveryPartner }> => {
+    return apiClient.put<{ success: boolean; partner: DeliveryPartner }>(
+      `/logistics/partners/${encodeURIComponent(id)}`,
+      data
+    );
+  },
+
+  deletePartner: async (id: string): Promise<{ success: boolean }> => {
+    return apiClient.delete<{ success: boolean }>(
+      `/logistics/partners/${encodeURIComponent(id)}`
+    );
+  },
+
+  uploadPartnerLogo: async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("image", file, file.name || "logo.jpg");
+    try {
+      const res = await apiClient.postForm<{
+        success?: boolean;
+        imageUrl?: string;
+        error?: string;
+      }>("/logistics/partners/upload-logo", formData);
+      if (res.imageUrl && typeof res.imageUrl === "string") {
+        return res.imageUrl;
+      }
+    } catch (error) {
+      const missingRoute =
+        error instanceof ApiError
+          ? error.status === 404
+          : error instanceof Error && /not found|404/i.test(error.message);
+      if (!missingRoute) {
+        console.warn("[logistics] upload-logo failed, trying shared upload", error);
+      }
+    }
+    return uploadProductGalleryFile(file);
   },
 };
 

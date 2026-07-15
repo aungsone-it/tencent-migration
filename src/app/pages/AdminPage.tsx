@@ -20,6 +20,7 @@ import { AdminBreadcrumb } from "../components/AdminBreadcrumb";
 import { useBadgeCounts } from "../hooks/useBadgeCounts";
 import { usePlatformBranding } from "../hooks/usePlatformBranding";
 import { buildSuperAdminDocumentTitle } from "../utils/superAdminDocumentTitle";
+import { formatLogisticsPartnerSlugLabel } from "../utils/logisticsPartnerSlug";
 import { SmartCache } from "../../utils/cache";
 import { moduleCache, CACHE_KEYS } from "../utils/module-cache";
 import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
@@ -66,6 +67,12 @@ const CollaboratorApplications = lazy(() =>
 );
 const Finances = lazy(() => import("../components/Finances").then((m) => ({ default: m.Finances })));
 const Logistics = lazy(() => import("../components/Logistics").then((m) => ({ default: m.Logistics })));
+const LogisticsPartnerProfile = lazy(() =>
+  import("../components/LogisticsPartnerProfile").then((m) => ({ default: m.LogisticsPartnerProfile }))
+);
+const LogisticsPartnerFormPage = lazy(() =>
+  import("../components/LogisticsPartnerFormPage").then((m) => ({ default: m.LogisticsPartnerFormPage }))
+);
 const Settings = lazy(() => import("../components/Settings").then((m) => ({ default: m.Settings })));
 const AdminGlobalSearch = lazy(() =>
   import("../components/AdminGlobalSearch").then((m) => ({ default: m.AdminGlobalSearch }))
@@ -133,6 +140,23 @@ export function AdminPage() {
     const m = p.match(/^\/admin\/([^/]+)/);
     return m?.[1];
   }, [params.section, params["*"], location.pathname]);
+
+  const logisticsRoute = useMemo(() => {
+    const path = location.pathname.replace(/\/+$/, "");
+    if (path === "/admin/logistics/new") {
+      return { kind: "create" as const };
+    }
+    const editMatch = path.match(/^\/admin\/logistics\/([^/]+)\/edit$/i);
+    if (editMatch?.[1]) {
+      return { kind: "edit" as const, slug: decodeURIComponent(editMatch[1]) };
+    }
+    const viewMatch = path.match(/^\/admin\/logistics\/([^/]+)$/i);
+    if (viewMatch?.[1]) {
+      return { kind: "view" as const, slug: decodeURIComponent(viewMatch[1]) };
+    }
+    return { kind: "list" as const };
+  }, [location.pathname]);
+
   const navigate = useNavigate();
   const { refreshUser, user: authUser } = useAuth();
   const allowedAdminPages = useMemo(
@@ -376,6 +400,15 @@ export function AdminPage() {
       const current = `${window.location.pathname}${window.location.search}`;
       if (current !== target) {
         navigate(target, { replace: true });
+      }
+      return;
+    }
+
+    if (currentPage === ADMIN_PAGES.LOGISTICS) {
+      if (logisticsRoute.kind !== "list") return;
+      const targetPath = "/admin/logistics";
+      if (window.location.pathname !== targetPath) {
+        navigate(targetPath, { replace: false });
       }
       return;
     }
@@ -755,6 +788,15 @@ export function AdminPage() {
       case ADMIN_PAGES.FINANCES:
         return <Finances />;
       case ADMIN_PAGES.LOGISTICS:
+        if (logisticsRoute.kind === "create") {
+          return <LogisticsPartnerFormPage mode="create" />;
+        }
+        if (logisticsRoute.kind === "edit") {
+          return <LogisticsPartnerFormPage mode="edit" slug={logisticsRoute.slug} />;
+        }
+        if (logisticsRoute.kind === "view") {
+          return <LogisticsPartnerProfile slug={logisticsRoute.slug} />;
+        }
         return <Logistics />;
       case ADMIN_PAGES.SETTINGS:
         return <Settings />;
@@ -802,6 +844,9 @@ export function AdminPage() {
               setOrdersSearchPrefill(null);
               setCurrentPage(page);
               setSidebarOpen(false);
+              if (page === ADMIN_PAGES.LOGISTICS) {
+                navigate("/admin/logistics");
+              }
             }}
             currentUser={currentUser}
             onViewProfile={() => {
@@ -868,7 +913,32 @@ export function AdminPage() {
                     onNavigate={(page) => {
                       setCurrentPage(page as AdminPage);
                       setSidebarOpen(false);
+                      if (page === ADMIN_PAGES.LOGISTICS) {
+                        navigate("/admin/logistics");
+                        return;
+                      }
+                      if (page.startsWith("__logistics_profile__:")) {
+                        const slug = page.slice("__logistics_profile__:".length);
+                        navigate(`/admin/logistics/${encodeURIComponent(slug)}`);
+                      }
                     }}
+                    logisticsPartnerLabel={
+                      logisticsRoute.kind === "view" || logisticsRoute.kind === "edit"
+                        ? formatLogisticsPartnerSlugLabel(logisticsRoute.slug)
+                        : undefined
+                    }
+                    logisticsDetailLabel={
+                      logisticsRoute.kind === "create"
+                        ? "Add partner"
+                        : logisticsRoute.kind === "edit"
+                          ? "Edit"
+                          : undefined
+                    }
+                    logisticsPartnerSlug={
+                      logisticsRoute.kind === "view" || logisticsRoute.kind === "edit"
+                        ? logisticsRoute.slug
+                        : undefined
+                    }
                     listingCount={
                       currentPage === ADMIN_PAGES.PRODUCT ? productListingBreadcrumbCount : null
                     }

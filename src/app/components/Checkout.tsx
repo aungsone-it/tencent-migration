@@ -64,12 +64,19 @@ import {
   myanmarRegionSelectOptions,
   myanmarTownshipSelectOptions,
   resolveMyanmarRegionForTownship,
+  resolveMyanmarRegionKey,
   isTownshipInMyanmarRegion,
 } from "../utils/myanmarRegions";
 import { normalizeCheckoutStoragePath } from "../utils/vendorStorePaths";
 import { useIsMobile } from "./ui/use-mobile";
 import { useLanguage } from "../contexts/LanguageContext";
 import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
+import { logisticsApi, type DeliveryPartner } from "../../utils/api";
+import {
+  formatCheckoutShippingLabel,
+  formatEstimatedDeliveryLabel,
+  resolveCheckoutLogisticsQuote,
+} from "../utils/checkoutLogistics";
 
 /** KV-backed customer session (authApi / migoo-user) — AuthContext only has CloudBase sessions */
 function getMigooCustomerFromStorage(): {
@@ -1175,6 +1182,10 @@ export function Checkout({
   const [confirmedOrderNote, setConfirmedOrderNote] = useState(initialSummarySnapshot?.orderNote || "");
   const [confirmedCoupon, setConfirmedCoupon] = useState<any>(initialSummarySnapshot?.coupon || null);
   const [confirmedDiscount, setConfirmedDiscount] = useState(initialSummarySnapshot?.discount || 0);
+  const [confirmedShippingFee, setConfirmedShippingFee] = useState(
+    Number(initialSummarySnapshot?.shippingFee || initialSummarySnapshot?.shippingCost || 0) || 0
+  );
+  const [logisticsPartners, setLogisticsPartners] = useState<DeliveryPartner[]>([]);
   const [miniSummaryItems, setMiniSummaryItems] = useState<any[]>(
     () => (Array.isArray(initialMiniSummaryCache?.items) ? initialMiniSummaryCache!.items : [])
   );
@@ -1204,6 +1215,39 @@ export function Checkout({
     }
   }, [items, totalPrice, checkoutMiniCacheKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await logisticsApi.getPartners();
+        if (!cancelled) {
+          setLogisticsPartners(Array.isArray(res.partners) ? res.partners : []);
+        }
+      } catch {
+        if (!cancelled) setLogisticsPartners([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const checkoutRegionKey = useMemo(
+    () => resolveMyanmarRegionKey(shippingInfo.state),
+    [shippingInfo.state]
+  );
+
+  const logisticsQuote = useMemo(
+    () => resolveCheckoutLogisticsQuote(logisticsPartners, checkoutRegionKey),
+    [logisticsPartners, checkoutRegionKey]
+  );
+
+  const hasSelectedRegion = Boolean(checkoutRegionKey);
+  const shippingUnavailable = hasSelectedRegion && !logisticsQuote;
+  const shippingFee = logisticsQuote?.shippingFee ?? 0;
+  const codFeeAmount =
+    paymentMethod === "COD" && logisticsQuote?.codSupported ? logisticsQuote.codFee : 0;
+
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
     : items.length > 0
@@ -1217,7 +1261,28 @@ export function Checkout({
   const summaryDisplayItems = checkoutItems;
   const summaryDisplayTotal = checkoutSubtotal;
   const payableSubtotal = Math.max(Number(summaryDisplayTotal || 0), 0);
-  const finalTotal = Math.max(payableSubtotal - discountAmount, 0);
+  const finalTotal = Math.max(payableSubtotal - discountAmount + shippingFee + codFeeAmount, 0);
+
+  const shippingSummaryLabel = useMemo(() => {
+    if (!checkoutRegionKey) return t("checkout.selectRegionForShipping");
+    if (!logisticsQuote) return t("checkout.shippingUnavailable");
+    return formatCheckoutShippingLabel(logisticsQuote, formatStorefrontPrice) || t("checkout.free");
+  }, [checkoutRegionKey, logisticsQuote, t]);
+
+  const estimatedDeliveryLabel = useMemo(() => {
+    if (!logisticsQuote?.estimatedDays) return null;
+    return formatEstimatedDeliveryLabel(logisticsQuote.estimatedDays, (days) =>
+      t("checkout.withinDays").replace("{days}", String(days))
+    );
+  }, [logisticsQuote?.estimatedDays, t]);
+
+  const codPaymentAvailable =
+    Boolean(logisticsQuote?.codSupported) && !shippingUnavailable;
+
+  useEffect(() => {
+    if (paymentMethod !== "COD") return;
+    if (!codPaymentAvailable) setPaymentMethod("None");
+  }, [paymentMethod, codPaymentAvailable]);
 
   const checkoutPixelTrackKey = useMemo(() => {
     const lines = metaPixelLineItems(checkoutItems);
@@ -1750,6 +1815,13 @@ export function Checkout({
         subtotal: payableSubtotal,
         total: finalTotal,
         discount: discountAmount,
+        shippingFee: shippingFee + codFeeAmount,
+        shippingCost: shippingFee + codFeeAmount,
+        shipping: shippingFee + codFeeAmount,
+        deliveryPartnerId: logisticsQuote?.partner.id || null,
+        deliveryPartnerName: logisticsQuote?.partner.name || null,
+        estimatedDelivery: estimatedDeliveryLabel,
+        codFee: codFeeAmount,
         couponCode: appliedCoupon?.campaign?.code || null,
         couponId: appliedCoupon?.campaign?.id || null,
         notes: orderNote,
@@ -1933,6 +2005,10 @@ export function Checkout({
       toast.error("Please select a payment method");
       return;
     }
+    if (shippingUnavailable) {
+      toast.error(t("checkout.shippingUnavailable"));
+      return;
+    }
     const orderEmail = resolveOrderEmail();
 
     setLoading(true);
@@ -1989,6 +2065,7 @@ export function Checkout({
     // 🔥 SAVE items and total BEFORE clearing cart
     setConfirmedItems(checkoutItems);
     setConfirmedTotal(finalTotal);
+    setConfirmedShippingFee(shippingFee + codFeeAmount);
     setConfirmedOrderNote(orderNote);
     setConfirmedCoupon(appliedCoupon);
     setConfirmedDiscount(discountAmount);
@@ -2033,6 +2110,13 @@ export function Checkout({
         total: finalTotal,
         subtotal: payableSubtotal,
         discount: discountAmount,
+        shippingFee: shippingFee + codFeeAmount,
+        shippingCost: shippingFee + codFeeAmount,
+        shipping: shippingFee + codFeeAmount,
+        deliveryPartnerId: logisticsQuote?.partner.id || null,
+        deliveryPartnerName: logisticsQuote?.partner.name || null,
+        estimatedDelivery: estimatedDeliveryLabel,
+        codFee: codFeeAmount,
         date: new Date().toISOString(),
         vendor: vendorName || storeName, // 🔥 Add vendor name to order
         // 🎫 Include coupon information for tracking
@@ -2345,7 +2429,11 @@ export function Checkout({
               <div className="space-y-2.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.subtotal")}</span>
-                  <span className="font-medium text-slate-900">{formatStorefrontPrice(confirmedTotal + confirmedDiscount)}</span>
+                  <span className="font-medium text-slate-900">
+                    {formatStorefrontPrice(
+                      Math.max(confirmedTotal + confirmedDiscount - confirmedShippingFee, 0)
+                    )}
+                  </span>
                 </div>
                 
                 {confirmedCoupon && confirmedDiscount > 0 && (
@@ -2360,7 +2448,11 @@ export function Checkout({
                 
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.shipping")}</span>
-                  <span className="font-bold text-emerald-600">{t("checkout.free")}</span>
+                  <span className="font-semibold text-slate-900">
+                    {confirmedShippingFee > 0
+                      ? formatStorefrontPrice(confirmedShippingFee)
+                      : t("checkout.free")}
+                  </span>
                 </div>
                 
                 <div className="flex justify-between border-t border-slate-200 pt-2">
@@ -2630,11 +2722,14 @@ export function Checkout({
                 <div className="space-y-3">
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod("COD")}
+                    onClick={() => codPaymentAvailable && setPaymentMethod("COD")}
+                    disabled={!codPaymentAvailable}
                     className={`w-full rounded-lg border p-4 text-left transition-colors ${
                       paymentMethod === "COD"
                         ? "border-slate-900 bg-slate-50"
-                        : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                        : codPaymentAvailable
+                          ? "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                          : "border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -2850,8 +2945,41 @@ export function Checkout({
 
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.shipping")}</span>
-                  <span className="font-bold text-emerald-600">{t("checkout.free")}</span>
+                  <span
+                    className={
+                      shippingUnavailable
+                        ? "font-medium text-amber-700"
+                        : logisticsQuote
+                          ? "font-semibold text-slate-900"
+                          : "font-medium text-slate-500"
+                    }
+                  >
+                    {shippingSummaryLabel}
+                  </span>
                 </div>
+
+                {logisticsQuote?.partner.name && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">{t("checkout.deliveryPartner")}</span>
+                    <span className="font-medium text-slate-700">{logisticsQuote.partner.name}</span>
+                  </div>
+                )}
+
+                {estimatedDeliveryLabel && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">{t("checkout.estimatedDelivery")}</span>
+                    <span className="text-slate-600">{estimatedDeliveryLabel}</span>
+                  </div>
+                )}
+
+                {codFeeAmount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">COD fee</span>
+                    <span className="font-semibold text-slate-900">
+                      {formatStorefrontPrice(codFeeAmount)}
+                    </span>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-sm font-semibold text-slate-900">{t("checkout.total")}</span>
@@ -2872,6 +3000,7 @@ export function Checkout({
                 disabled={
                   loading ||
                   kpayPwaLoading ||
+                  shippingUnavailable ||
                   paymentMethod === "None" ||
                   (paymentMethod === "KPay" && (!canSubmitKPayOrder || !kpayWebhookConfirmed))
                 }

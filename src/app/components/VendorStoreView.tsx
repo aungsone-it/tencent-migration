@@ -1017,10 +1017,8 @@ export function VendorStoreView({
   const { chatUnreadCount, openFloatingChat } = useChatNotification();
 
   useEffect(() => {
-    if (language === "zh") {
-      setLanguage("en");
-    }
-  }, [language, setLanguage]);
+    setLanguage("my");
+  }, [setLanguage]);
 
   const [canonicalStoreSlug, setCanonicalStoreSlug] = useState<string | null>(() => {
     const resolved = resolveVendorPathSlug(storeSlug || vendorId);
@@ -1769,8 +1767,9 @@ export function VendorStoreView({
     const optionClass = "flex cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-sm";
 
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      <div className="hidden">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
             className="h-9 w-10 shrink-0 rounded-full px-0 text-xs font-semibold text-slate-700 hover:bg-slate-100 md:h-10 md:w-auto md:px-3"
@@ -1791,6 +1790,7 @@ export function VendorStoreView({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     );
   }, [language, setLanguage, t]);
 

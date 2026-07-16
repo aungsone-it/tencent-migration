@@ -690,6 +690,16 @@ export const enTranslations: Record<string, string> = {
     'chat.chooseConversation': 'Choose a conversation from the list to start chatting',
     'chat.deleteConfirm': 'Delete this conversation and all its messages?',
 
+    'floatingChat.support': 'Support',
+    'floatingChat.online': 'Online',
+    'floatingChat.phoneTitle': 'Add your phone number',
+    'floatingChat.phoneDescription':
+      'Share your phone number so our sales team can contact you about your inquiry.',
+    'floatingChat.phonePlaceholder': '+959XXXXXXXXX or 09XXXXXXXXX',
+    'floatingChat.savePhone': 'Save phone number',
+    'floatingChat.maybeLater': 'Maybe later',
+    'floatingChat.welcome': 'Hello! Welcome to {storeName}. How can we help you today?',
+
     // Vendor admin portal
     'vendorAdmin.vendorStore': 'Vendor Store',
     'vendorAdmin.ecommerce': 'E-COMMERCE',

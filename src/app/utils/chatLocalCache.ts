@@ -185,6 +185,15 @@ export function writeAdminThreadLocal(
   }
 }
 
+export function clearAdminThreadLocal(conversationId: string): void {
+  if (typeof window === "undefined" || !conversationId) return;
+  try {
+    localStorage.removeItem(`${ADMIN_THREAD_PREFIX}${conversationId}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function clearAdminChatLocalCaches(): void {
   if (typeof window === "undefined") return;
   try {
@@ -193,6 +202,39 @@ export function clearAdminChatLocalCaches(): void {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (k?.startsWith(ADMIN_THREAD_PREFIX)) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}
+
+function emailTokenForChatCache(email: string): string {
+  return String(email || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+}
+
+/** Wipe floating-chat local caches for a guest/customer email (messages, thread ids, sync markers). */
+export function clearFloatingChatCachesForEmail(customerEmail: string): void {
+  if (typeof window === "undefined") return;
+  const token = emailTokenForChatCache(customerEmail);
+  if (!token) return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith("migoo-chat-messages-") && k.endsWith(`-${token}`)) {
+        keys.push(k);
+      }
+      if (k === "migoo-chat-conversationId" || k.startsWith("migoo-chat-conversationId-")) {
+        keys.push(k);
+      }
+      if (k === "migoo-chat-synced-email" || k.startsWith("migoo-chat-synced-email-")) {
+        keys.push(k);
+      }
     }
     for (const k of keys) localStorage.removeItem(k);
   } catch {

@@ -5066,6 +5066,74 @@ function jsonAdminOrdersPage(
   };
 }
 
+/** Drop read-model rows whose KV source was deleted (prevents deleted orders reappearing on refresh). */
+async function reconcileReadModelOrdersPage(
+  body: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const orders = Array.isArray(body.orders) ? (body.orders as Record<string, unknown>[]) : [];
+  if (orders.length === 0) return body;
+
+  const kept: Record<string, unknown>[] = [];
+  let removed = 0;
+  const statusDrops = { pending: 0, processing: 0, fulfilled: 0, cancelled: 0 };
+
+  for (const row of orders) {
+    const lookup = String(row.id || row.orderNumber || "").trim();
+    if (!lookup) continue;
+    const resolved = await resolveOrderStorage(lookup);
+    if (resolved) {
+      kept.push(row);
+      continue;
+    }
+    removed += 1;
+    const st = String(row.status || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-");
+    if (st === "pending") statusDrops.pending += 1;
+    else if (st === "processing") statusDrops.processing += 1;
+    else if (st === "fulfilled") statusDrops.fulfilled += 1;
+    else if (st === "cancelled") statusDrops.cancelled += 1;
+
+    const num = String(row.orderNumber || "").trim();
+    void deleteOrderReadModel(String(row.id || "").trim(), num || undefined);
+  }
+
+  if (removed === 0) return body;
+
+  const prevTotal = Number(body.total ?? orders.length);
+  const nextTotal = Math.max(0, prevTotal - removed);
+  const aggregates =
+    body.aggregates && typeof body.aggregates === "object"
+      ? { ...(body.aggregates as Record<string, unknown>) }
+      : undefined;
+  if (aggregates) {
+    aggregates.filteredCount = Math.max(0, Number(aggregates.filteredCount ?? prevTotal) - removed);
+    const breakdown =
+      aggregates.statusBreakdown && typeof aggregates.statusBreakdown === "object"
+        ? { ...(aggregates.statusBreakdown as Record<string, number>) }
+        : undefined;
+    if (breakdown) {
+      breakdown.pending = Math.max(0, Number(breakdown.pending ?? 0) - statusDrops.pending);
+      breakdown.processing = Math.max(0, Number(breakdown.processing ?? 0) - statusDrops.processing);
+      breakdown.fulfilled = Math.max(0, Number(breakdown.fulfilled ?? 0) - statusDrops.fulfilled);
+      breakdown.cancelled = Math.max(0, Number(breakdown.cancelled ?? 0) - statusDrops.cancelled);
+      aggregates.statusBreakdown = breakdown;
+    }
+  }
+
+  const page = Math.max(1, Number(body.page ?? 1));
+  const pageSize = Math.max(1, Number(body.pageSize ?? (kept.length || 20)));
+  return {
+    ...body,
+    orders: kept,
+    total: nextTotal,
+    hasMore: page * pageSize < nextTotal,
+    ...(aggregates ? { aggregates } : {}),
+    readModelReconciled: removed,
+  };
+}
+
 async function jsonAdminOrdersPageFromReadModel(
   opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>
 ): Promise<Record<string, unknown> | null> {
@@ -5092,7 +5160,7 @@ async function jsonAdminOrdersPageFromReadModel(
       // Migration may be applied before backfill. Do not show a false-empty admin list.
       return null;
     }
-    return {
+    const pageBody = {
       orders: Array.isArray(body.orders) ? body.orders : [],
       total: Number(body.total ?? 0),
       page: Number(body.page ?? opts.page),
@@ -5101,6 +5169,7 @@ async function jsonAdminOrdersPageFromReadModel(
       aggregates: body.aggregates && typeof body.aggregates === "object" ? body.aggregates : undefined,
       readModel: true,
     };
+    return await reconcileReadModelOrdersPage(pageBody);
   } catch (error) {
     console.warn("[orders] read-model page failed:", error);
     return null;
@@ -6346,10 +6415,14 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
       console.log(`✅ Stock restoration complete for deleted order ${existingOrder.orderNumber}`);
     }
     
-    // Delete canonical row + any duplicate legacy rows with same id/orderNumber.
-    const deleteKeys = new Set<string>([storageKey]);
     const canonicalId = String(existingOrder?.id || "").trim();
     const canonicalOrderNumber = String(existingOrder?.orderNumber || "").trim();
+
+    // Remove read model first so a failed SQL delete does not leave KV deleted while the row still lists.
+    await deleteOrderReadModel(canonicalId, canonicalOrderNumber, { strict: true });
+
+    // Delete canonical row + any duplicate legacy rows with same id/orderNumber.
+    const deleteKeys = new Set<string>([storageKey]);
     try {
       const rows = await withTimeout(kv.getByPrefixWithKeys("order:"), 10000);
       for (const row of rows) {
@@ -6368,7 +6441,6 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
       // Fallback to deleting only resolved key if scan fails.
     }
     await withTimeout(kv.mdel([...deleteKeys]), 10000);
-    await deleteOrderReadModel(canonicalId, canonicalOrderNumber);
 
     if (canonicalOrderNumber) {
       await withTimeout(kv.del(`order_num:${canonicalOrderNumber}`), 5000).catch(() => {});
@@ -10370,6 +10442,145 @@ function mergeConversationsByCustomerVendor(conversations: any[]): any[] {
     }));
 }
 
+const GUEST_CHAT_EMAIL_DOMAIN_SERVER = "guest.migoo.store";
+
+function isGuestChatEmailServer(email: unknown): boolean {
+  return String(email || "")
+    .trim()
+    .toLowerCase()
+    .endsWith(`@${GUEST_CHAT_EMAIL_DOMAIN_SERVER}`);
+}
+
+function formatGuestDisplayCodeServer(code: number): string {
+  const num = Math.max(1, Math.trunc(code));
+  const str = String(num);
+  return str.length <= 6 ? str.padStart(6, "0") : str;
+}
+
+async function allocateGuestDisplayCode(customerEmail: string): Promise<number | null> {
+  const email = normalizeChatEmail(customerEmail);
+  if (!email || !isGuestChatEmailServer(email)) return null;
+
+  const mapKey = `chat:guest-display:${email}`;
+  const existing = (await withTimeout(kv.get(mapKey), 5000).catch(() => null)) as {
+    displayCode?: number;
+  } | null;
+  if (existing?.displayCode && Number(existing.displayCode) >= 1) {
+    return Number(existing.displayCode);
+  }
+
+  const counterKey = "chat:guest-display-counter";
+  const prev = Number((await withTimeout(kv.get(counterKey), 5000).catch(() => 0)) || 0);
+  const next = Math.max(1, prev + 1);
+  await withTimeout(kv.set(counterKey, next), 5000);
+  await withTimeout(
+    kv.set(mapKey, { displayCode: next, email, assignedAt: new Date().toISOString() }),
+    5000,
+  );
+
+  return next;
+}
+
+async function guestDisplayNameForEmail(customerEmail: string): Promise<string | null> {
+  const code = await allocateGuestDisplayCode(customerEmail);
+  if (!code) return null;
+  return `#${formatGuestDisplayCodeServer(code)}`;
+}
+
+async function deleteConversationAndMessages(conversationId: string): Promise<{
+  messagesDeleted: number;
+}> {
+  const messageRows = await withTimeout(
+    kv.getByPrefix(`chat:message:${conversationId}:`),
+    15000,
+  ).catch(() => []);
+
+  let messagesDeleted = 0;
+  for (const row of messageRows || []) {
+    const msg = row as { id?: unknown };
+    const id = String(msg?.id || "").trim();
+    if (!id) continue;
+    await withTimeout(kv.del(`chat:message:${conversationId}:${id}`), 5000).catch(() => undefined);
+    messagesDeleted += 1;
+  }
+
+  await withTimeout(kv.del(`chat:conversation:${conversationId}`), 5000);
+  return { messagesDeleted };
+}
+
+/** Hard-delete every chat thread + guest id mapping for a guest storefront visitor. */
+async function purgeGuestChatByEmail(customerEmail: string): Promise<{
+  conversationsDeleted: number;
+  messagesDeleted: number;
+}> {
+  const email = normalizeChatEmail(customerEmail);
+  if (!email || !isGuestChatEmailServer(email)) {
+    return { conversationsDeleted: 0, messagesDeleted: 0 };
+  }
+
+  await withTimeout(kv.del(`chat:guest-display:${email}`), 5000).catch(() => undefined);
+
+  const allConversations = await withTimeout(kv.getByPrefix("chat:conversation:"), 15000).catch(
+    () => [],
+  );
+  let conversationsDeleted = 0;
+  let messagesDeleted = 0;
+
+  for (const conv of allConversations || []) {
+    if (!conv || typeof conv !== "object") continue;
+    const row = conv as { id?: unknown; customerEmail?: unknown };
+    const convId = String(row.id || "").trim();
+    if (!convId) continue;
+    if (normalizeChatEmail(row.customerEmail) !== email) continue;
+    const stats = await deleteConversationAndMessages(convId);
+    conversationsDeleted += 1;
+    messagesDeleted += stats.messagesDeleted;
+  }
+
+  return { conversationsDeleted, messagesDeleted };
+}
+
+// Allocate or return the sequential guest display id (#000001, #000002, …).
+app.post("/make-server-16010b6f/chat/guest-id", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const guestEmail = normalizeChatEmail((body as { guestEmail?: string })?.guestEmail);
+    if (!guestEmail || !isGuestChatEmailServer(guestEmail)) {
+      return c.json({ error: "Valid guestEmail is required" }, 400);
+    }
+
+    const displayCode = await allocateGuestDisplayCode(guestEmail);
+    if (!displayCode) {
+      return c.json({ error: "Failed to allocate guest id" }, 500);
+    }
+
+    const displayName = `#${formatGuestDisplayCodeServer(displayCode)}`;
+    const allConversations = await withTimeout(kv.getByPrefix("chat:conversation:"), 15000).catch(
+      () => [],
+    );
+    for (const conv of allConversations || []) {
+      if (!conv || typeof conv !== "object") continue;
+      const row = conv as { id?: unknown; customerEmail?: unknown };
+      const convId = String(row.id || "").trim();
+      if (!convId) continue;
+      if (normalizeChatEmail(row.customerEmail) !== guestEmail) continue;
+      await withTimeout(
+        kv.set(`chat:conversation:${convId}`, { ...conv, customerName: displayName }),
+        5000,
+      ).catch(() => undefined);
+    }
+
+    return c.json({
+      success: true,
+      displayCode,
+      displayName,
+    });
+  } catch (error: any) {
+    console.error("❌ Failed to allocate guest id:", error);
+    return c.json({ error: error.message || "Failed to allocate guest id" }, 500);
+  }
+});
+
 // Get all chat conversations
 app.get("/make-server-16010b6f/chat/conversations", async (c) => {
   try {
@@ -10388,21 +10599,35 @@ app.get("/make-server-16010b6f/chat/conversations", async (c) => {
     const enrichedRaw = await Promise.all(
       (conversations || []).map(async (conv: any) => {
         if (!conv?.customerEmail) return conv;
+        let next = { ...conv };
+
+        if (
+          isGuestChatEmailServer(conv.customerEmail) &&
+          !/#\s*\d+/.test(String(conv.customerName || ""))
+        ) {
+          const guestName = await guestDisplayNameForEmail(conv.customerEmail);
+          if (guestName) {
+            next = { ...next, customerName: guestName };
+          }
+        }
+
         const img = await resolveCustomerProfileImage(
           conv.customerEmail,
-          conv.customerProfileImage,
+          next.customerProfileImage,
           customerAvatarMap
         );
-        if (img && img !== conv.customerProfileImage) {
-          const next = { ...conv, customerProfileImage: img };
+        if (img && img !== next.customerProfileImage) {
+          next = { ...next, customerProfileImage: img };
+        }
+
+        if (next !== conv) {
           try {
             await withTimeout(kv.set(`chat:conversation:${conv.id}`, next), 5000);
           } catch {
             /* non-fatal */
           }
-          return next;
         }
-        return conv;
+        return next;
       })
     );
 
@@ -10607,7 +10832,7 @@ app.get("/make-server-16010b6f/chat/messages/:conversationId", async (c) => {
 app.post("/make-server-16010b6f/chat/messages", async (c) => {
   try {
     const body = await c.req.json();
-    const { conversationId, text, sender, senderName, customerEmail, imageUrl, vendorId, customerProfileImage } = body;
+    const { conversationId, text, sender, senderName, customerEmail, customerPhone, imageUrl, vendorId, customerProfileImage } = body;
 
     const trimmedText = String(text ?? "").trim();
     const resolvedImageUrl = String(imageUrl ?? "").trim();
@@ -10750,6 +10975,10 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
 
     if (sender === "customer") {
       resolvedCustomerName = (senderName || existingConv?.customerName || "").trim();
+      if (isGuestChatEmailServer(resolvedCustomerEmail)) {
+        const allocatedName = await guestDisplayNameForEmail(resolvedCustomerEmail);
+        if (allocatedName) resolvedCustomerName = allocatedName;
+      }
     } else {
       const fromClient = (bodyCustomerName || "").trim();
       const fromExisting = (existingConv?.customerName || "").trim();
@@ -10778,6 +11007,10 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
       );
     }
 
+    const resolvedCustomerPhone = String(
+      customerPhone || existingConv?.customerPhone || ""
+    ).trim();
+
     const prevUnread = Number(existingConv?.unread) || 0;
     const nextUnread = sender === "customer" ? prevUnread + 1 : 0;
 
@@ -10786,6 +11019,7 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
       id: message.conversationId,
       customerName: resolvedCustomerName,
       customerEmail: resolvedCustomerEmail,
+      customerPhone: resolvedCustomerPhone || undefined,
       customerProfileImage: resolvedCustomerImage,
       lastMessage: lastMessagePreview,
       timestamp,
@@ -10831,6 +11065,7 @@ app.post("/make-server-16010b6f/chat/messages", async (c) => {
           unread: peerUnread + 1,
           customerName: resolvedCustomerName || peer?.customerName,
           customerEmail: resolvedCustomerEmail || peer?.customerEmail,
+          customerPhone: resolvedCustomerPhone || peer?.customerPhone,
           customerProfileImage: resolvedCustomerImage || peer?.customerProfileImage,
         };
         peerWrites.push(
@@ -10884,6 +11119,37 @@ app.put("/make-server-16010b6f/chat/messages/:conversationId/read", async (c) =>
   } catch (error: any) {
     console.error("❌ Failed to mark as read:", error);
     return c.json({ error: error.message, success: false }, 500);
+  }
+});
+
+// Update guest/customer contact info (phone) on an existing conversation
+app.put("/make-server-16010b6f/chat/conversations/:conversationId/contact", async (c) => {
+  try {
+    const conversationId = c.req.param("conversationId");
+    const body = await c.req.json();
+    const customerPhone = String(body?.customerPhone || "").trim();
+
+    if (!customerPhone) {
+      return c.json({ error: "customerPhone is required" }, 400);
+    }
+
+    const conversation = (await withTimeout(
+      kv.get(`chat:conversation:${conversationId}`),
+      5000
+    ).catch(() => null)) as any;
+
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    const next = { ...conversation, customerPhone };
+    await withTimeout(kv.set(`chat:conversation:${conversationId}`, next), 5000);
+    queueChatConversationReadModelSync(conversationId, next);
+
+    return c.json({ success: true, conversation: next });
+  } catch (error: any) {
+    console.error("❌ Failed to update conversation contact:", error);
+    return c.json({ error: error.message }, 500);
   }
 });
 
@@ -10992,22 +11258,31 @@ app.delete("/make-server-16010b6f/chat/conversations/:conversationId", async (c)
     if (conversationId === "all") {
       return c.json({ error: "Use DELETE /chat/conversations/all to clear all history" }, 400);
     }
-    const messageRows = await withTimeout(
-      kv.getByPrefix(`chat:message:${conversationId}:`),
-      15000
-    ).catch(() => []);
 
-    let messagesDeleted = 0;
-    for (const row of messageRows || []) {
-      const msg = row as { id?: unknown };
-      const id = String(msg?.id || "").trim();
-      if (!id) continue;
-      await withTimeout(kv.del(`chat:message:${conversationId}:${id}`), 5000).catch(() => undefined);
-      messagesDeleted += 1;
+    const existingConv = (await withTimeout(
+      kv.get(`chat:conversation:${conversationId}`),
+      5000,
+    ).catch(() => null)) as { customerEmail?: unknown } | null;
+    const customerEmail = normalizeChatEmail(existingConv?.customerEmail);
+
+    if (customerEmail && isGuestChatEmailServer(customerEmail)) {
+      const purged = await purgeGuestChatByEmail(customerEmail);
+      return c.json({
+        success: true,
+        guestPurged: true,
+        customerEmail,
+        conversationDeleted: purged.conversationsDeleted,
+        messagesDeleted: purged.messagesDeleted,
+      });
     }
 
-    await withTimeout(kv.del(`chat:conversation:${conversationId}`), 5000);
-    return c.json({ success: true, conversationDeleted: 1, messagesDeleted });
+    const stats = await deleteConversationAndMessages(conversationId);
+    return c.json({
+      success: true,
+      conversationDeleted: 1,
+      messagesDeleted: stats.messagesDeleted,
+      customerEmail: customerEmail || undefined,
+    });
   } catch (error: any) {
     console.error("❌ Failed to delete conversation:", error);
     return c.json({ error: error.message, success: false }, 500);

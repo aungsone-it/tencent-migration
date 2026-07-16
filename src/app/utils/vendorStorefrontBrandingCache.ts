@@ -18,6 +18,36 @@ export type VendorStorefrontBranding = {
   storeLogo: string;
 };
 
+const liveStorefrontDisplayNameBySlug = new Map<string, string>();
+
+function normalizeVendorSlugKey(slug: string | undefined | null): string {
+  return String(slug || "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Called by `VendorStoreView` whenever the resolved store name changes. */
+export function setLiveVendorStorefrontDisplayName(
+  slug: string | undefined | null,
+  storeName: string | undefined | null,
+): void {
+  const key = normalizeVendorSlugKey(slug);
+  const name = String(storeName || "").trim();
+  if (!key || !name) return;
+  liveStorefrontDisplayNameBySlug.set(key, name);
+}
+
+/** Prefer live name from the mounted storefront; fall back to persisted catalog cache. */
+export function readVendorStorefrontDisplayName(
+  slug: string | undefined | null,
+): string {
+  const key = normalizeVendorSlugKey(slug);
+  if (!key) return "";
+  const live = liveStorefrontDisplayNameBySlug.get(key);
+  if (live?.trim()) return live.trim();
+  return readCachedVendorBrandingBySlug(slug).storeName;
+}
+
 export function isGenericVendorStoreLabel(name: string | null | undefined): boolean {
   const raw = String(name || "").trim();
   return !raw || /^vendor\s+store$/i.test(raw);

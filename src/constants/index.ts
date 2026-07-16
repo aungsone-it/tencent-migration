@@ -44,6 +44,9 @@ export const MIGOO_USER_SESSION_CHANGED_EVENT = "migoo-user-session-changed";
 /** Header “Mark all read” (and similar) — clears floating-chat unread without opening the panel. */
 export const MIGOO_CHAT_DISMISS_UNREAD_EVENT = "migoo-chat-dismiss-unread";
 
+/** `VendorStoreView` publishes resolved store display name for `FloatingChat` header branding. */
+export const MIGOO_VENDOR_STOREFRONT_BRANDING_EVENT = "migoo-vendor-storefront-branding";
+
 export function notifyMigooUserSessionChanged(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(MIGOO_USER_SESSION_CHANGED_EVENT));

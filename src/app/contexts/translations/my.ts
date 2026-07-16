@@ -296,4 +296,17 @@ export const myTranslations: Record<string, string> = {
     'cart.total': 'စုစုပေါင်း',
     'cart.checkoutUnavailable': 'ငွေပေးချေရန် မရနိုင်ပါ',
     'cart.proceedToCheckout': 'ငွေပေးချေရန်',
+
+    'chat.typeMessage': 'မက်ဆေ့ချ်ရေးပါ...',
+    'chat.send': 'ပို့ရန်',
+
+    'floatingChat.support': 'အကူအညီ',
+    'floatingChat.online': 'အွန်လိုင်း',
+    'floatingChat.phoneTitle': 'ဖုန်းနံပါတ် ထည့်ပါ',
+    'floatingChat.phoneDescription':
+      'သင်၏ စုံစမ်းမှုနှင့် ပတ်သက်၍ ကျွန်ုပ်တို့ ရောင်းချသူများက ဆက်သွယ်နိုင်ရန် ဖုန်းနံပါတ်ကို မျှဝေပါ။',
+    'floatingChat.phonePlaceholder': '+959XXXXXXXXX သို့မဟုတ် 09XXXXXXXXX',
+    'floatingChat.savePhone': 'ဖုန်းနံပါတ် သိမ်းရန်',
+    'floatingChat.maybeLater': 'နောက်မှ',
+    'floatingChat.welcome': 'မင်္ဂလာပါ! {storeName} မှ ကြိုဆိုပါသည်။ ကျွန်ုပ်တို့ ဘယ်လို ကူညီပေးရမလဲ?',
 };

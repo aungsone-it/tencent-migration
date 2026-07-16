@@ -9,7 +9,6 @@ import {
 import { useResolvedVendorHostSlug } from "../utils/vendorHostResolution";
 import { lazy, Suspense, useEffect } from "react";
 import { BackToTop } from "./BackToTop";
-import { useAuth } from "../contexts/AuthContext";
 import { useCartVisibility } from "../contexts/CartVisibilityContext";
 import { CartVisibilityProvider } from "../contexts/CartVisibilityContext";
 import { LoadingProvider, useLoading } from "../contexts/LoadingContext";
@@ -37,7 +36,6 @@ export function RootLayout() {
 }
 
 function RootLayoutContent() {
-  const { user } = useAuth();
   const location = useLocation();
   const { setChatUnreadCount, forceOpenFloatingChat, resetForceOpenFloatingChat, floatingChatOpen } =
     useChatNotification();
@@ -104,13 +102,10 @@ function RootLayoutContent() {
         !isAdminPortal && (
         <Suspense fallback={null}>
           <FloatingChat
-            customerName={user?.fullName || user?.firstName || "Guest"}
-            customerEmail={user?.email || ""}
             onUnreadCountChange={setChatUnreadCount}
             forceOpen={forceOpenFloatingChat}
             onOpen={resetForceOpenFloatingChat}
             vendorId={vendorId}
-            isAuthenticated={!!user}
             aboveStickyPurchaseBar={isVendorProductDetailPage}
             reserveBackToTopStack={!isLandingPage}
           />

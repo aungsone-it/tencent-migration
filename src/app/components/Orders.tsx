@@ -46,7 +46,7 @@ import {
   getCachedAdminOrdersPage,
   patchAdminOrdersCacheStatuses,
   insertRecoveredOrderIntoAdminCaches,
-  invalidateAdminOrdersCache,
+  removeAdminOrdersFromCaches,
   ADMIN_ORDERS_PAGE_DEFAULT,
   moduleCache,
   adminOrdersPageCacheKey,
@@ -1444,6 +1444,9 @@ export function Orders({
     const orderIds = [...selectedOrders];
     const previousOrders = [...orders];
     const previousTotal = ordersTotal;
+    const deletedMeta = previousOrders
+      .filter((order) => orderIds.includes(order.id))
+      .map((order) => ({ orderId: order.id, orderNumber: order.orderNumber }));
 
     setOrders((prev) => prev.filter((order) => !orderIds.includes(order.id)));
     setSelectedOrders([]);
@@ -1451,18 +1454,48 @@ export function Orders({
 
     try {
       const results = await Promise.allSettled(orderIds.map((id) => ordersApi.delete(id)));
-      const failed = results.filter((result) => result.status === "rejected").length;
-      if (failed > 0) {
-        throw new Error(`${failed} order delete(s) failed`);
+      const succeededIds: string[] = [];
+      const failedIds: string[] = [];
+
+      results.forEach((result, index) => {
+        const id = orderIds[index];
+        if (result.status === "rejected") {
+          failedIds.push(id);
+          return;
+        }
+        if (result.value?.success !== true) {
+          failedIds.push(id);
+          return;
+        }
+        succeededIds.push(id);
+      });
+
+      if (succeededIds.length > 0) {
+        removeAdminOrdersFromCaches(
+          deletedMeta.filter((row) => succeededIds.includes(row.orderId))
+        );
+        for (const id of succeededIds) pendingOrderStatusDrafts.delete(id);
       }
-      invalidateAdminOrdersCache();
-      for (const id of orderIds) pendingOrderStatusDrafts.delete(id);
+
+      if (failedIds.length > 0) {
+        setOrders(previousOrders.filter((order) => !succeededIds.includes(order.id)));
+        setOrdersTotal(Math.max(0, previousTotal - succeededIds.length));
+        const msg =
+          failedIds.length === orderIds.length
+            ? t("orders.bulkDeleteError") || "Failed to delete orders."
+            : `${failedIds.length} of ${orderIds.length} order delete(s) failed.`;
+        toast.error(msg);
+        if (succeededIds.length === 0) {
+          void loadOrders(true);
+        }
+        return;
+      }
+
       toast.success(
         t("orders.bulkDeleteSuccess")?.replace("{count}", String(count)) ||
           `Deleted ${count} order${count === 1 ? "" : "s"}.`
       );
       onOrderUpdate?.();
-      void loadOrders(true);
     } catch (error: any) {
       console.error("Failed to delete orders:", error);
       setOrders(previousOrders);

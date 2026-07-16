@@ -1,0 +1,26 @@
+{
+  "envId": "nexa-mm-i0goiaxufc1521e43",
+  "functionRoot": ".cloudbase/functions",
+  "functions": [
+    {
+      "name": "make-server-16010b6f",
+      "dir": ".cloudbase/functions/make-server-16010b6f",
+      "runtime": "Nodejs18.15",
+      "handler": "index.main",
+      "timeout": 60,
+      "memorySize": 512,
+      "installDependency": true,
+      "description": "Main storefront + admin API"
+    },
+    {
+      "name": "kpay-webhook",
+      "dir": ".cloudbase/functions/kpay-webhook",
+      "runtime": "Nodejs18.15",
+      "handler": "index.main",
+      "timeout": 30,
+      "memorySize": 256,
+      "installDependency": true,
+      "description": "KBZPay webhook"
+    }
+  ]
+}

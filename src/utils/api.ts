@@ -954,6 +954,7 @@ export const chatApi = {
     /** Persisted thread label / token hint (vendor storefront vs SECURE) — keep in sync with server */
     vendorSource?: string;
     customerProfileImage?: string;
+    customerPhone?: string;
   }) => {
     const imageUrl = sanitizeOptionalHttpUrl(data.imageUrl);
     const customerProfileImage = sanitizeOptionalHttpUrl(data.customerProfileImage);
@@ -968,6 +969,29 @@ export const chatApi = {
       },
       { timeout: API_TIMEOUTS.CHAT }
     );
+  },
+
+  /**
+   * Allocate sequential guest display id (#000001, #000002, …).
+   */
+  allocateGuestDisplayId: async (data: { guestEmail: string }) => {
+    return apiClient.post(
+      "/chat/guest-id",
+      { guestEmail: String(data.guestEmail).trim() },
+      { timeout: API_TIMEOUTS.CHAT },
+    );
+  },
+
+  /**
+   * Save customer phone on a chat thread (guest checkout / floating chat).
+   */
+  updateConversationContact: async (data: {
+    conversationId: string;
+    customerPhone: string;
+  }) => {
+    return apiClient.put(`/chat/conversations/${data.conversationId}/contact`, {
+      customerPhone: data.customerPhone,
+    });
   },
 
   /**

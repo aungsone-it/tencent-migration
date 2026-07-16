@@ -30,6 +30,7 @@ import {
   readCachedVendorBrandingBySlug,
   readCachedVendorProductName,
   resolveVendorStoreDisplayName,
+  setLiveVendorStorefrontDisplayName,
 } from "../utils/vendorStorefrontBrandingCache";
 import {
   readSessionCatalogList,
@@ -163,6 +164,7 @@ import {
   AMBIENT_AUTH_PROFILE_REFRESH_MIN_MS,
   MIGOO_OPEN_CUSTOMER_AUTH_FOR_CHAT_EVENT,
   MIGOO_USER_SESSION_CHANGED_EVENT,
+  MIGOO_VENDOR_STOREFRONT_BRANDING_EVENT,
   VENDOR_ACCOUNT_VISIBILITY_RESYNC_MIN_MS,
   notifyMigooUserSessionChanged,
 } from "../../constants";
@@ -1512,6 +1514,19 @@ export function VendorStoreView({
   });
   const [storePhone, setStorePhone] = useState<string>(vendorHomeSnapshot.storePhone);
   const [metaPixelId, setMetaPixelId] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!vendorId) return;
+    const name = storeName.trim();
+    if (!name) return;
+    setLiveVendorStorefrontDisplayName(vendorId, name);
+    window.dispatchEvent(
+      new CustomEvent(MIGOO_VENDOR_STOREFRONT_BRANDING_EVENT, {
+        detail: { slug: vendorId, storeName: name },
+      }),
+    );
+  }, [vendorId, storeName]);
+
   /** Profile avatar dropdown (desktop). */
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   /** Slide-out nav on small screens (account, browse, wishlist — hamburger on the right like /store). */

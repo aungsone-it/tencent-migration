@@ -2614,6 +2614,100 @@ export function patchAdminOrdersCacheStatuses(
   }
 }
 
+function bumpStatusBreakdownDrop(
+  breakdown: { pending: number; processing: number; fulfilled: number; cancelled: number },
+  status: unknown
+): void {
+  const st = String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/_/g, "-");
+  if (st === "pending" || st === "pending-payment") breakdown.pending += 1;
+  else if (st === "processing" || st === "ready-to-ship") breakdown.processing += 1;
+  else if (st === "fulfilled") breakdown.fulfilled += 1;
+  else if (st === "cancelled") breakdown.cancelled += 1;
+}
+
+/** Remove deleted orders from session caches without a full refetch (prevents SQL ghost rows flashing back). */
+export function removeAdminOrdersFromCaches(
+  removed: Array<{ orderId: string; orderNumber?: string }>
+): void {
+  if (removed.length === 0) return;
+
+  const byId = new Set(removed.map((r) => String(r.orderId)));
+  const byOrderNumber = new Set(
+    removed
+      .map((r) => String(r.orderNumber || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const shouldRemove = (raw: Record<string, unknown>): boolean => {
+    const id = String(raw?.id ?? "");
+    const onum = String(raw?.orderNumber ?? "").trim().toLowerCase();
+    return byId.has(id) || (onum.length > 0 && byOrderNumber.has(onum));
+  };
+
+  const filterOrderRows = (
+    orders: unknown[]
+  ): { orders: unknown[]; dropped: number; statusDrops: { pending: number; processing: number; fulfilled: number; cancelled: number } } => {
+    const statusDrops = { pending: 0, processing: 0, fulfilled: 0, cancelled: 0 };
+    const kept: unknown[] = [];
+    for (const raw of orders) {
+      const o = raw as Record<string, unknown>;
+      if (shouldRemove(o)) {
+        bumpStatusBreakdownDrop(statusDrops, o.status);
+        continue;
+      }
+      kept.push(raw);
+    }
+    return { orders: kept, dropped: orders.length - kept.length, statusDrops };
+  };
+
+  const full = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
+  if (full?.orders && Array.isArray(full.orders)) {
+    const { orders: nextOrders, dropped } = filterOrderRows(full.orders);
+    if (dropped > 0) {
+      moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, { ...full, orders: nextOrders });
+    }
+  }
+
+  for (const key of moduleCache.getStats().keys) {
+    if (!key.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
+    const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(key);
+    if (!pagePayload?.orders || !Array.isArray(pagePayload.orders)) continue;
+
+    const { orders: nextOrders, dropped, statusDrops } = filterOrderRows(pagePayload.orders);
+    if (dropped === 0) continue;
+
+    const breakdown = pagePayload.aggregates?.statusBreakdown;
+    moduleCache.prime(key, {
+      ...pagePayload,
+      orders: nextOrders,
+      total: Math.max(0, pagePayload.total - dropped),
+      aggregates: pagePayload.aggregates
+        ? {
+            ...pagePayload.aggregates,
+            filteredCount: Math.max(0, pagePayload.aggregates.filteredCount - dropped),
+            statusBreakdown: breakdown
+              ? {
+                  pending: Math.max(0, (breakdown.pending ?? 0) - statusDrops.pending),
+                  processing: Math.max(0, (breakdown.processing ?? 0) - statusDrops.processing),
+                  fulfilled: Math.max(0, (breakdown.fulfilled ?? 0) - statusDrops.fulfilled),
+                  cancelled: Math.max(0, (breakdown.cancelled ?? 0) - statusDrops.cancelled),
+                }
+              : breakdown,
+          }
+        : pagePayload.aggregates,
+    });
+  }
+
+  SmartCache.delete("badge_counts");
+  if (typeof window !== "undefined") {
+    notifyAdminOrdersUpdated("remove-admin-orders");
+  }
+}
+
 function recoveredOrderCacheKey(order: Record<string, unknown>): string {
   return String(order.orderNumber || order.id || "")
     .trim()

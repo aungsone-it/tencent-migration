@@ -16,6 +16,7 @@ import {
   Clock,
   Loader2,
   X,
+  Copy,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -36,6 +37,7 @@ import { conversationBucketKeyClient, canonicalChatThreadId, mainStoreConversati
 import {
   broadcastConversationMessage,
   broadcastCustomerChatMessage,
+  broadcastGuestChatReset,
   broadcastInboxPing,
   subscribeAdminInbox,
   subscribeConversationBroadcastMulti,
@@ -44,12 +46,14 @@ import {
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
 import { getCachedAdminVendorsForProductList } from "../utils/module-cache";
 import { buildVendorDisplayLookup, resolveChatVendorLabel } from "../utils/vendorDisplay";
+import { adminChatContactLabel, enrichGuestConversationsWithDisplayIds, guestChatLocalAvatarDataUri, isGuestChatEmail, purgeGuestChatClientData, resolveGuestChatCustomerLabel, resolveGuestChatAvatarUrl, pickGuestCustomerNameForInbox } from "../utils/guestChatIdentity";
 
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import {
   clearAdminChatLocalCaches,
+  clearAdminThreadLocal,
   mergeChatMessageLists,
   readAdminInboxLocal,
   readAdminStaffIdLocal,
@@ -74,6 +78,7 @@ interface Conversation {
   id: string;
   customerName: string;
   customerEmail: string;
+  customerPhone?: string;
   customerProfileImage?: string; // Add profile image URL
   lastMessage: string;
   timestamp: string;
@@ -100,6 +105,37 @@ function isGeneratedChatAvatarUrl(url: string): boolean {
     u.includes("ui-avatars.com") ||
     u.includes("robohash.org") ||
     u.includes("avatar.vercel.sh")
+  );
+}
+
+function ChatContactAvatar({
+  conv,
+  size = "md",
+}: {
+  conv: Conversation;
+  size?: "sm" | "md";
+}) {
+  const label = resolveGuestChatCustomerLabel(conv);
+  const box = size === "sm" ? "w-10 h-10" : "w-12 h-12";
+  const email = String(conv.customerEmail || "").trim();
+  const isGuest = isGuestChatEmail(email);
+  const initialSrc = resolveGuestChatAvatarUrl(conv);
+  const [src, setSrc] = useState(initialSrc);
+
+  useEffect(() => {
+    setSrc(initialSrc);
+  }, [initialSrc]);
+
+  return (
+    <img
+      src={src}
+      alt={label}
+      className={`${box} rounded-full object-cover bg-slate-100 shrink-0`}
+      onError={() => {
+        if (!isGuest || src.startsWith("data:")) return;
+        setSrc(guestChatLocalAvatarDataUri(email));
+      }}
+    />
   );
 }
 
@@ -217,12 +253,17 @@ function mergeInboxFromPayload(
 
   if (idx === -1) {
     const name =
-      String(payload.customerName || "").trim() ||
+      pickGuestCustomerNameForInbox(
+        String(payload.customerName || "").trim(),
+        "",
+        email,
+      ) ||
       (email.includes("@") ? email.split("@")[0] : "Customer");
     const row: Conversation = {
       id: cid,
       customerName: name,
       customerEmail: email || "—",
+      customerPhone: payload.customerPhone,
       customerProfileImage: payload.customerProfileImage,
       lastMessage,
       timestamp: ts,
@@ -248,8 +289,13 @@ function mergeInboxFromPayload(
     timestamp: ts,
     unread: nextUnread,
     customerProfileImage: payload.customerProfileImage || cur.customerProfileImage,
-    customerName: String(payload.customerName || "").trim() || cur.customerName,
+    customerName: pickGuestCustomerNameForInbox(
+      String(payload.customerName || "").trim(),
+      cur.customerName,
+      email || String(cur.customerEmail || ""),
+    ),
     customerEmail: String(payload.customerEmail || "").trim() || cur.customerEmail,
+    customerPhone: String(payload.customerPhone || "").trim() || cur.customerPhone,
     vendorId: payload.vendorId || cur.vendorId,
     vendorSource: payload.vendorSource ?? cur.vendorSource,
   };
@@ -418,6 +464,7 @@ export function Chat({
       if (loadGen !== inboxLoadGenRef.current) return;
       if (response.conversations && Array.isArray(response.conversations)) {
         let fromApi = normalizeAdminInboxList(response.conversations as Conversation[]);
+        fromApi = await enrichGuestConversationsWithDisplayIds(fromApi);
         const sel = selectedConversationRef.current;
         fromApi = preserveSelectedConversationInList(fromApi, conversationsRef.current, sel);
         if (handoffPinnedConversationRef.current) {
@@ -427,13 +474,7 @@ export function Chat({
             sel
           );
         }
-        const prev = conversationsRef.current;
         let next = fromApi;
-        if (fromApi.length === 0 && prev.length > 0) {
-          next = prev;
-        } else if (prev.length > 0) {
-          next = normalizeAdminInboxList([...fromApi, ...prev]);
-        }
         chatAdminInboxCache = next;
         setConversations(next);
         writeAdminInboxLocal(next);
@@ -490,10 +531,10 @@ export function Chat({
 
       let spinnerTimer: ReturnType<typeof setTimeout> | null = null;
       if (!silentUi) {
-        if (cached !== undefined) {
-          setMessages(cached);
-          setLoadingMessages(false);
-        } else {
+      if (Array.isArray(cached)) {
+        setMessages(cached);
+        setLoadingMessages(false);
+      } else {
           spinnerTimer = setTimeout(() => setLoadingMessages(true), CHAT_MESSAGES_SPINNER_DELAY_MS);
         }
       }
@@ -630,6 +671,7 @@ export function Chat({
         const remove = new Set(removed.map((x) => String(x).trim()));
         for (const id of remove) {
           chatAdminMessagesCache.delete(id);
+          clearAdminThreadLocal(id);
         }
         const prev = conversationsRef.current;
         const sel = selectedConversationRef.current;
@@ -640,6 +682,7 @@ export function Chat({
         });
         const merged = normalizeAdminInboxList(nextRaw);
         chatAdminInboxCache = merged;
+        writeAdminInboxLocal(merged);
         const stillHasSelection =
           sel == null ||
           merged.some(
@@ -760,7 +803,7 @@ export function Chat({
       scrollDebounceRef.current = null;
       const el = messagesEndRef.current;
       if (!el) return;
-      const behavior = messages.length > 36 ? ("auto" as const) : ("smooth" as const);
+      const behavior = (Array.isArray(messages) ? messages.length : 0) > 36 ? ("auto" as const) : ("smooth" as const);
       el.scrollIntoView({ behavior, block: "end" });
     }, CHAT_SCROLL_DEBOUNCE_MS);
     return () => {
@@ -818,8 +861,9 @@ export function Chat({
       getCachedThreadMessages(canonicalConversationId) ??
       getCachedThreadMessages(selectedConversation) ??
       readAdminThreadLocal<Message>(canonicalConversationId) ??
-      readAdminThreadLocal<Message>(selectedConversation);
-    if (cached !== undefined) {
+      readAdminThreadLocal<Message>(selectedConversation) ??
+      undefined;
+    if (Array.isArray(cached)) {
       setMessages(cached);
       setLoadingMessages(false);
       void loadMessages(canonicalConversationId, true, true);
@@ -854,7 +898,7 @@ export function Chat({
     if (adminInboxLsRef.current) clearTimeout(adminInboxLsRef.current);
     adminInboxLsRef.current = setTimeout(() => {
       adminInboxLsRef.current = null;
-      if (conversations.length > 0) writeAdminInboxLocal(conversations);
+      writeAdminInboxLocal(conversations);
     }, CHAT_LOCAL_STORAGE_DEBOUNCE_MS);
     return () => {
       if (adminInboxLsRef.current) clearTimeout(adminInboxLsRef.current);
@@ -862,7 +906,7 @@ export function Chat({
   }, [conversations]);
 
   useEffect(() => {
-    if (!selectedConversation || messages.length === 0) return;
+    if (!selectedConversation || !Array.isArray(messages) || messages.length === 0) return;
     const row = findConversationRow(
       conversations,
       selectedConversation,
@@ -883,9 +927,7 @@ export function Chat({
     return () => {
       if (adminInboxLsRef.current) clearTimeout(adminInboxLsRef.current);
       if (adminThreadLsRef.current) clearTimeout(adminThreadLsRef.current);
-      if (conversationsRef.current.length > 0) {
-        writeAdminInboxLocal(conversationsRef.current);
-      }
+      writeAdminInboxLocal(conversationsRef.current);
       const sel = selectedConversationRef.current;
       if (sel && messagesRef.current.length > 0) {
         const row = findConversationRow(
@@ -1309,9 +1351,12 @@ export function Chat({
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const safeMessages = Array.isArray(messages) ? messages : [];
+
   const filteredConversations = conversations.filter((conv) =>
     (conv.customerName || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (conv.customerEmail || "").toLowerCase().includes(searchQuery.toLowerCase())
+    (conv.customerEmail || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (conv.customerPhone || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Apply sorting
@@ -1338,6 +1383,7 @@ export function Chat({
   const selectedVendorHeaderBadge = selectedConv
     ? resolveChatVendorLabel(selectedConv.vendorSource, selectedConv.vendorId, vendorLookup)
     : null;
+  const selectedCustomerPhone = String(selectedConv?.customerPhone || "").trim();
   const totalUnread = conversations.reduce((sum, conv) => sum + conv.unread, 0);
 
   /** Sidebar row matches current thread (primary id or merged alias ids). */
@@ -1382,15 +1428,34 @@ export function Chat({
     const backupSelected = selectedConversation;
     setConversations((prev) => {
       const remove = new Set(allIds);
-      const next = prev.filter((c) => !remove.has(c.id));
+      const next = prev.filter((c) => {
+        if (remove.has(c.id)) return false;
+        if ((c.aliasConversationIds || []).some((aid) => remove.has(String(aid).trim()))) {
+          return false;
+        }
+        return true;
+      });
       chatAdminInboxCache = next;
+      writeAdminInboxLocal(next);
       return next;
     });
-    for (const id of allIds) chatAdminMessagesCache.delete(id);
+    for (const id of allIds) {
+      chatAdminMessagesCache.delete(id);
+      clearAdminThreadLocal(id);
+    }
+    const deletedEmail = String(selectedConv.customerEmail || "").trim();
+    const isGuest = isGuestChatEmail(deletedEmail);
     setMessages([]);
     setSelectedConversation(null);
     try {
       await Promise.all(allIds.map((id) => chatApi.deleteConversation(id)));
+      if (isGuest && deletedEmail) {
+        purgeGuestChatClientData(deletedEmail);
+        void broadcastGuestChatReset({
+          customerEmail: deletedEmail,
+          removedConversationIds: [...allIds],
+        });
+      }
       toast.success("Conversation deleted");
       void broadcastInboxPing({ removedConversationIds: [...allIds], t: Date.now() });
     } catch {
@@ -1399,6 +1464,16 @@ export function Chat({
       setMessages(backupMessages);
       setSelectedConversation(backupSelected);
       toast.error("Failed to delete conversation");
+    }
+  };
+
+  const handleCopyCustomerPhone = async () => {
+    if (!selectedCustomerPhone) return;
+    try {
+      await navigator.clipboard.writeText(selectedCustomerPhone);
+      toast.success("Phone number copied");
+    } catch {
+      toast.error("Could not copy phone number");
     }
   };
 
@@ -1507,10 +1582,6 @@ export function Chat({
               </div>
             ) : (
               sortedConversations.map((conv) => {
-                // Use customer profile image if available, otherwise use Dicebear avatar
-                const avatar =
-                  conv.customerProfileImage ||
-                  `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(conv.customerName)}&backgroundColor=3b82f6`;
                 const vendorBadgeLabel = resolveChatVendorLabel(
                   conv.vendorSource,
                   conv.vendorId,
@@ -1528,22 +1599,25 @@ export function Chat({
                     }`}
                   >
                     <div className="relative flex-shrink-0">
-                      <img
-                        key={avatar}
-                        src={avatar}
-                        alt={conv.customerName}
-                        className="w-12 h-12 rounded-full object-cover"
-                      />
+                      <ChatContactAvatar conv={conv} size="md" />
                       {conv.status === "online" && (
                         <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
                       )}
                     </div>
                     <div className="flex-1 min-w-0 text-left">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                           <h3 className="text-sm font-semibold text-slate-900 truncate">
-                            {conv.customerName}
+                            {resolveGuestChatCustomerLabel(conv)}
                           </h3>
+                          {vendorBadgeLabel && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0 h-5 bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 text-blue-700 shrink-0"
+                            >
+                              🏪 {vendorBadgeLabel}
+                            </Badge>
+                          )}
                           {conv.starred && (
                             <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400 flex-shrink-0" />
                           )}
@@ -1555,11 +1629,6 @@ export function Chat({
                       <p className="text-sm text-slate-600 truncate">
                         {conv.lastMessage}
                       </p>
-                      {vendorBadgeLabel && (
-                        <Badge variant="outline" className="text-xs mt-1 bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 text-blue-700">
-                          🏪 {t("chat.from")} {vendorBadgeLabel}
-                        </Badge>
-                      )}
                     </div>
                     {conv.unread > 0 && (
                       <div className="flex-shrink-0">
@@ -1582,35 +1651,42 @@ export function Chat({
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  <img
-                    key={
-                      selectedConv.customerProfileImage ||
-                      `dicebear-${selectedConv.customerName}`
-                    }
-                    src={
-                      selectedConv.customerProfileImage ||
-                      `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedConv.customerName)}&backgroundColor=3b82f6`
-                    }
-                    alt={selectedConv.customerName}
-                    className="w-10 h-10 rounded-full object-cover"
-                  />
+                  <ChatContactAvatar conv={selectedConv} size="sm" />
                   {selectedConv.status === "online" && (
                     <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white"></div>
                   )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900">
-                    {selectedConv.customerName}
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-slate-500">
-                      {selectedConv.customerEmail}
-                    </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      {resolveGuestChatCustomerLabel(selectedConv)}
+                    </h3>
                     {selectedVendorHeaderBadge && (
-                      <Badge variant="outline" className="text-xs bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 text-blue-700">
+                      <Badge
+                        variant="outline"
+                        className="text-xs bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 text-blue-700"
+                      >
                         🏪 {selectedVendorHeaderBadge}
                       </Badge>
                     )}
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <p className="text-xs text-slate-500">
+                      {adminChatContactLabel(selectedConv)}
+                    </p>
+                    {selectedCustomerPhone && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-slate-500 hover:text-slate-700"
+                          title="Copy phone number"
+                          aria-label="Copy phone number"
+                          onClick={() => void handleCopyCustomerPhone()}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
                   </div>
                 </div>
               </div>
@@ -1642,7 +1718,7 @@ export function Chat({
                   <Loader2 className="w-10 h-10 text-slate-400 animate-spin" />
                   <p className="text-sm text-slate-500">{t("chat.loadingMessages")}</p>
                 </div>
-              ) : messages.length === 0 ? (
+              ) : safeMessages.length === 0 ? (
                 <div className="min-h-full flex flex-col items-center justify-center text-center p-6">
                   <MessageSquare className="w-12 h-12 text-slate-300 mb-3" />
                   <p className="text-sm text-slate-500">{t("chat.noMessagesYet")}</p>
@@ -1652,7 +1728,7 @@ export function Chat({
                 </div>
               ) : (
                 <div className="min-h-full flex flex-col justify-end gap-4 p-6">
-                  {messages.map((message) => (
+                  {safeMessages.map((message) => (
                     <div
                       key={message.id}
                       className={`flex min-w-0 w-full ${

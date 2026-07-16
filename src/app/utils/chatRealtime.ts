@@ -23,6 +23,7 @@ export type InboxBroadcastPayload = {
   timestamp?: string;
   customerEmail?: string;
   customerName?: string;
+  customerPhone?: string;
   customerProfileImage?: string;
   vendorId?: string;
   vendorSource?: string;
@@ -33,6 +34,11 @@ export type InboxBroadcastPayload = {
   /** All conversations were wiped — other admin tabs should clear local inbox. */
   clearedAll?: boolean;
   /** One or more threads were deleted — other admin tabs remove rows without refetch. */
+  removedConversationIds?: string[];
+};
+
+export type GuestChatResetPayload = {
+  customerEmail: string;
   removedConversationIds?: string[];
 };
 
@@ -216,6 +222,37 @@ export async function broadcastCustomerChatMessage(
   }
 }
 
+/** Tell a guest floating-chat tab to wipe local history, phone, and session. */
+export async function broadcastGuestChatReset(payload: GuestChatResetPayload): Promise<void> {
+  const channelName = customerChatChannelName(payload.customerEmail);
+  if (typeof window === "undefined" || !channelName) return;
+  const ch = supabase.channel(channelName, {
+    config: { broadcast: { ack: false } },
+  });
+  const ok = await waitSubscribed(ch);
+  if (!ok) {
+    try {
+      await supabase.removeChannel(ch);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  try {
+    await ch.send({
+      type: "broadcast",
+      event: "guest-reset",
+      payload: { t: Date.now(), ...payload },
+    });
+  } finally {
+    try {
+      await supabase.removeChannel(ch);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /** Customer floating chat: receive admin replies on any vendor store / tab for this account. */
 export function subscribeCustomerChatBroadcast(
   customerEmail: string,
@@ -235,6 +272,30 @@ export function subscribeCustomerChatBroadcast(
       if (msg && typeof msg === "object" && !Array.isArray(msg)) {
         onMessage(msg as Record<string, unknown>);
       }
+    });
+  ch.subscribe();
+  return () => {
+    try {
+      void supabase.removeChannel(ch);
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
+/** Guest floating chat: admin deleted this visitor — wipe local session + history. */
+export function subscribeGuestChatReset(
+  customerEmail: string,
+  onReset: (payload: GuestChatResetPayload) => void,
+): () => void {
+  const channelName = customerChatChannelName(customerEmail);
+  if (!channelName) return () => undefined;
+  const ch = supabase
+    .channel(channelName, { config: { broadcast: { ack: false } } })
+    .on("broadcast", { event: "guest-reset" }, (ctx: unknown) => {
+      const payload = extractBroadcastPayload<GuestChatResetPayload>(ctx);
+      if (!payload?.customerEmail) return;
+      onReset(payload);
     });
   ch.subscribe();
   return () => {

@@ -401,7 +401,7 @@ export async function syncOrderReadModel(orderId: string, orderValue: unknown): 
   });
 }
 
-export async function deleteOrderReadModel(
+async function deleteOrderReadModelRows(
   orderId: string,
   orderNumber?: string,
 ): Promise<void> {
@@ -409,33 +409,45 @@ export async function deleteOrderReadModel(
   const num = text(orderNumber);
   if (!id && !num) return;
 
-  await bestEffort(`delete order ${id || num}`, async () => {
-    const ids = new Set<string>();
-    if (id) ids.add(id);
+  const ids = new Set<string>();
+  if (id) ids.add(id);
 
-    if (num) {
-      const { data, error } = await readModelClient
-        .from("app_orders")
-        .select("id")
-        .eq("order_number", num);
-      if (error) throw error;
-      for (const row of data ?? []) {
-        const rid = text((row as { id?: string }).id);
-        if (rid) ids.add(rid);
-      }
+  if (num) {
+    const { data, error } = await readModelClient
+      .from("app_orders")
+      .select("id")
+      .eq("order_number", num);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const rid = text((row as { id?: string }).id);
+      if (rid) ids.add(rid);
     }
+  }
 
-    for (const oid of ids) {
-      const { error: itemsError } = await readModelClient
-        .from("app_order_items")
-        .delete()
-        .eq("order_id", oid);
-      if (itemsError) throw itemsError;
+  for (const oid of ids) {
+    const { error: itemsError } = await readModelClient
+      .from("app_order_items")
+      .delete()
+      .eq("order_id", oid);
+    if (itemsError) throw itemsError;
 
-      const { error } = await readModelClient.from("app_orders").delete().eq("id", oid);
-      if (error) throw error;
-    }
-  });
+    const { error } = await readModelClient.from("app_orders").delete().eq("id", oid);
+    if (error) throw error;
+  }
+}
+
+/** @param strict When true, failures propagate (admin DELETE must not leave SQL ghosts). */
+export async function deleteOrderReadModel(
+  orderId: string,
+  orderNumber?: string,
+  opts?: { strict?: boolean },
+): Promise<void> {
+  const label = `delete order ${text(orderId) || text(orderNumber) || "?"}`;
+  if (opts?.strict) {
+    await deleteOrderReadModelRows(orderId, orderNumber);
+    return;
+  }
+  await bestEffort(label, () => deleteOrderReadModelRows(orderId, orderNumber));
 }
 
 function enqueueReadModelWork(work: Promise<void>): void {

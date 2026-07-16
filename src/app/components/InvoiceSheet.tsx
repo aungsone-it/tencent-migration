@@ -22,11 +22,14 @@ export interface InvoiceSheetOrder {
   total?: number | string;
   subtotal?: number;
   discount?: number;
+  shippingFee?: number | string;
   couponCode?: string;
   notes?: string;
   vendor?: string;
   vendorName?: string;
   storeName?: string;
+  deliveryService?: string;
+  deliveryPartnerName?: string;
 }
 
 function resolveInvoiceBrandName(order: InvoiceSheetOrder): string {
@@ -69,12 +72,23 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
     (sum, item) => sum + parsePrice(item.price) * (item.quantity || 1),
     0
   );
-  const subtotalBeforeDiscount = productTotal || order.subtotal || parseTotal(order.total);
+  const shippingFeeRaw = parsePrice(order.shippingFee ?? 0);
+  const deliveryCompany = String(
+    order.deliveryService || order.deliveryPartnerName || ""
+  ).trim();
+  const subtotal = productTotal || parsePrice(order.subtotal) || 0;
+  const total = parseTotal(order.total) || subtotal;
+  const explicitDiscount =
+    order.discount != null && order.discount !== ""
+      ? parsePrice(order.discount)
+      : null;
+  const shippingFee =
+    shippingFeeRaw > 0
+      ? shippingFeeRaw
+      : Math.max(0, total - subtotal + (explicitDiscount ?? 0));
   const actualDiscount =
-    order.discount ?? Math.max(0, subtotalBeforeDiscount - parseTotal(order.total));
+    explicitDiscount ?? Math.max(0, subtotal + shippingFee - total);
   const hasDiscount = actualDiscount > 0;
-  const subtotal = subtotalBeforeDiscount;
-  const total = parseTotal(order.total) || subtotal - actualDiscount;
   const discountPercentage =
     subtotal > 0 ? Math.round((actualDiscount / subtotal) * 100) : 0;
 
@@ -120,6 +134,9 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
           </p>
         ))}
         {order.phone && <p className="phone-line">Tel: {order.phone}</p>}
+        {deliveryCompany && (
+          <p className="delivery-line">Delivery: {deliveryCompany}</p>
+        )}
       </div>
 
       <table className="items-table">
@@ -166,12 +183,27 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
       )}
 
       <div className="total-section">
+        {(subtotal > 0 || shippingFee > 0) && (
+          <div className="subtotal-row">
+            <span className="subtotal-label">Subtotal:</span>
+            <span className="subtotal-amount">{formatCurrency(subtotal)}</span>
+          </div>
+        )}
+        {shippingFee > 0 && (
+          <>
+            {deliveryCompany && (
+              <div className="delivery-company-row">
+                <span className="delivery-company-label">{deliveryCompany}</span>
+              </div>
+            )}
+            <div className="subtotal-row">
+              <span className="subtotal-label">Shipping fee:</span>
+              <span className="subtotal-amount">{formatCurrency(shippingFee)}</span>
+            </div>
+          </>
+        )}
         {hasDiscount && (
           <>
-            <div className="subtotal-row">
-              <span className="subtotal-label">Subtotal:</span>
-              <span className="subtotal-amount">{formatCurrency(subtotal)}</span>
-            </div>
             <div className="discount-row">
               <span className="discount-label">
                 Discount{order.couponCode ? ` (${order.couponCode})` : ""}:

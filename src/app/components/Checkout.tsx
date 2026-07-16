@@ -136,6 +136,9 @@ type CheckoutSummarySnapshot = {
   orderNote: string;
   coupon: any;
   discount: number;
+  shippingFee?: number;
+  shippingCost?: number;
+  deliveryPartnerName?: string;
   shippingInfo: {
     fullName: string;
     email: string;
@@ -334,6 +337,10 @@ function draftOrderToSummarySnapshot(
         ? { campaign: { code: draft.couponCode } }
         : null,
     discount: Number(draft.discount || 0) || 0,
+    shippingFee: Number(draft.shippingFee ?? draft.shippingCost ?? draft.shipping ?? 0) || 0,
+    deliveryPartnerName: String(
+      draft.deliveryPartnerName ?? draft.deliveryService ?? ""
+    ).trim(),
     shippingInfo: {
       fullName: String(ship.fullName ?? draft.customerName ?? ""),
       email: String(ship.email ?? draft.email ?? ""),
@@ -1185,6 +1192,9 @@ export function Checkout({
   const [confirmedShippingFee, setConfirmedShippingFee] = useState(
     Number(initialSummarySnapshot?.shippingFee || initialSummarySnapshot?.shippingCost || 0) || 0
   );
+  const [confirmedDeliveryPartnerName, setConfirmedDeliveryPartnerName] = useState(
+    String(initialSummarySnapshot?.deliveryPartnerName || "").trim()
+  );
   const [logisticsPartners, setLogisticsPartners] = useState<DeliveryPartner[]>([]);
   const [miniSummaryItems, setMiniSummaryItems] = useState<any[]>(
     () => (Array.isArray(initialMiniSummaryCache?.items) ? initialMiniSummaryCache!.items : [])
@@ -1370,6 +1380,10 @@ export function Checkout({
       setConfirmedOrderNote(snapshot.orderNote || "");
       setConfirmedCoupon(snapshot.coupon || null);
       setConfirmedDiscount(Number(snapshot.discount) || 0);
+      setConfirmedShippingFee(
+        Number(snapshot.shippingFee ?? snapshot.shippingCost ?? 0) || 0
+      );
+      setConfirmedDeliveryPartnerName(String(snapshot.deliveryPartnerName || "").trim());
       setShippingInfo(snapshot.shippingInfo || shippingInfo);
       setPaymentMethod(normalizeCheckoutPaymentMethod(snapshot.paymentMethod));
       setStep("success");
@@ -1624,6 +1638,12 @@ export function Checkout({
         setConfirmedOrderNote(String(o?.notes ?? ""));
         setConfirmedCoupon(coupon);
         setConfirmedDiscount(discount);
+        setConfirmedShippingFee(
+          Number(o?.shippingFee ?? o?.shippingCost ?? o?.shipping ?? 0) || 0
+        );
+        setConfirmedDeliveryPartnerName(
+          String(o?.deliveryPartnerName ?? o?.deliveryService ?? "").trim()
+        );
         setShippingInfo(shipping);
         setPaymentMethod(normalizeCheckoutPaymentMethod(o?.paymentMethod));
         notifyCustomerOrdersUpdated(
@@ -1646,6 +1666,10 @@ export function Checkout({
             orderNote: String(o?.notes ?? ""),
             coupon,
             discount,
+            shippingFee: Number(o?.shippingFee ?? o?.shippingCost ?? o?.shipping ?? 0) || 0,
+            deliveryPartnerName: String(
+              o?.deliveryPartnerName ?? o?.deliveryService ?? ""
+            ).trim(),
             shippingInfo: shipping,
             paymentMethod: normalizeCheckoutPaymentMethod(o?.paymentMethod),
             savedAt: new Date().toISOString(),
@@ -1820,6 +1844,8 @@ export function Checkout({
         shipping: shippingFee + codFeeAmount,
         deliveryPartnerId: logisticsQuote?.partner.id || null,
         deliveryPartnerName: logisticsQuote?.partner.name || null,
+        deliveryService: logisticsQuote?.partner.name || null,
+        deliveryServiceLogo: logisticsQuote?.partner.logo || null,
         estimatedDelivery: estimatedDeliveryLabel,
         codFee: codFeeAmount,
         couponCode: appliedCoupon?.campaign?.code || null,
@@ -2066,6 +2092,7 @@ export function Checkout({
     setConfirmedItems(checkoutItems);
     setConfirmedTotal(finalTotal);
     setConfirmedShippingFee(shippingFee + codFeeAmount);
+    setConfirmedDeliveryPartnerName(logisticsQuote?.partner.name || "");
     setConfirmedOrderNote(orderNote);
     setConfirmedCoupon(appliedCoupon);
     setConfirmedDiscount(discountAmount);
@@ -2115,6 +2142,8 @@ export function Checkout({
         shipping: shippingFee + codFeeAmount,
         deliveryPartnerId: logisticsQuote?.partner.id || null,
         deliveryPartnerName: logisticsQuote?.partner.name || null,
+        deliveryService: logisticsQuote?.partner.name || null,
+        deliveryServiceLogo: logisticsQuote?.partner.logo || null,
         estimatedDelivery: estimatedDeliveryLabel,
         codFee: codFeeAmount,
         date: new Date().toISOString(),
@@ -2340,6 +2369,8 @@ export function Checkout({
         orderNote,
         coupon: appliedCoupon,
         discount: discountAmount,
+        shippingFee: shippingFee + codFeeAmount,
+        deliveryPartnerName: logisticsQuote?.partner.name || "",
         shippingInfo: { ...shippingInfo },
         paymentMethod,
         savedAt: new Date().toISOString(),
@@ -2454,6 +2485,13 @@ export function Checkout({
                       : t("checkout.free")}
                   </span>
                 </div>
+
+                {confirmedDeliveryPartnerName && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">{t("checkout.deliveryPartner")}</span>
+                    <span className="font-medium text-slate-700">{confirmedDeliveryPartnerName}</span>
+                  </div>
+                )}
                 
                 <div className="flex justify-between border-t border-slate-200 pt-2">
                   <span className="text-base font-semibold text-slate-900">{t("checkout.total")}</span>
@@ -2530,6 +2568,12 @@ export function Checkout({
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{t("checkout.email")}</p>
                     <p className="text-sm font-medium text-slate-900 truncate">{resolveOrderEmail()}</p>
+                  </div>
+                )}
+                {confirmedDeliveryPartnerName && (
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{t("checkout.deliveryPartner")}</p>
+                    <p className="text-sm font-medium text-slate-900">{confirmedDeliveryPartnerName}</p>
                   </div>
                 )}
                 <div className="col-span-2">

@@ -75,6 +75,7 @@ interface OrderItem {
   notes?: string;
   deliveryService?: string;
   deliveryServiceLogo?: string;
+  shippingFee?: number;
   paymentMethod?: "credit-card" | "cod" | "bank-transfer" | "kbz-qr" | "kbz-pwa";
   kpay?: unknown;
   timeline: {

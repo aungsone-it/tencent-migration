@@ -12,15 +12,25 @@ export function toInvoiceSheetOrder(order: {
   total: number | string;
   subtotal?: number;
   discount?: number;
+  shippingFee?: number | string;
+  shippingCost?: number | string;
+  shipping?: number | string;
   couponCode?: string;
   notes?: string;
   vendor?: string;
   vendorName?: string;
   storeName?: string;
+  deliveryService?: string;
+  deliveryPartnerName?: string;
 }): InvoiceSheetOrder {
   const vendorLabel = String(
     order.vendorName || order.vendor || order.storeName || ""
   ).trim();
+  const deliveryService = String(
+    order.deliveryService || order.deliveryPartnerName || ""
+  ).trim();
+  const shippingFee =
+    order.shippingFee ?? order.shippingCost ?? order.shipping ?? 0;
 
   return {
     orderNumber: order.orderNumber,
@@ -33,10 +43,13 @@ export function toInvoiceSheetOrder(order: {
     total: order.total,
     subtotal: order.subtotal,
     discount: order.discount,
+    shippingFee,
     couponCode: order.couponCode,
     notes: order.notes,
     vendor: vendorLabel || order.vendor,
     vendorName: order.vendorName,
     storeName: order.storeName,
+    deliveryService: deliveryService || undefined,
+    deliveryPartnerName: deliveryService || undefined,
   };
 }

@@ -197,6 +197,7 @@ interface OrderItem {
   notes?: string;
   deliveryService?: string;
   deliveryServiceLogo?: string;
+  shippingFee?: number;
   paymentMethod?: "credit-card" | "cod" | "bank-transfer" | "kbz-qr" | "kbz-pwa";
   timeline: {
     status: string;
@@ -635,8 +636,10 @@ function mapApiOrdersToOrderItems(apiOrders: any[]): OrderItem[] {
     country: shipping.country,
     trackingNumber: order.trackingNumber,
     notes: order.notes,
-    deliveryService: order.deliveryService,
+    deliveryService: order.deliveryService || order.deliveryPartnerName,
     deliveryServiceLogo: order.deliveryServiceLogo,
+    shippingFee:
+      parseFloat(String(order.shippingFee ?? order.shippingCost ?? order.shipping ?? 0)) || 0,
     paymentMethod: deriveOrderPaymentMethodKey(order),
     kpay: order.kpay,
     timeline: [
@@ -1633,6 +1636,16 @@ export function Orders({
                         <Printer className="w-4 h-4 mr-2" />
                         {t("orders.print")} ({selectedOrders.length})
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleBulkDelete}
+                        disabled={isDeletingOrders}
+                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {t("orders.delete")} ({selectedOrders.length})
+                      </Button>
                     </>
                   )}
                   {hasActiveFilters && (
@@ -1641,17 +1654,6 @@ export function Orders({
                       {t("orders.clearFilters")}
                     </Button>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleBulkDelete}
-                    disabled={isDeletingOrders || selectedOrders.length === 0}
-                    className="hidden border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    {t("orders.delete")}
-                    {selectedOrders.length > 0 ? ` (${selectedOrders.length})` : ""}
-                  </Button>
                   <Button variant="outline" size="sm" onClick={exportOrders}>
                     <Download className="w-4 h-4 mr-2" />
                     {t("orders.export")}

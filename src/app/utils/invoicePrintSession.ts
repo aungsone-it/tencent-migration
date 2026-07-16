@@ -122,6 +122,12 @@ export const INVOICE_PRINT_STYLES = `
     margin-top: 0.8vw !important;
   }
 
+  body.invoice-print-active .delivery-line {
+    font-size: max(3.1mm, 2.3vw) !important;
+    margin-top: 0.8vw !important;
+    font-weight: 600 !important;
+  }
+
   body.invoice-print-active .shipping-section {
     margin-bottom: 2.6vw !important;
     padding-bottom: 2vw !important;
@@ -178,6 +184,16 @@ export const INVOICE_PRINT_STYLES = `
   body.invoice-print-active .subtotal-row,
   body.invoice-print-active .discount-row {
     margin-bottom: 0.8vw !important;
+  }
+
+  body.invoice-print-active .delivery-company-row {
+    margin-bottom: 0.4vw !important;
+  }
+
+  body.invoice-print-active .delivery-company-label {
+    font-size: max(3.1mm, 2.3vw) !important;
+    font-weight: 600 !important;
+    color: #333 !important;
   }
 
   body.invoice-print-active .total-row {
@@ -349,6 +365,12 @@ export const INVOICE_PRINT_STYLES = `
   color: #000;
 }
 
+.delivery-line {
+  margin: 2px 0 0 0;
+  color: #000;
+  font-weight: 600;
+}
+
 .items-table {
   width: 100%;
   border-collapse: collapse;
@@ -423,10 +445,20 @@ export const INVOICE_PRINT_STYLES = `
 
 .subtotal-row,
 .discount-row,
-.total-row {
+.total-row,
+.delivery-company-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.delivery-company-row {
+  margin-bottom: 2px;
+}
+
+.delivery-company-label {
+  font-weight: 600;
+  color: #333;
 }
 
 .subtotal-row,

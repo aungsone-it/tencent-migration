@@ -285,11 +285,6 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     const accountSwitched = Boolean(prevSynced && prevSynced !== emailNorm);
     const force = opts.force || accountSwitched;
 
-    if (!silent && !force) {
-      const cached = readLocalChatMessages<Message>(storageKey);
-      if (cached?.length) setMessages(cached);
-    }
-
     if (!silent) setLoading(true);
     try {
       const response = (await chatApi.getHistory({
@@ -336,16 +331,22 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     await syncFromServer({ silent: true, force: false });
   };
 
-  // Signed-in: show local cache immediately, reconcile with DB in background.
+  // Signed-in: reconcile with DB when thread/session changes (not on every open/close — avoids
+  // overwriting realtime messages with a stale localStorage snapshot before debounce flushes).
   useEffect(() => {
     if (!hasActiveChatSession(vendorId, isAuthenticated)) return;
     const email = readMigooCustomerEmail() || (customerEmail || "").trim();
     if (!email) return;
-    const storageKey = chatMessagesStorageKey(vendorId, email);
-    const cached = readLocalChatMessages<Message>(storageKey);
-    if (cached?.length) setMessages(cached);
-    void syncFromServer({ silent: !isOpen, force: false });
-  }, [conversationId, isOpen, isCustomerAuthenticated, isAuthenticated, customerEmail, vendorId]);
+    void syncFromServer({ silent: true, force: false });
+  }, [conversationId, isCustomerAuthenticated, isAuthenticated, customerEmail, vendorId]);
+
+  // Full refresh when the panel opens so the thread matches the server.
+  useEffect(() => {
+    if (!isOpen || !hasActiveChatSession(vendorId, isAuthenticated)) return;
+    const email = readMigooCustomerEmail() || (customerEmail || "").trim();
+    if (!email || !conversationId) return;
+    void syncFromServer({ silent: false, force: false });
+  }, [isOpen, isAuthenticated, vendorId, conversationId, customerEmail]);
 
   // Realtime is primary; reconcile with server when tab becomes visible (missed deltas / offline).
   useEffect(() => {

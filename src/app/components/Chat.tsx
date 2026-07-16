@@ -570,6 +570,36 @@ export function Chat({
     []
   );
 
+  const resolveActiveThreadId = useCallback((): string | null => {
+    const sid = selectedConversationRef.current;
+    if (!sid) return null;
+    const row = findConversationRow(
+      conversationsRef.current,
+      sid,
+      handoffPinnedConversationRef.current
+    );
+    return row?.id ?? sid;
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    pollingIntervalRef.current = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void loadConversations("silent");
+      const threadId = resolveActiveThreadId();
+      if (threadId) {
+        void loadMessages(threadId, true, false);
+      }
+    }, POLLING_INTERVALS_MS.ADMIN_CHAT_INBOX_POLL);
+  }, [loadMessages, resolveActiveThreadId, stopPolling]);
+
   // CloudBase realtime Broadcast: inbox sidebar (merge payloads to avoid list refetch) + thread messages
   useEffect(() => {
     const scheduleFullInboxFetch = () => {
@@ -649,7 +679,10 @@ export function Chat({
             resolveConversationChannelIds(conversationsRef.current, sel)[0] ?? sel;
           setMessages((prev) => {
             const sorted = appendUniqueMessage(prev, liveMsg);
-            if (cacheKey) chatAdminMessagesCache.set(cacheKey, sorted);
+            if (cacheKey) {
+              chatAdminMessagesCache.set(cacheKey, sorted);
+              writeAdminThreadLocal(cacheKey, sorted);
+            }
             return sorted;
           });
         }
@@ -692,7 +725,10 @@ export function Chat({
         resolveConversationChannelIds(conversationsRef.current, sel)[0] ?? sel;
       setMessages((prev) => {
         const sorted = appendUniqueMessage(prev, m);
-        if (cacheKey) chatAdminMessagesCache.set(cacheKey, sorted);
+        if (cacheKey) {
+          chatAdminMessagesCache.set(cacheKey, sorted);
+          writeAdminThreadLocal(cacheKey, sorted);
+        }
         return sorted;
       });
 
@@ -757,24 +793,26 @@ export function Chat({
     }
   }, [initialCustomer]);
 
-  // Load thread messages when the *selected* conversation changes — not when the inbox list
-  // is patched (e.g. after broadcastInboxPing merge), or a silent refetch can overwrite the
-  // optimistic admin reply with a slightly stale GET.
-  const prevSelectedConversationRef = useRef<string | null>(null);
+  // Load thread messages when selection or inbox row becomes available — skip when the inbox
+  // list is patched for the same thread (realtime ping) so optimistic replies aren't overwritten.
+  const loadedThreadKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedConversation) {
-      prevSelectedConversationRef.current = null;
+      loadedThreadKeyRef.current = null;
       return;
     }
+
     const selectedRow = findConversationRow(
-      conversations,
+      conversationsRef.current,
       selectedConversation,
       handoffPinnedConversationRef.current
     );
     if (!selectedRow) return;
-    const canonicalConversationId = selectedRow.id;
 
-    prevSelectedConversationRef.current = selectedConversation;
+    const canonicalConversationId = selectedRow.id;
+    const threadKey = `${selectedConversation}::${canonicalConversationId}`;
+    if (loadedThreadKeyRef.current === threadKey) return;
+    loadedThreadKeyRef.current = threadKey;
 
     const cached =
       getCachedThreadMessages(canonicalConversationId) ??
@@ -784,9 +822,11 @@ export function Chat({
     if (cached !== undefined) {
       setMessages(cached);
       setLoadingMessages(false);
+      void loadMessages(canonicalConversationId, true, true);
+      return;
     }
-    void loadMessages(canonicalConversationId, cached !== undefined, true);
-  }, [conversations, selectedConversation, loadMessages]);
+    void loadMessages(canonicalConversationId, false, true);
+  }, [selectedConversation, conversations, loadMessages]);
 
   // Staff sign-in / account switch: localStorage for speed; DB on new device or different admin.
   useEffect(() => {
@@ -925,6 +965,7 @@ export function Chat({
         if (!match) {
           primeCachedThreadMessages(idToUse, []);
         }
+        loadedThreadKeyRef.current = null;
         setSelectedConversation(idToUse);
         if (cancelled) return;
       } catch (e) {
@@ -961,7 +1002,7 @@ export function Chat({
     }
     startPolling();
     return () => stopPolling();
-  }, [selectedConversation, docVisible]);
+  }, [selectedConversation, docVisible, startPolling, stopPolling]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -972,8 +1013,8 @@ export function Chat({
       visTimer = window.setTimeout(() => {
         visTimer = null;
         void loadConversationsRef.current();
-        const sid = selectedConversationRef.current;
-        if (sid) void loadMessages(sid, true, true);
+        const threadId = resolveActiveThreadId();
+        if (threadId) void loadMessages(threadId, true, false);
       }, 900);
     };
     document.addEventListener("visibilitychange", onVis);
@@ -981,25 +1022,7 @@ export function Chat({
       document.removeEventListener("visibilitychange", onVis);
       if (visTimer) clearTimeout(visTimer);
     };
-  }, [loadMessages]);
-
-  const startPolling = () => {
-    stopPolling(); // Clear any existing interval
-    pollingIntervalRef.current = window.setInterval(() => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      void loadConversations("silent");
-      if (selectedConversation) {
-        loadMessages(selectedConversation, true, "auto"); // messages only; unread handled on open / send
-      }
-    }, POLLING_INTERVALS_MS.ADMIN_CHAT_INBOX_POLL);
-  };
-
-  const stopPolling = () => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
-  };
+  }, [loadMessages, resolveActiveThreadId]);
 
   // 🔥 CLEAR ALL CHAT HISTORY (per-conversation deletes — same as manual delete; no bulk admin secret required)
   const clearAllHistory = async () => {
@@ -1070,15 +1093,10 @@ export function Chat({
 
   const handleSelectConversation = (conversationId: string) => {
     chatAdminSelectedConversationCache = conversationId;
-    setSelectedConversation(conversationId);
-    const cached = getCachedThreadMessages(conversationId);
-    if (cached !== undefined) {
-      setMessages(cached);
-      setLoadingMessages(false);
-      void loadMessages(conversationId, true, true);
-      return;
+    if (selectedConversationRef.current !== conversationId) {
+      loadedThreadKeyRef.current = null;
     }
-    void loadMessages(conversationId, false, true);
+    setSelectedConversation(conversationId);
   };
 
   const handleSendMessage = async () => {
@@ -1111,9 +1129,9 @@ export function Chat({
       if (response.success && response.message) {
         // Add message to local state immediately
         setMessages((prev) => {
-          const next = [...prev, response.message];
-          chatAdminMessagesCache.set(canonicalConversationId, next);
-          return next;
+          const sorted = appendUniqueMessage(prev, response.message);
+          chatAdminMessagesCache.set(canonicalConversationId, sorted);
+          return sorted;
         });
         setMessageInput("");
         setSelectedImage(null);

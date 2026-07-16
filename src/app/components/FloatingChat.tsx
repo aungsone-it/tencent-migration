@@ -120,7 +120,7 @@ function resolveChatParticipant(): ChatParticipant {
     email: guestEmail,
     phone: readGuestChatPhone(),
     isGuest: true,
-    profileImage: guestChatFlatAvatarUrl(guestEmail),
+    profileImage: guestChatFlatAvatarUrl(guestEmail, guestDisplayName(guestId)),
   };
 }
 

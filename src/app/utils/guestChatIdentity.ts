@@ -176,9 +176,16 @@ function guestChatProfileHash(seed: string): number {
   return hash;
 }
 
+/** Prefer #000001 display id for stable pixel-art; fall back to guest email. */
+export function guestChatAvatarSeed(customerEmail: string, customerName?: unknown): string {
+  const code = parseGuestIdFromCustomerName(customerName);
+  if (code) return `#${code}`;
+  return String(customerEmail || "guest").trim().toLowerCase();
+}
+
 /** Same Dicebear pixel-art avatars used across Migoo (staff, customers, guests). */
-export function guestChatFlatAvatarUrl(customerEmail: string): string {
-  const seed = String(customerEmail || "guest").trim().toLowerCase();
+export function guestChatFlatAvatarUrl(customerEmail: string, customerName?: unknown): string {
+  const seed = guestChatAvatarSeed(customerEmail, customerName);
   return `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(seed)}`;
 }
 
@@ -350,7 +357,7 @@ export function resolveGuestChatAvatarUrl(conv: {
   customerName?: unknown;
 }): string {
   const email = String(conv.customerEmail || "").trim();
-  if (isGuestChatEmail(email)) return guestChatFlatAvatarUrl(email);
+  if (isGuestChatEmail(email)) return guestChatFlatAvatarUrl(email, conv.customerName);
   const stored = String(conv.customerProfileImage || "").trim();
   if (stored && !stored.startsWith("data:")) return stored;
   const seed = String(conv.customerName || email || "customer").trim();

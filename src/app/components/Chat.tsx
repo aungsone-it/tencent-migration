@@ -46,7 +46,7 @@ import {
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
 import { getCachedAdminVendorsForProductList } from "../utils/module-cache";
 import { buildVendorDisplayLookup, resolveChatVendorLabel } from "../utils/vendorDisplay";
-import { adminChatContactLabel, enrichGuestConversationsWithDisplayIds, guestChatLocalAvatarDataUri, isGuestChatEmail, purgeGuestChatClientData, resolveGuestChatCustomerLabel, resolveGuestChatAvatarUrl, pickGuestCustomerNameForInbox } from "../utils/guestChatIdentity";
+import { adminChatContactLabel, enrichGuestConversationsWithDisplayIds, isGuestChatEmail, purgeGuestChatClientData, resolveGuestChatCustomerLabel, resolveGuestChatAvatarUrl, pickGuestCustomerNameForInbox } from "../utils/guestChatIdentity";
 
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
@@ -117,24 +117,12 @@ function ChatContactAvatar({
 }) {
   const label = resolveGuestChatCustomerLabel(conv);
   const box = size === "sm" ? "w-10 h-10" : "w-12 h-12";
-  const email = String(conv.customerEmail || "").trim();
-  const isGuest = isGuestChatEmail(email);
-  const initialSrc = resolveGuestChatAvatarUrl(conv);
-  const [src, setSrc] = useState(initialSrc);
-
-  useEffect(() => {
-    setSrc(initialSrc);
-  }, [initialSrc]);
 
   return (
     <img
-      src={src}
+      src={resolveGuestChatAvatarUrl(conv)}
       alt={label}
       className={`${box} rounded-full object-cover bg-slate-100 shrink-0`}
-      onError={() => {
-        if (!isGuest || src.startsWith("data:")) return;
-        setSrc(guestChatLocalAvatarDataUri(email));
-      }}
     />
   );
 }

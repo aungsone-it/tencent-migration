@@ -5092,12 +5092,16 @@ async function reconcileReadModelOrdersPage(
       .toLowerCase()
       .replace(/\s+/g, "-");
     if (st === "pending") statusDrops.pending += 1;
-    else if (st === "processing") statusDrops.processing += 1;
+    else if (st === "processing" || st === "ready-to-ship") statusDrops.processing += 1;
     else if (st === "fulfilled") statusDrops.fulfilled += 1;
     else if (st === "cancelled") statusDrops.cancelled += 1;
 
     const num = String(row.orderNumber || "").trim();
-    void deleteOrderReadModel(String(row.id || "").trim(), num || undefined);
+    try {
+      await deleteOrderReadModel(String(row.id || "").trim(), num || undefined, { strict: true });
+    } catch (readModelErr) {
+      console.warn(`[orders] reconcile: failed to purge SQL row ${lookup}:`, readModelErr);
+    }
   }
 
   if (removed === 0) return body;
@@ -6458,14 +6462,32 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
       await withTimeout(deletePwaCheckoutDraft(merchantOrderId), 5000).catch(() => {});
     }
 
-    // Best-effort SQL cleanup — KV is source of truth; list reconcile also drops ghosts.
-    await deleteOrderReadModel(canonicalId, canonicalOrderNumber, { strict: false });
+    const verifyLookup = canonicalOrderNumber || canonicalId || trimmedId;
+    const stillThere = verifyLookup ? await resolveOrderStorage(verifyLookup) : null;
+    if (stillThere) {
+      console.error(`❌ Order still in KV after delete: ${verifyLookup}`);
+      return c.json(
+        { error: "Failed to delete order", message: "Order still exists in storage" },
+        500,
+      );
+    }
+
+    // Purge SQL read-model rows so paginated admin list does not resurrect deleted orders on refresh.
+    try {
+      await deleteOrderReadModel(canonicalId, canonicalOrderNumber, { strict: true });
+    } catch (readModelErr) {
+      console.warn(
+        `⚠️ SQL read-model delete failed for ${canonicalOrderNumber || canonicalId}:`,
+        readModelErr,
+      );
+    }
 
     // Clear cache when order is deleted
     clearCache('orders_minimal');
     
     return c.json({ 
       success: true,
+      deleted: true,
       message: "Order deleted successfully"
     });
   } catch (error) {

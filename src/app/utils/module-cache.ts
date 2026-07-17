@@ -1109,7 +1109,9 @@ export function adminOrdersPageCacheKey(p: AdminOrdersPageParams): string {
   return `${ADMIN_ORDERS_PAGE_CACHE_PREFIX}p${p.page}-ps${pageSize}-st-${p.status || "all"}-pay-${p.payment || "all"}-v-${encodeURIComponent(p.vendor || "all")}-df-${encodeURIComponent(p.dateFrom || "")}-dt-${encodeURIComponent(p.dateTo || "")}-s-${p.sort || "newest"}-q-${encodeURIComponent(qn)}`;
 }
 
-export async function fetchAdminOrdersPage(params: AdminOrdersPageParams): Promise<AdminOrdersPagePayload> {
+export async function fetchAdminOrdersPage(
+  params: AdminOrdersPageParams & { bustCache?: boolean },
+): Promise<AdminOrdersPagePayload> {
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? ADMIN_ORDERS_PAGE_DEFAULT));
   const sp = new URLSearchParams();
   sp.set("page", String(Math.max(1, params.page)));
@@ -1122,6 +1124,7 @@ export async function fetchAdminOrdersPage(params: AdminOrdersPageParams): Promi
   if (params.dateFrom) sp.set("dateFrom", params.dateFrom);
   if (params.dateTo) sp.set("dateTo", params.dateTo);
   if (params.sort) sp.set("sort", params.sort);
+  if (params.bustCache) sp.set("_", String(Date.now()));
   const response = await fetch(
     `${API_ROOT}/orders?${sp.toString()}`,
     { headers: cloudbaseHeaders() }
@@ -1203,6 +1206,7 @@ export async function getCachedAdminOrdersPage(
       dateFrom,
       dateTo,
       sort,
+      bustCache: forceRefresh,
     }),
     forceRefresh
   );
@@ -2722,6 +2726,7 @@ export function removeAdminOrdersFromCaches(
 
   SmartCache.delete("badge_counts");
   if (typeof window !== "undefined") {
+    removePersistedKeysPrefix("migoo-ls-admin-orders-p1-");
     notifyAdminOrdersUpdated("remove-admin-orders", {
       removedCount: removed.length,
       pendingRemoved,

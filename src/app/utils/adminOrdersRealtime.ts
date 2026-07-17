@@ -3,8 +3,29 @@ const ADMIN_ORDERS_UPDATED_STORAGE_KEY = "migoo-admin-orders-updated-at";
 /** Set when order data changed on the server (storefront checkout, admin mutations, cache invalidation). */
 const SS_SUPER_ADMIN_FINANCES_STALE = "migoo-ss-super-admin-finances-stale-v1";
 
+export type AdminOrdersUpdatedStoragePayload = {
+  at: number;
+  reason?: string;
+};
+
 export function adminOrdersUpdatedStorageKey(): string {
   return ADMIN_ORDERS_UPDATED_STORAGE_KEY;
+}
+
+export function readAdminOrdersUpdatedStorageEvent(
+  raw: string | null | undefined,
+): AdminOrdersUpdatedStoragePayload | null {
+  if (raw == null || raw === "") return null;
+  try {
+    const parsed = JSON.parse(raw) as AdminOrdersUpdatedStoragePayload;
+    if (parsed && typeof parsed === "object" && typeof parsed.at === "number") {
+      return parsed;
+    }
+  } catch {
+    /* legacy numeric timestamp */
+  }
+  const at = Number(raw);
+  return Number.isFinite(at) ? { at } : null;
 }
 
 /** Super-admin Finances must not trust LS/module snapshot until the next network revalidation. */
@@ -55,7 +76,10 @@ export function notifyAdminOrdersUpdated(
   }
   const at = Date.now();
   try {
-    localStorage.setItem(ADMIN_ORDERS_UPDATED_STORAGE_KEY, String(at));
+    localStorage.setItem(
+      ADMIN_ORDERS_UPDATED_STORAGE_KEY,
+      JSON.stringify({ at, reason }),
+    );
   } catch {
     // Best effort only.
   }

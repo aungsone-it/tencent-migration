@@ -14,7 +14,10 @@ import {
   emptyRegionRate,
   emptyTownshipRate,
   countPartnerTownshipExceptions,
+  createPendingTownshipKey,
   formToPayload,
+  isPendingTownshipKey,
+  listSelectedTownshipKeys,
   logisticsApiErrorMessage,
   partnerToForm,
   sanitizePartnerForm,
@@ -140,7 +143,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
   const addTownshipException = (region: string) => {
     const current = form.regionRates[region];
     if (!current) return;
-    const used = new Set(Object.keys(current.townshipExceptions || {}));
+    const used = listSelectedTownshipKeys(current.townshipExceptions);
     const available = myanmarTownshipSelectOptions(region).filter((t) => !used.has(t));
     if (available.length === 0) {
       toast.error(t("logistics.form.allTownshipsUsed"));
@@ -154,7 +157,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
           ...prev.regionRates[region],
           townshipExceptions: {
             ...(prev.regionRates[region].townshipExceptions || {}),
-            [available[0]]: emptyTownshipRate(),
+            [createPendingTownshipKey()]: emptyTownshipRate(),
           },
         },
       },
@@ -554,15 +557,18 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                           <div className="space-y-2">
                             {Object.entries(rate.townshipExceptions || {}).map(
                               ([township, exception]) => {
-                                const usedElsewhere = new Set(
-                                  Object.keys(rate.townshipExceptions || {}).filter(
-                                    (k) => k !== township
-                                  )
+                                const usedElsewhere = listSelectedTownshipKeys(
+                                  rate.townshipExceptions
                                 );
+                                if (!isPendingTownshipKey(township)) {
+                                  usedElsewhere.delete(township);
+                                }
                                 const townshipOptions = myanmarTownshipSelectOptions(region).filter(
-                                  (option) =>
-                                    option === township || !usedElsewhere.has(option)
+                                  (option) => !usedElsewhere.has(option)
                                 );
+                                const selectedTownship = isPendingTownshipKey(township)
+                                  ? ""
+                                  : township;
                                 return (
                                   <div
                                     key={`${region}-${township}`}
@@ -571,7 +577,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                                     <div>
                                       <Label className="text-xs">{t("logistics.form.township")}</Label>
                                       <MyanmarSearchableSelect
-                                        value={township}
+                                        value={selectedTownship}
                                         onValueChange={(value) =>
                                           changeTownshipExceptionKey(region, township, value)
                                         }

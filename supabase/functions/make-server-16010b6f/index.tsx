@@ -48,6 +48,7 @@ import {
 } from "./admin_operation_guard.tsx";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import { applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
+import { slimOrderCreateBody } from "./order_create_slim.ts";
 import {
   mergeMetaCapiAccessTokenOnSave,
   queueMetaCapiPurchaseFromOrder,
@@ -6068,7 +6069,7 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     const parsedDiscount = body.discount ? (typeof body.discount === 'string' ? parseFloat(body.discount) : body.discount) : 0;
     
     const orderData = {
-      ...applyNormalizedShippingToOrderBody(body),
+      ...applyNormalizedShippingToOrderBody(slimOrderCreateBody(body)),
       id,
       total: parsedTotal,
       subtotal: parsedSubtotal,
@@ -6397,9 +6398,16 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
   try {
     const id = c.req.param("id");
 
-    const resolved = await resolveOrderStorage(id);
+    const trimmedId = String(id || "").trim();
+    const resolved = await resolveOrderStorage(trimmedId);
     if (!resolved) {
-      return c.json({ error: "Order not found" }, 404);
+      // KV missing — purge SQL read-model row so admin list can drop the ghost.
+      await deleteOrderReadModel(trimmedId, trimmedId, { strict: true });
+      clearCache("orders_minimal");
+      return c.json({
+        success: true,
+        message: "Order deleted successfully",
+      });
     }
     const { record: existingOrder, storageKey } = resolved;
     
@@ -6417,9 +6425,6 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
     
     const canonicalId = String(existingOrder?.id || "").trim();
     const canonicalOrderNumber = String(existingOrder?.orderNumber || "").trim();
-
-    // Remove read model first so a failed SQL delete does not leave KV deleted while the row still lists.
-    await deleteOrderReadModel(canonicalId, canonicalOrderNumber, { strict: true });
 
     // Delete canonical row + any duplicate legacy rows with same id/orderNumber.
     const deleteKeys = new Set<string>([storageKey]);
@@ -6452,7 +6457,10 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
     if (merchantOrderId) {
       await withTimeout(deletePwaCheckoutDraft(merchantOrderId), 5000).catch(() => {});
     }
-    
+
+    // Best-effort SQL cleanup — KV is source of truth; list reconcile also drops ghosts.
+    await deleteOrderReadModel(canonicalId, canonicalOrderNumber, { strict: false });
+
     // Clear cache when order is deleted
     clearCache('orders_minimal');
     

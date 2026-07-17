@@ -47,6 +47,7 @@ import {
   KPAY_PWA_PENDING_STORAGE_KEY,
 } from "../utils/kpayClient";
 import { buildOrderNumber, formatOrderNumberDisplay } from "../utils/orderNumber";
+import { slimOrderCreatePayload } from "../utils/orderCreatePayload";
 import { resolveVendorSubdomainStoreSlug } from "../utils/vendorSubdomainHooks";
 import { useResolvedVendorHostSlug } from "../utils/vendorHostResolution";
 import {
@@ -58,6 +59,7 @@ import {
   readKpaySummaryStorefrontOrigin,
   resolveUnifiedKpayPostPaymentSummaryPath,
   resolveVendorStorefrontHomeUrl,
+  resolveVendorStorefrontHomeUrlFromLocation,
   resolveVendorSummaryPath,
 } from "../utils/vendorCheckoutPaths";
 import {
@@ -542,14 +544,16 @@ async function createStorefrontOrderFromPwaDraft(params: {
   vendorId: string | undefined;
   effectiveUserId: string | null | undefined;
 }): Promise<{ ok: boolean; message?: string }> {
-  const payload = buildPwaFinalizeOrderPayload(
-    params.orderId,
-    params.d,
-    params.session,
-    params.prepayId,
-    params.storeName,
-    params.vendorId,
-    params.effectiveUserId,
+  const payload = slimOrderCreatePayload(
+    buildPwaFinalizeOrderPayload(
+      params.orderId,
+      params.d,
+      params.session,
+      params.prepayId,
+      params.storeName,
+      params.vendorId,
+      params.effectiveUserId,
+    ),
   );
   const createResponse = await fetch(
     `${cloudbaseApiBaseUrl}/orders`,
@@ -833,17 +837,33 @@ export function Checkout({
   const displayStoreName =
     storeName || vendorName || summaryOrderVendor || "";
 
+  const vendorOnDedicatedHost = vendorSubdomainSlug != null || customHostSlug != null;
+  const checkoutStorefrontHomeUrl = useMemo(
+    () =>
+      resolveVendorStorefrontHomeUrlFromLocation({
+        pathname: location.pathname,
+        storeSlug: storeName || vendorId || vendorName,
+        onVendorHost: vendorOnDedicatedHost,
+      }),
+    [location.pathname, storeName, vendorId, vendorName, vendorOnDedicatedHost],
+  );
+
+  useEffect(() => {
+    if (!checkoutStorefrontHomeUrl) return;
+    persistKpaySummaryStorefrontOrigin(checkoutStorefrontHomeUrl);
+    setSummaryStorefrontOrigin((prev) => prev || checkoutStorefrontHomeUrl);
+  }, [checkoutStorefrontHomeUrl]);
+
   useEffect(() => {
     if (!onSummaryRoute) return;
 
     const slug = storeName || vendorId || summaryOrderVendor || null;
     const originHint =
       summaryStorefrontOrigin?.trim() ||
+      checkoutStorefrontHomeUrl ||
       pwaPendingContext?.storefrontOrigin?.trim() ||
-      (vendorSubdomainSlug != null || customHostSlug != null
-        ? typeof window !== "undefined"
-          ? window.location.origin
-          : null
+      (vendorOnDedicatedHost && typeof window !== "undefined"
+        ? window.location.origin
         : null);
     if (!originHint && !slug) return;
 
@@ -870,19 +890,28 @@ export function Checkout({
     vendorName,
     vendorSubdomainSlug,
     customHostSlug,
+    vendorOnDedicatedHost,
+    checkoutStorefrontHomeUrl,
     pwaPendingContext?.storefrontOrigin,
   ]);
 
   const handleContinueShopping = useCallback(() => {
+    if (onSummaryRoute && !unifiedSummaryRoute) {
+      if (checkoutStorefrontHomeUrl) {
+        persistKpaySummaryStorefrontOrigin(checkoutStorefrontHomeUrl);
+      }
+      onBack();
+      return;
+    }
+
     if (onSummaryRoute) {
       const storefrontOrigin =
         summaryStorefrontOrigin?.trim() ||
+        checkoutStorefrontHomeUrl ||
         pwaPendingContext?.storefrontOrigin?.trim() ||
         readKpaySummaryStorefrontOrigin() ||
-        (vendorSubdomainSlug != null || customHostSlug != null
-          ? typeof window !== "undefined"
-            ? window.location.origin
-            : null
+        (vendorOnDedicatedHost && typeof window !== "undefined"
+          ? window.location.origin
           : null);
       if (storefrontOrigin) {
         persistKpaySummaryStorefrontOrigin(storefrontOrigin);
@@ -909,6 +938,9 @@ export function Checkout({
     summaryStorefrontOrigin,
     summaryStorefrontHomeUrl,
     pwaPendingContext?.storefrontOrigin,
+    vendorOnDedicatedHost,
+    checkoutStorefrontHomeUrl,
+    unifiedSummaryRoute,
     vendorSubdomainSlug,
     customHostSlug,
     onBack,
@@ -1838,7 +1870,13 @@ export function Checkout({
       const originPath =
         typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       const storefrontOrigin =
-        typeof window !== "undefined" ? window.location.origin : "";
+        checkoutStorefrontHomeUrl ||
+        resolveVendorStorefrontHomeUrlFromLocation({
+          pathname: location.pathname,
+          storeSlug: storeName || vendorId || vendorName,
+          onVendorHost: vendorOnDedicatedHost,
+        }) ||
+        (typeof window !== "undefined" ? window.location.origin : "");
       const draftOrder = {
         userId: effectiveUser?.id ?? null,
         customerName: shippingInfo.fullName,
@@ -2196,11 +2234,10 @@ export function Checkout({
           merchantOrderId: latestKpaySession?.merchantOrderId || orderNum,
           status: latestKpaySession?.status || "pending",
           providerStatus: latestKpaySession?.providerStatus || "",
-          qrContent: latestKpaySession?.qrContent || "",
-          qrImageUrl: latestKpaySession?.qrImageUrl || "",
-          payUrl: latestKpaySession?.payUrl || "",
         };
       }
+
+      const createPayload = slimOrderCreatePayload(orderData);
 
       // Save to backend
       const response = await fetch(
@@ -2213,7 +2250,7 @@ export function Checkout({
 
             ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
-          body: JSON.stringify(orderData),
+          body: JSON.stringify(createPayload),
         }
       );
 
@@ -2389,6 +2426,9 @@ export function Checkout({
       // non-fatal; summary route can still render in-memory state
     }
     setStep("success");
+    if (checkoutStorefrontHomeUrl) {
+      persistKpaySummaryStorefrontOrigin(checkoutStorefrontHomeUrl);
+    }
     if (location.pathname !== summaryPath) {
       navigate(summaryPath, { replace: true });
     }

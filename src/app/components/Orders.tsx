@@ -19,6 +19,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import {
@@ -134,6 +135,48 @@ function countOrderStatusBreakdown(rows: OrderItem[]) {
     fulfilled: rows.filter((o) => normalizeOrderListStatus(o.status) === "fulfilled").length,
     cancelled: rows.filter((o) => normalizeOrderListStatus(o.status) === "cancelled").length,
   };
+}
+
+function countDeletedStatusDrops(rows: OrderItem[]) {
+  const drops = { pending: 0, processing: 0, fulfilled: 0, cancelled: 0 };
+  for (const order of rows) {
+    const st = normalizeOrderListStatus(order.status);
+    if (st === "pending") drops.pending += 1;
+    else if (st === "processing" || st === "ready-to-ship") drops.processing += 1;
+    else if (st === "fulfilled") drops.fulfilled += 1;
+    else if (st === "cancelled") drops.cancelled += 1;
+  }
+  return drops;
+}
+
+async function deleteOrderRow(
+  order: Pick<OrderItem, "id" | "orderNumber">,
+): Promise<{ ok: boolean; error?: string }> {
+  const candidates = [order.orderNumber, order.id]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const unique = [...new Set(candidates)];
+  let lastError = "Order not found";
+  for (const id of unique) {
+    try {
+      const res = (await ordersApi.delete(id)) as {
+        success?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (res?.success === true) return { ok: true };
+      lastError = res?.error || res?.message || "Delete rejected";
+    } catch (err) {
+      if (err instanceof ApiError) {
+        lastError = err.message || `Request failed (${err.statusCode})`;
+      } else if (err instanceof Error) {
+        lastError = err.message;
+      } else {
+        lastError = "Delete failed";
+      }
+    }
+  }
+  return { ok: false, error: lastError };
 }
 
 function aggregatesBreakdownLooksStale(
@@ -1017,7 +1060,8 @@ export function Orders({
       if (
         reason === "patch-admin-orders-status" ||
         reason === "kpay-refund-payment-updated" ||
-        reason === "pwa-order-recovered"
+        reason === "pwa-order-recovered" ||
+        reason === "remove-admin-orders"
       ) {
         return;
       }
@@ -1428,62 +1472,95 @@ export function Orders({
     window.URL.revokeObjectURL(url);
   };
 
-  const handleBulkDelete = async () => {
-    if (selectedOrders.length === 0) {
-      toast.error(t("orders.deleteSelectFirst") || "Select orders to delete first.");
-      return;
-    }
+  const performOrderDeletes = async (rowsToDelete: OrderItem[]) => {
+    if (rowsToDelete.length === 0) return;
 
-    const count = selectedOrders.length;
-    const confirmMsg =
-      t("orders.bulkDeleteConfirm")?.replace("{count}", String(count)) ||
-      `Delete ${count} selected order(s)? This cannot be undone.`;
-    if (!window.confirm(confirmMsg)) return;
-
+    const count = rowsToDelete.length;
+    const orderIds = rowsToDelete.map((order) => order.id);
     setIsDeletingOrders(true);
-    const orderIds = [...selectedOrders];
     const previousOrders = [...orders];
     const previousTotal = ordersTotal;
-    const deletedMeta = previousOrders
-      .filter((order) => orderIds.includes(order.id))
-      .map((order) => ({ orderId: order.id, orderNumber: order.orderNumber }));
+    const previousAggregates = ordersAggregates;
+    const deletedMeta = rowsToDelete.map((order) => ({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+    }));
 
     setOrders((prev) => prev.filter((order) => !orderIds.includes(order.id)));
-    setSelectedOrders([]);
+    setSelectedOrders((prev) => prev.filter((id) => !orderIds.includes(id)));
     setOrdersTotal((prev) => Math.max(0, prev - count));
+    setOrdersAggregates((agg) => {
+      if (!agg) return agg;
+      const drops = countDeletedStatusDrops(rowsToDelete);
+      const breakdown = agg.statusBreakdown;
+      return {
+        ...agg,
+        filteredCount: Math.max(0, (agg.filteredCount ?? count) - count),
+        statusBreakdown: breakdown
+          ? {
+              pending: Math.max(0, (breakdown.pending ?? 0) - drops.pending),
+              processing: Math.max(0, (breakdown.processing ?? 0) - drops.processing),
+              fulfilled: Math.max(0, (breakdown.fulfilled ?? 0) - drops.fulfilled),
+              cancelled: Math.max(0, (breakdown.cancelled ?? 0) - drops.cancelled),
+            }
+          : breakdown,
+      };
+    });
 
     try {
-      const results = await Promise.allSettled(orderIds.map((id) => ordersApi.delete(id)));
+      const results = await Promise.allSettled(rowsToDelete.map((order) => deleteOrderRow(order)));
       const succeededIds: string[] = [];
-      const failedIds: string[] = [];
+      const failedRows: OrderItem[] = [];
+      let lastError = "";
 
       results.forEach((result, index) => {
-        const id = orderIds[index];
-        if (result.status === "rejected") {
-          failedIds.push(id);
+        const row = rowsToDelete[index];
+        if (result.status === "fulfilled" && result.value.ok) {
+          succeededIds.push(row.id);
           return;
         }
-        if (result.value?.success !== true) {
-          failedIds.push(id);
-          return;
+        failedRows.push(row);
+        if (result.status === "fulfilled" && result.value.error) {
+          lastError = result.value.error;
         }
-        succeededIds.push(id);
       });
 
       if (succeededIds.length > 0) {
         removeAdminOrdersFromCaches(
-          deletedMeta.filter((row) => succeededIds.includes(row.orderId))
+          deletedMeta.filter((row) => succeededIds.includes(row.orderId)),
         );
         for (const id of succeededIds) pendingOrderStatusDrafts.delete(id);
       }
 
-      if (failedIds.length > 0) {
+      if (failedRows.length > 0) {
         setOrders(previousOrders.filter((order) => !succeededIds.includes(order.id)));
         setOrdersTotal(Math.max(0, previousTotal - succeededIds.length));
+        setOrdersAggregates((agg) => {
+          if (!agg) return agg;
+          const drops = countDeletedStatusDrops(failedRows);
+          const breakdown = agg.statusBreakdown;
+          return {
+            ...agg,
+            filteredCount: Math.max(0, (agg.filteredCount ?? 0) + failedRows.length),
+            statusBreakdown: breakdown
+              ? {
+                  pending: (breakdown.pending ?? 0) + drops.pending,
+                  processing: (breakdown.processing ?? 0) + drops.processing,
+                  fulfilled: (breakdown.fulfilled ?? 0) + drops.fulfilled,
+                  cancelled: (breakdown.cancelled ?? 0) + drops.cancelled,
+                }
+              : breakdown,
+          };
+        });
         const msg =
-          failedIds.length === orderIds.length
-            ? t("orders.bulkDeleteError") || "Failed to delete orders."
-            : `${failedIds.length} of ${orderIds.length} order delete(s) failed.`;
+          count === 1
+            ? lastError ||
+              t("orders.deleteOneError") ||
+              "Failed to delete order."
+            : failedRows.length === count
+              ? t("orders.bulkDeleteError") || "Failed to delete orders."
+              : `${failedRows.length} of ${count} order delete(s) failed.`;
         toast.error(msg);
         if (succeededIds.length === 0) {
           void loadOrders(true);
@@ -1492,22 +1569,36 @@ export function Orders({
       }
 
       toast.success(
-        t("orders.bulkDeleteSuccess")?.replace("{count}", String(count)) ||
-          `Deleted ${count} order${count === 1 ? "" : "s"}.`
+        count === 1
+          ? t("orders.deleteOneSuccess") || "Order deleted."
+          : t("orders.bulkDeleteSuccess")?.replace("{count}", String(count)) ||
+              `Deleted ${count} order${count === 1 ? "" : "s"}.`,
       );
-      onOrderUpdate?.();
     } catch (error: any) {
       console.error("Failed to delete orders:", error);
       setOrders(previousOrders);
       setOrdersTotal(previousTotal);
+      setOrdersAggregates(previousAggregates);
       toast.error(
-        t("orders.bulkDeleteError") ||
-          `Failed to delete orders: ${error?.message || "Unknown error"}`
+        count === 1
+          ? t("orders.deleteOneError") ||
+              `Failed to delete order: ${error?.message || "Unknown error"}`
+          : t("orders.bulkDeleteError") ||
+              `Failed to delete orders: ${error?.message || "Unknown error"}`,
       );
       void loadOrders(true);
     } finally {
       setIsDeletingOrders(false);
     }
+  };
+
+  const handleDeleteOrder = async (order: OrderItem) => {
+    const label = order.orderNumber || order.id;
+    const confirmMsg =
+      t("orders.deleteOneConfirm")?.replace("{order}", label) ||
+      `Delete order ${label}? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
+    await performOrderDeletes([order]);
   };
 
   const pageStatusBreakdown = countOrderStatusBreakdown(orders);
@@ -1668,16 +1759,6 @@ export function Orders({
                       <Button variant="outline" size="sm" onClick={handleBulkPrint}>
                         <Printer className="w-4 h-4 mr-2" />
                         {t("orders.print")} ({selectedOrders.length})
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleBulkDelete}
-                        disabled={isDeletingOrders}
-                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        {t("orders.delete")} ({selectedOrders.length})
                       </Button>
                     </>
                   )}
@@ -1924,6 +2005,15 @@ export function Orders({
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleStatusChange(order.id, "cancelled")}>
                                 {t("orders.markAsCancelled")}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={isDeletingOrders}
+                                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                                onClick={() => void handleDeleteOrder(order)}
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                {t("orders.delete")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>

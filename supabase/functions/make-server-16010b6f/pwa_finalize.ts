@@ -4,6 +4,7 @@
  */
 import * as kv from "./kv_store.tsx";
 import { normalizeOrderShippingFields, applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
+import { slimOrderCreateBody } from "./order_create_slim.ts";
 
 const DRAFT_KEY_PREFIX = "kpay_pwa_draft:";
 
@@ -267,7 +268,7 @@ async function createStorefrontOrderDirect(body: Record<string, unknown>): Promi
     : 0;
 
   const orderData = {
-    ...applyNormalizedShippingToOrderBody(body),
+    ...applyNormalizedShippingToOrderBody(slimOrderCreateBody(body)),
     id,
     total: parsedTotal,
     subtotal: parsedSubtotal,
@@ -312,7 +313,7 @@ async function postStorefrontOrder(body: Record<string, unknown>): Promise<{
       "Content-Type": "application/json",
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(slimOrderCreateBody(body)),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {

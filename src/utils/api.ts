@@ -425,7 +425,9 @@ export const ordersApi = {
    * Delete a single order
    */
   delete: async (id: string): Promise<ApiResponse<void>> => {
-    return apiClient.deleteWithRetry<ApiResponse<void>>(`/orders/${id}`);
+    return apiClient.deleteWithRetry<ApiResponse<void>>(
+      `/orders/${encodeURIComponent(String(id || "").trim())}`
+    );
   },
 
   /**

@@ -16,7 +16,6 @@ import { buildVendorStoreHomePath, resolveVendorPathSlug } from "./vendorStorePa
 import { API_BASE_URL } from "../../utils/api-client";
 import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import {
-  resolveActiveVendorSubdomainBase,
   resolvePrimaryPlatformApexHost,
   resolveVendorSubdomainApexFromHost,
   isBarePlatformApexHost,
@@ -212,15 +211,56 @@ export function hasKpaySummaryReturnContext(params: {
   return isUnifiedKpaySummaryPath(params.pathname);
 }
 
-function normalizeStorefrontOriginUrl(origin: string | null | undefined): string | null {
-  const raw = (origin || "").trim();
+/** Normalize a vendor storefront home URL (keeps `/vendor/:slug` on marketplace/path hosts). */
+function normalizeStorefrontHomeUrl(url: string | null | undefined): string | null {
+  const raw = (url || "").trim();
   if (!raw) return null;
   try {
-    const u = new URL(raw);
-    return `${u.origin}/`;
+    const base =
+      typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const u = new URL(raw.includes("://") ? raw : raw.startsWith("/") ? `${base}${raw}` : `${base}/${raw}`);
+    const path = u.pathname.replace(/\/+$/, "") || "";
+    return path ? `${u.origin}${path}/` : `${u.origin}/`;
   } catch {
     return null;
   }
+}
+
+/** @deprecated alias — stores full vendor home URL, not bare origin only */
+function normalizeStorefrontOriginUrl(origin: string | null | undefined): string | null {
+  return normalizeStorefrontHomeUrl(origin);
+}
+
+/** Where "Continue Shopping" should land for the current checkout host + path. */
+export function resolveVendorStorefrontHomeUrlFromLocation(params: {
+  pathname?: string;
+  storeSlug?: string | null;
+  onVendorHost?: boolean;
+}): string | null {
+  if (typeof window === "undefined") return null;
+
+  const pathname = params.pathname ?? window.location.pathname;
+  const onVendorHost =
+    params.onVendorHost ?? resolveVendorSubdomainHostContext(window.location.hostname).isVendorSubdomainHost;
+
+  if (onVendorHost) {
+    return normalizeStorefrontHomeUrl(window.location.origin);
+  }
+
+  const slug =
+    (params.storeSlug && String(params.storeSlug).trim()) ||
+    extractStoreSlugFromPathname(pathname);
+  if (slug) {
+    return normalizeStorefrontHomeUrl(
+      `${window.location.origin}${buildVendorStoreHomePath({
+        pathSlug: slug,
+        hostRootStorePaths: false,
+        useVendorDashPrefix: pathname.startsWith("/vendor-"),
+      })}`,
+    );
+  }
+
+  return normalizeStorefrontHomeUrl(window.location.origin);
 }
 
 /** Persist vendor storefront origin across pending-storage clear (Continue Shopping on unified `/summary`). */
@@ -229,14 +269,14 @@ export const KPAY_SUMMARY_STOREFRONT_ORIGIN_KEY = "migoo-kpay-summary-storefront
 export function readKpaySummaryStorefrontOrigin(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return normalizeStorefrontOriginUrl(sessionStorage.getItem(KPAY_SUMMARY_STOREFRONT_ORIGIN_KEY));
+    return normalizeStorefrontHomeUrl(sessionStorage.getItem(KPAY_SUMMARY_STOREFRONT_ORIGIN_KEY));
   } catch {
     return null;
   }
 }
 
 export function persistKpaySummaryStorefrontOrigin(origin: string | null | undefined): void {
-  const normalized = normalizeStorefrontOriginUrl(origin);
+  const normalized = normalizeStorefrontHomeUrl(origin);
   if (!normalized || typeof window === "undefined") return;
   try {
     sessionStorage.setItem(KPAY_SUMMARY_STOREFRONT_ORIGIN_KEY, normalized);
@@ -307,16 +347,16 @@ export function resolveLandingVendorStoreUrl(vendor: {
   return `/vendor/${encodeURIComponent(slug)}`;
 }
 
-/** Resolve vendor home URL: checkout origin → verified custom domain → subdomain → /vendor/:slug. */
+/** Resolve vendor home URL: saved checkout home → verified custom domain → subdomain → /vendor/:slug. */
 export async function resolveVendorStorefrontHomeUrl(params: {
   storeSlug?: string | null;
   storeName?: string | null;
   storefrontOrigin?: string | null;
 }): Promise<string> {
-  const fromOrigin =
-    normalizeStorefrontOriginUrl(params.storefrontOrigin) ||
+  const fromSession =
+    normalizeStorefrontHomeUrl(params.storefrontOrigin) ||
     readKpaySummaryStorefrontOrigin();
-  if (fromOrigin) return fromOrigin;
+  if (fromSession) return fromSession;
 
   const slugRaw =
     (params.storeSlug && params.storeSlug.trim()) ||
@@ -372,10 +412,10 @@ export function resolveUnifiedSummaryContinueShoppingTarget(params: {
   const callback = parsePwaCallbackInfo(qs.get("callback_info"));
 
   const origin =
-    normalizeStorefrontOriginUrl(params.storefrontOrigin) ||
+    normalizeStorefrontHomeUrl(params.storefrontOrigin) ||
     readKpaySummaryStorefrontOrigin() ||
-    normalizeStorefrontOriginUrl(pending?.storefrontOrigin) ||
-    normalizeStorefrontOriginUrl(callback?.storefrontOrigin);
+    normalizeStorefrontHomeUrl(pending?.storefrontOrigin) ||
+    normalizeStorefrontHomeUrl(callback?.storefrontOrigin);
 
   if (origin) return origin;
 
@@ -426,7 +466,7 @@ export async function navigateUnifiedSummaryContinueShopping(
     orderVendor: params.orderVendor,
   });
 
-  const preResolved = normalizeStorefrontOriginUrl(params.preResolvedHomeUrl);
+  const preResolved = normalizeStorefrontHomeUrl(params.preResolvedHomeUrl);
   let target = preResolved || syncTarget;
 
   if (!preResolved && (target === "/" || !target)) {
@@ -435,6 +475,16 @@ export async function navigateUnifiedSummaryContinueShopping(
       storeName: params.orderVendor || params.storeSlug,
       storefrontOrigin,
     });
+  }
+
+  if (!target || target === "/") {
+    const slug = params.storeSlug || params.orderVendor;
+    if (slug) {
+      target = buildVendorStoreHomePath({
+        pathSlug: slug,
+        hostRootStorePaths: false,
+      });
+    }
   }
 
   if (!target || target === "/") {

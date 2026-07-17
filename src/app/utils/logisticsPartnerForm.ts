@@ -38,6 +38,26 @@ export const emptyPartnerForm = (): PartnerForm => ({
   regionRates: {},
 });
 
+export const PENDING_TOWNSHIP_PREFIX = "__pending__:";
+
+export function createPendingTownshipKey(): string {
+  return `${PENDING_TOWNSHIP_PREFIX}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function isPendingTownshipKey(key: string): boolean {
+  return String(key || "").startsWith(PENDING_TOWNSHIP_PREFIX);
+}
+
+export function listSelectedTownshipKeys(
+  exceptions: Record<string, TownshipRateForm> | undefined
+): Set<string> {
+  const used = new Set<string>();
+  for (const key of Object.keys(exceptions || {})) {
+    if (!isPendingTownshipKey(key)) used.add(key);
+  }
+  return used;
+}
+
 function stripEmptyTownshipExceptions(form: PartnerForm): PartnerForm {
   const regionRates: Record<string, RegionRateForm> = {};
   for (const [region, rate] of Object.entries(form.regionRates)) {
@@ -45,6 +65,7 @@ function stripEmptyTownshipExceptions(form: PartnerForm): PartnerForm {
     for (const [township, exception] of Object.entries(rate.townshipExceptions || {})) {
       const costMin = String(exception?.costMin || "").trim();
       const costMax = String(exception?.costMax || "").trim();
+      if (isPendingTownshipKey(township) && !costMin && !costMax) continue;
       if (costMin || costMax) {
         townshipExceptions[township] = { costMin, costMax };
       }
@@ -64,7 +85,8 @@ function normalizeTownshipExceptionsForRegion(
 ): Record<string, TownshipRateForm> | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const out: Record<string, TownshipRateForm> = {};
-  for (const [township, rate] of Object.entries(raw)) {
+    for (const [township, rate] of Object.entries(raw)) {
+    if (isPendingTownshipKey(township)) continue;
     const key = normalizeTownshipKey(region, township) || String(township || "").trim();
     if (!key) continue;
     const costMin = String(rate?.costMin || "").trim();
@@ -162,6 +184,9 @@ export function validatePartnerForm(form: PartnerForm): string | null {
       const costMin = String(exception?.costMin || "").trim();
       const costMax = String(exception?.costMax || "").trim();
       if (!costMin && !costMax) continue;
+      if (isPendingTownshipKey(township)) {
+        return `Select a township for the ${region} exception`;
+      }
       if (!costMin) {
         return `Minimum shipping cost is required for ${township} (${region} exception)`;
       }

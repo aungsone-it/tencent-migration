@@ -8,6 +8,7 @@ import {
   getCachedAdminOrdersPayload,
   moduleCache,
   CACHE_KEYS,
+  syncPendingOrdersBadgeFromAdminCache,
   ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT,
   ADMIN_VENDOR_APPLICATIONS_UPDATED_STORAGE_KEY,
 } from '../utils/module-cache';
@@ -340,7 +341,23 @@ export function useBadgeCounts() {
     let ordersTimer: ReturnType<typeof setTimeout> | null = null;
     let vendorTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const queueOrdersRefresh = () => {
+    const queueOrdersRefresh = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ reason?: string; pendingOrders?: number }>).detail;
+      const reason = detail?.reason;
+      if (reason === "remove-admin-orders") {
+        const pending =
+          typeof detail?.pendingOrders === "number"
+            ? detail.pendingOrders
+            : syncPendingOrdersBadgeFromAdminCache();
+        if (pending != null) {
+          setBadgeCounts((prev) => {
+            const updated = { ...prev, orders: pending };
+            SmartCache.set("badge_counts", updated);
+            return updated;
+          });
+        }
+        return;
+      }
       if (ordersTimer) clearTimeout(ordersTimer);
       ordersTimer = setTimeout(() => {
         void loadBadgeCounts(true);

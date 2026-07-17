@@ -39,13 +39,17 @@ export function consumeSuperAdminFinancesSessionStale(): boolean {
 }
 
 /** Broadcast order mutations to this tab + other tabs (via storage event). */
-export function notifyAdminOrdersUpdated(reason = "orders-mutated"): void {
+export function notifyAdminOrdersUpdated(
+  reason = "orders-mutated",
+  extra?: Record<string, unknown>
+): void {
   if (typeof window === "undefined") return;
   if (
     reason === "storefront-order-created" ||
     reason === "storefront-checkout-order-created" ||
     reason === "invalidate-admin-orders-cache" ||
-    reason === "realtime-order-pulse"
+    reason === "realtime-order-pulse" ||
+    reason === "remove-admin-orders"
   ) {
     markSuperAdminFinancesSessionStale();
   }
@@ -55,5 +59,7 @@ export function notifyAdminOrdersUpdated(reason = "orders-mutated"): void {
   } catch {
     // Best effort only.
   }
-  window.dispatchEvent(new CustomEvent("adminOrdersUpdated", { detail: { at, reason } }));
+  window.dispatchEvent(
+    new CustomEvent("adminOrdersUpdated", { detail: { at, reason, ...extra } })
+  );
 }

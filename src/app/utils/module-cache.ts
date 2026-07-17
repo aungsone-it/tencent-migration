@@ -23,6 +23,7 @@ import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
 import { notifyAdminOrdersUpdated, isSuperAdminFinancesSessionStale } from "./adminOrdersRealtime";
+import { normalizeAdminOrderStatusForBadge } from "./normalizeOrderBadgeStatus";
 import {
   isVendorUncategorizedFilter,
   VENDOR_STORE_UNCATEGORIZED_SLUG,
@@ -2629,11 +2630,28 @@ function bumpStatusBreakdownDrop(
   else if (st === "cancelled") breakdown.cancelled += 1;
 }
 
+/** Recompute pending-order badge from the patched admin orders cache (no network). */
+export function syncPendingOrdersBadgeFromAdminCache(): number | null {
+  const payload = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
+  if (!payload?.orders || !Array.isArray(payload.orders)) return null;
+  return payload.orders.filter(
+    (order) =>
+      normalizeAdminOrderStatusForBadge(
+        (order as { status?: unknown })?.status
+      ) === "pending"
+  ).length;
+}
+
 /** Remove deleted orders from session caches without a full refetch (prevents SQL ghost rows flashing back). */
 export function removeAdminOrdersFromCaches(
-  removed: Array<{ orderId: string; orderNumber?: string }>
+  removed: Array<{ orderId: string; orderNumber?: string; status?: unknown }>
 ): void {
   if (removed.length === 0) return;
+
+  let pendingRemoved = 0;
+  for (const row of removed) {
+    if (normalizeAdminOrderStatusForBadge(row.status) === "pending") pendingRemoved += 1;
+  }
 
   const byId = new Set(removed.map((r) => String(r.orderId)));
   const byOrderNumber = new Set(
@@ -2704,7 +2722,11 @@ export function removeAdminOrdersFromCaches(
 
   SmartCache.delete("badge_counts");
   if (typeof window !== "undefined") {
-    notifyAdminOrdersUpdated("remove-admin-orders");
+    notifyAdminOrdersUpdated("remove-admin-orders", {
+      removedCount: removed.length,
+      pendingRemoved,
+      pendingOrders: syncPendingOrdersBadgeFromAdminCache(),
+    });
   }
 }
 

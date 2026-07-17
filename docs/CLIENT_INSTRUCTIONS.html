@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEXA Platform — Client Instructions</title>
+  <style>
+    :root {
+      --ink: #111827;
+      --muted: #4b5563;
+      --border: #e5e7eb;
+      --bg: #ffffff;
+      --surface: #f9fafb;
+      --accent: #1e3a5f;
+      --accent-light: #eef2f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 0 1.5rem 3rem;
+    }
+    .doc-header {
+      border-bottom: 1px solid var(--border);
+      padding: 2rem 0 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .doc-header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin: 0 0 0.35rem;
+      letter-spacing: -0.02em;
+    }
+    .doc-meta {
+      font-size: 0.875rem;
+      color: var(--muted);
+      margin: 0;
+    }
+    .doc-meta span + span::before { content: " · "; }
+    nav.toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2rem;
+    }
+    nav.toc strong {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    nav.toc ol { margin: 0; padding-left: 1.25rem; }
+    nav.toc li { margin: 0.25rem 0; }
+    nav.toc a { color: var(--accent); text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 2.5rem 0 1rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 2px solid var(--accent-light);
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 1.5rem 0 0.65rem;
+      page-break-after: avoid;
+    }
+    p, li { color: var(--muted); }
+    strong { color: var(--ink); font-weight: 600; }
+    code {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.875em;
+      background: var(--accent-light);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      margin: 0.75rem 0 1rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--accent-light); font-weight: 600; }
+    tr:nth-child(even) td { background: var(--surface); }
+    ol, ul { padding-left: 1.35rem; }
+    li { margin: 0.35rem 0; }
+    .doc-footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8125rem;
+      color: var(--muted);
+    }
+    @media print {
+      body { font-size: 11pt; padding: 0.6in; max-width: none; }
+      nav.toc { break-inside: avoid; }
+      h2 { break-before: page; }
+      h2:first-of-type { break-before: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="doc-header">
+    <h1>NEXA Platform — Client Instructions</h1>
+    <p class="doc-meta">
+      <span>User manual</span>
+      <span>Customers, vendors &amp; staff</span>
+      <span>Plain language</span>
+    </p>
+  </header>
+
+  <nav class="toc" aria-label="Table of contents">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#customer">Customer guide</a></li>
+      <li><a href="#vendor">Vendor guide</a></li>
+      <li><a href="#admin">Super admin guide</a></li>
+      <li><a href="#reference">Reference</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="overview">1. Overview</h2>
+
+  <h3>What is NEXA?</h3>
+  <p>NEXA Platform is an online shopping system where <strong>each store has its own website</strong>. The main site helps people find stores; each vendor has a separate shop. Customers shop one store at a time.</p>
+
+  <h3>User roles</h3>
+  <table>
+    <thead><tr><th>Role</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Customer</strong></td><td>Browse, cart, checkout, track orders</td></tr>
+      <tr><td><strong>Vendor</strong></td><td>Manage one store — products, orders, settings</td></tr>
+      <tr><td><strong>Super Admin</strong></td><td>Manage the whole platform</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Where customers shop</h3>
+  <p>Customers do <strong>not</strong> shop from a product list on the main homepage. Open a vendor store link (e.g. <code>https://gogo.nexa-mm.com/</code>) or click a vendor logo on the homepage carousel.</p>
+
+  <h2 id="customer">2. Customer guide</h2>
+
+  <h3>Opening a store</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td>Vendor subdomain</td><td><code>https://gogo.nexa-mm.com/</code></td></tr>
+      <tr><td>Custom domain</td><td><code>https://yourstore.com/</code></td></tr>
+      <tr><td>Main site carousel</td><td>Click a vendor logo</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Browsing and cart</h3>
+  <ul>
+    <li>Use <strong>category tabs</strong> and search to find products.</li>
+    <li>Tap a product for details; use <strong>Add to Cart</strong> or the heart icon for saved items.</li>
+    <li>Guest carts stay on one device; sign in to sync across devices.</li>
+  </ul>
+
+  <h3>Checkout</h3>
+  <ol>
+    <li>Open <strong>Cart</strong> → <strong>Checkout</strong>.</li>
+    <li>Enter shipping address and phone.</li>
+    <li>Choose <strong>Cash on Delivery</strong> or <strong>KBZPay</strong>.</li>
+    <li>Review and place the order.</li>
+  </ol>
+
+  <h3>Cash on Delivery</h3>
+  <p>Order is created immediately. Pay the delivery person in cash when your order arrives. Track status under <strong>Profile → Orders</strong> when signed in.</p>
+
+  <h3>KBZPay</h3>
+  <ol>
+    <li>Choose KBZPay at checkout.</li>
+    <li>Pay in the KBZPay app (QR or app launch).</li>
+    <li>After payment you may see <code>https://www.nexa-mm.com/summary</code> — tap <strong>Continue Shopping</strong>.</li>
+  </ol>
+  <p>Keep the browser open until payment finishes. If payment succeeded but no order appears, contact the store with your receipt.</p>
+
+  <h3>Profile, support, and shortcuts</h3>
+  <ul>
+    <li><strong>Profile:</strong> orders, addresses, account settings.</li>
+    <li><strong>Support:</strong> chat bubble; phone menu for Dial or Viber.</li>
+    <li><strong>Add to Home:</strong> Android Chrome — tap the button above chat; iPhone — Safari → Share → Add to Home Screen.</li>
+    <li><strong>Language:</strong> English or Burmese on the storefront menu.</li>
+  </ul>
+
+  <h2 id="vendor">3. Vendor guide</h2>
+
+  <h3>Getting started</h3>
+  <ol>
+    <li>Apply at <code>https://www.nexa-mm.com/vendor/application</code>.</li>
+    <li>Wait for approval from super admin.</li>
+    <li>Sign in at <code>https://www.nexa-mm.com/vendor/login</code> and open vendor admin.</li>
+  </ol>
+  <table>
+    <thead><tr><th>URL</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>https://yourstore.nexa-mm.com/</code></td><td>Customer shop</td></tr>
+      <tr><td><code>https://yourstore.nexa-mm.com/admin</code></td><td>Your dashboard</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Application requirements</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td>Phone</td><td>Myanmar format: <code>+959…</code> or <code>09…</code></td></tr>
+      <tr><td>Email</td><td>Wait for <strong>Email is available</strong></td></tr>
+      <tr><td>Description</td><td>At least 10 characters</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Daily work</h3>
+  <ul>
+    <li><strong>Products:</strong> add photos, prices, stock, and categories.</li>
+    <li><strong>Orders:</strong> check pending orders; update status as you fulfill.</li>
+    <li><strong>Settings:</strong> logo, banner, contact, terms, subdomain.</li>
+    <li>Use <strong>Preview store</strong> before sharing your link.</li>
+  </ul>
+
+  <h2 id="admin">4. Super admin guide</h2>
+
+  <h3>Access</h3>
+  <p>Open <code>https://www.nexa-mm.com/admin</code> and sign in with your staff account.</p>
+
+  <h3>Daily workflow</h3>
+  <ol>
+    <li>Review <strong>Orders</strong> (pending badge on sidebar).</li>
+    <li>Recover KBZPay drafts from the amber panel if needed.</li>
+    <li>Approve or reject vendors under <strong>Vendor → Review applications</strong>.</li>
+    <li>Check <strong>Settings → Activities</strong> for the audit log.</li>
+  </ol>
+
+  <h3>Settings</h3>
+  <table>
+    <thead><tr><th>Tab</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>General</td><td>Platform name, logo, support contact</td></tr>
+      <tr><td>Users</td><td>Staff accounts (owner only)</td></tr>
+      <tr><td>Activities</td><td>Audit timeline</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="reference">5. Reference</h2>
+
+  <h3>Quick URLs</h3>
+  <table>
+    <thead><tr><th>Purpose</th><th>URL</th></tr></thead>
+    <tbody>
+      <tr><td>Main site</td><td><code>https://www.nexa-mm.com/</code></td></tr>
+      <tr><td>Super admin</td><td><code>https://www.nexa-mm.com/admin</code></td></tr>
+      <tr><td>Apply to sell</td><td><code>https://www.nexa-mm.com/vendor/application</code></td></tr>
+      <tr><td>Vendor login</td><td><code>https://www.nexa-mm.com/vendor/login</code></td></tr>
+      <tr><td>After KBZPay</td><td><code>https://www.nexa-mm.com/summary</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Troubleshooting</h3>
+  <table>
+    <thead><tr><th>Problem</th><th>What to try</th></tr></thead>
+    <tbody>
+      <tr><td>Blank page</td><td>Retry link; use Chrome or Safari</td></tr>
+      <tr><td>Empty category</td><td>Hard refresh; switch tabs</td></tr>
+      <tr><td>KBZPay paid, no order</td><td>Wait 1–2 min; check Profile → Orders</td></tr>
+      <tr><td>Missing admin menu</td><td>Owner checks role in Settings → Users</td></tr>
+      <tr><td>Add to Home (iPhone)</td><td>Safari → Share → Add to Home Screen</td></tr>
+    </tbody>
+  </table>
+
+  <footer class="doc-footer">
+    NEXA Platform — Client Instructions. Each store is independent; the main site connects people to stores.
+  </footer>
+
+</body>
+</html>

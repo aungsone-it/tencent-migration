@@ -280,6 +280,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MO
 | Doc | Contents |
 |-----|----------|
 | [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) | **Backend truth:** KV model, SQL read model, Realtime pulses, auth, CloudBase/Tencent Pro limits, scaling |
+| [docs/DUMB_CLIENT_MANUAL.md](docs/DUMB_CLIENT_MANUAL.md) | **Frontend truth:** thin-client / dumb-client manual (presentation-style, 24 slides) |
 | [docs/CODE_REVIEW_AND_ROUTING.md](docs/CODE_REVIEW_AND_ROUTING.md) | Routes, hosts, component map |
 | [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) | **TCB-first setup:** empty DB, console function deploy, EdgeOne, import Supabase later |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and env setup |
@@ -287,7 +288,8 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MO
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |
 | [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, Realtime scale notes |
 | [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows |
-| [docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md](docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md) | Short non-technical guide |
+| [docs/CLIENT_INSTRUCTIONS.md](docs/CLIENT_INSTRUCTIONS.md) | **End-user manual** — how to shop, sell, and manage (presentation-style) |
+| [docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md](docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md) | Short non-technical quick reference |
 | [docs/VENDOR_ADD_TO_HOME.md](docs/VENDOR_ADD_TO_HOME.md) | Add to Home button — Android/iOS behavior, testing, limitations |
 | [docs/UI_ANIMATIONS.md](docs/UI_ANIMATIONS.md) | Animation reference |
 | [docs/LEGACY_DOCS.md](docs/LEGACY_DOCS.md) | Outdated root markdown files — do not use |

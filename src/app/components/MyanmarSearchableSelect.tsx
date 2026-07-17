@@ -15,6 +15,7 @@ import type { Language } from "../contexts/language-core";
 import {
   getMyanmarRegionLabel,
   getMyanmarTownshipLabel,
+  getMyanmarTownshipSearchTerms,
 } from "../utils/myanmarRegionLabels";
 
 type MyanmarSearchableSelectProps = {
@@ -89,7 +90,11 @@ export function MyanmarSearchableSelect({
               {options.map((option) => (
                 <CommandItem
                   key={option}
-                  value={`${option} ${getLabel(option)}`}
+                  value={
+                    kind === "township"
+                      ? getMyanmarTownshipSearchTerms(option, language)
+                      : `${option} ${getLabel(option)}`
+                  }
                   onSelect={() => {
                     onValueChange(option);
                     handleOpenChange(false);

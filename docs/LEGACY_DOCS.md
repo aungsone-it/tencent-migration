@@ -18,7 +18,7 @@ The following markdown files live in the **repository root** and are **historica
 | [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](./NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows |
 | [docs/CLIENT_INSTRUCTIONS.md](./CLIENT_INSTRUCTIONS.md) | **End-user manual** — how to use the system (customers, vendors, admin) |
 | [docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md](./NEXA_SIMPLE_UI_INSTRUCTIONS.md) | Short non-technical quick reference |
-| [docs/DUMB_CLIENT_MANUAL.md](./DUMB_CLIENT_MANUAL.md) | Thin-client architecture manual (developers) |
+| [docs/CLIENT_MANUAL.md](./CLIENT_MANUAL.md) | Frontend client architecture manual (developers) |
 | [docs/VENDOR_ADD_TO_HOME.md](./VENDOR_ADD_TO_HOME.md) | Vendor storefront Add to Home / install shortcut |
 | [.env.example](../.env.example) | Environment variable reference |
 

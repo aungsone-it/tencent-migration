@@ -148,6 +148,7 @@
     <ol>
       <li><a href="#terms">Terms you will see</a></li>
       <li><a href="#super-admin">Super Admin</a></li>
+      <li><a href="#admin-roles">Admin user roles</a></li>
       <li><a href="#vendors">Vendors</a></li>
       <li><a href="#help">Quick help</a></li>
     </ol>
@@ -215,9 +216,93 @@
   <ol>
     <li>Click <strong>Settings</strong>.</li>
     <li><strong>General</strong> — platform name and logo.</li>
-    <li><strong>Users</strong> — add or edit staff (owner only).</li>
+    <li><strong>Users</strong> — add or edit staff (<strong>Store Owner only</strong>).</li>
     <li><strong>Activities</strong> — audit timeline of admin actions.</li>
   </ol>
+
+  <h2 id="admin-roles">Admin user roles</h2>
+  <p>
+    Staff who sign in at <code>https://www.nexa-mm.com/admin</code> are assigned one of
+    <strong>four roles</strong>. Your role controls which left-menu items you see.
+    If a section is missing, your account is limited on purpose — ask the <strong>Store Owner</strong>
+    to review your role under <strong>Settings → Users</strong>.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Role</th><th>What you can access</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Store Owner</strong></td>
+        <td>
+          <strong>Full platform access</strong> — all menu items including
+          <strong>Finances</strong> and <strong>Settings → Users</strong>.
+          Can add, edit, or remove any staff role. Cannot be deleted or deactivated.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Administrator</strong></td>
+        <td>
+          Day-to-day operations: products, orders, vendors, customers, chat, marketing,
+          logistics, and most settings (<strong>General</strong>, <strong>Activities</strong>).
+          <strong>No Finances.</strong> Cannot open <strong>Settings → Users</strong>.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Data Entry</strong></td>
+        <td>
+          Catalog work only: <strong>Home</strong>, <strong>Product</strong> (products, categories,
+          inventory), <strong>Chat</strong>, and limited <strong>Settings</strong> (General).
+          No orders, vendors, customers, finances, or user management.
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Warehouse</strong></td>
+        <td>
+          Fulfillment focus: <strong>Home</strong>, <strong>Orders</strong>,
+          <strong>Inventory</strong>, and <strong>Logistics</strong>.
+          No products, vendors, customers, finances, settings, or global search.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Menu access by role (quick reference)</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Menu section</th>
+        <th>Store Owner</th>
+        <th>Administrator</th>
+        <th>Data Entry</th>
+        <th>Warehouse</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Home</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>Product / Categories / Inventory</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Inventory only</td></tr>
+      <tr><td>Orders</td><td>Yes</td><td>Yes</td><td>No</td><td>Yes</td></tr>
+      <tr><td>Vendor</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td></tr>
+      <tr><td>Chat</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+      <tr><td>Customers</td><td>Yes</td><td>Yes</td><td>No</td><td>No</td></tr>
+      <tr><td>Finances</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+      <tr><td>Logistics</td><td>Yes</td><td>Yes</td><td>No</td><td>Yes</td></tr>
+      <tr><td>Settings → Users</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+      <tr><td>Settings → General / Activities</td><td>Yes</td><td>Yes</td><td>General only</td><td>No</td></tr>
+      <tr><td>Global search (top bar)</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Who can add staff accounts</h3>
+  <ul>
+    <li><strong>Store Owner</strong> — can create any role (Store Owner, Administrator, Data Entry, Warehouse).</li>
+    <li><strong>Administrator, Data Entry, Warehouse</strong> — cannot open <strong>Settings → Users</strong>.</li>
+  </ul>
+  <p>
+    To change a role: Store Owner → <strong>Settings → Users</strong> → select the person →
+    update <strong>Role</strong> → save.
+  </p>
 
   <h2 id="vendors">Vendors</h2>
 

@@ -267,9 +267,24 @@ Customers may also find you on the homepage vendor carousel when your store is a
 2. Sign in with your staff account.
 3. Use the left menu to navigate.
 
-If menu items are missing, your role may be restricted — check **Settings → Users** (owner only).
+If menu items are missing, your role may be restricted — see [Admin user roles](#42-admin-user-roles) below.
 
-### 4.2 Daily workflow
+### 4.2 Admin user roles
+
+Platform staff have one of **four roles**. Your role controls which left-menu items you see.
+
+| Role | What you can access |
+|------|---------------------|
+| **Store Owner** | **Full access** — all menus including **Finances** and **Settings → Users**. Can assign any staff role. Cannot be deleted or deactivated. |
+| **Administrator** | Day-to-day ops — products, orders, vendors, customers, chat, logistics, settings (General + Activities). **No Finances.** No **Settings → Users**. |
+| **Data Entry** | Catalog work — Home, Product (products/categories/inventory), Chat, limited Settings (General). No orders, vendors, customers, or finances. |
+| **Warehouse** | Fulfillment — Home, Orders, Inventory, Logistics. No products, vendors, finances, settings, or global search. |
+
+**Who can add staff:** only **Store Owner** via **Settings → Users**. Other roles cannot open that tab.
+
+**Quick check:** missing **Finances** → you are not Store Owner. Missing **Product** → likely **Warehouse** role. Missing **Orders** → likely **Data Entry** role.
+
+### 4.3 Daily workflow
 
 1. Review **Orders** (pending badge on sidebar).
 2. Check the **KBZPay drafts** panel for paid orders that need recovery.
@@ -279,7 +294,7 @@ If menu items are missing, your role may be restricted — check **Settings → 
 
 Stay signed in as yourself when approving vendors — actions are recorded under your account.
 
-### 4.3 Settings
+### 4.4 Settings
 
 | Tab | Purpose |
 |-----|---------|
@@ -289,7 +304,7 @@ Stay signed in as yourself when approving vendors — actions are recorded under
 
 Branding lives under **General** (there is no separate Appearance tab). Vendor deletion removes the vendor from the list but keeps history in Activities.
 
-### 4.4 Orders and KBZPay recovery
+### 4.5 Orders and KBZPay recovery
 
 - Use the orders list to search, filter, and update status.
 - If a customer paid via KBZPay but no order exists, use **Recover order** in the amber drafts panel.

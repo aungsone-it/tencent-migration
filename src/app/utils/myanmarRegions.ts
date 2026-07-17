@@ -115,7 +115,6 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
     "Thazi",
     "Wundwin",
     "Yamethin",
-    "Ye-U",
   ],
   Naypyidaw: [
     "Dekkhinathiri",
@@ -195,6 +194,7 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
     "Monyo",
     "Myo Hla",
     "Nattalin",
+    "Nyaungchedauk",
     "Nyaunglebin",
     "Oakshitpin",
     "Oe Thei Kone",
@@ -473,7 +473,7 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
     "Langkho",
     "Lashio",
     "Laukkaing",
-    "Lawksawk",
+    "Lawksawk (Yetsauk)",
     "Loilen",
     "Mabein",
     "Man Kan",
@@ -491,8 +491,9 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
     "Mongkhoke",
     "Mongla",
     "Monglon",
+    "Mongmao",
     "Mongmit",
-    "Mongnai",
+    "Mongnai (Moenae)",
     "Mongnawng",
     "Mongngawt",
     "Mongpan",
@@ -507,14 +508,16 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
     "Nam Tit",
     "Namhkan",
     "Namhsan",
+    "Namphan",
     "Namtu",
     "Nang Pang",
-    "Nansang",
+    "Nansang (South)",
     "Naungtayar",
     "Nawnghkio",
     "Nyaungshwe",
     "Pan Lon",
     "Pang Hseng (Kyu Koke)",
+    "Pangwaun",
     "Pangsang (Panghkam)",
     "Pawng Lawng",
     "Pekon",
@@ -554,6 +557,21 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
 };
 
 const TOWNSHIP_ALIASES: Record<string, string> = {
+  "Lawksawk": "Lawksawk (Yetsauk)",
+  "Moenae": "Mongnai (Moenae)",
+  "Moe Nae": "Mongnai (Moenae)",
+  "Mong Nai": "Mongnai (Moenae)",
+  "Mongnai": "Mongnai (Moenae)",
+  "Namsang": "Nansang (South)",
+  "Namsang (South)": "Nansang (South)",
+  "Namsang South": "Nansang (South)",
+  "Nan San (South)": "Nansang (South)",
+  "Nansang": "Nansang (South)",
+  "Nyaung Chay Htauk": "Nyaungchedauk",
+  "Nyaung Che Dauk": "Nyaungchedauk",
+  "Yatsauk": "Lawksawk (Yetsauk)",
+  "Yatsawk": "Lawksawk (Yetsauk)",
+  "Yetsauk": "Lawksawk (Yetsauk)",
   "Bawlake": "Bawlakhe",
   "Botahtaung": "Botataung",
   "Det Khi Na Thi Ri": "Dekkhinathiri",
@@ -565,11 +583,18 @@ const TOWNSHIP_ALIASES: Record<string, string> = {
   "Mayangone": "Mayangon",
   "Mingalartaungnyunt": "Mingala Taungnyunt",
   "Mogoke": "Mogok",
+  "Mong Maw": "Mongmao",
+  "Narphan": "Namphan",
+  "Naphan": "Namphan",
   "Oke Ta Ra Thi Ri": "Ottarathiri",
+  "Panwai": "Pangwaun",
+  "Panwine": "Pangwaun",
+  "Pobbathiri": "Poke Ba Thi Ri",
   "Puta-O": "Putao",
   "Pyigyitagon": "Pyigyitagun",
   "Pyinoolwin": "Pyin Oo Lwin",
   "Seikgyikanaungto": "Seikgyi Kanaungto",
+  "Tatkone": "Tatkon",
   "Toungup": "Taungup",
   "Za Bu Thi Ri": "Zabuthiri",
   "Zay Yar Thi Ri": "Zeyarthiri",
@@ -689,4 +714,21 @@ export function myanmarStateSelectOptions(currentState?: string): string[] {
 
 export function myanmarCitySelectOptions(region?: string, currentCity?: string): string[] {
   return myanmarTownshipSelectOptions(region, currentCity);
+}
+
+/** All searchable tokens for a township (English, GAD aliases, Burmese when language is my). */
+export function getMyanmarTownshipSearchTerms(
+  township: string,
+  language: "en" | "my" | "zh" = "en"
+): string {
+  const terms = new Set<string>([township]);
+  for (const [alias, canonical] of Object.entries(TOWNSHIP_ALIASES)) {
+    if (canonical === township) terms.add(alias);
+  }
+  if (language === "my") {
+    const burmese =
+      MYANMAR_TOWNSHIP_LABELS_MY[township as keyof typeof MYANMAR_TOWNSHIP_LABELS_MY];
+    if (burmese) terms.add(burmese);
+  }
+  return [...terms].join(" ");
 }

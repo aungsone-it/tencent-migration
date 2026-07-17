@@ -31,7 +31,7 @@ import {
   logisticsPartnerProfilePath,
 } from "../utils/logisticsPartnerSlug";
 import { getMyanmarRegionLabel } from "../utils/myanmarRegionLabels";
-import { myanmarTownshipSelectOptions } from "../utils/myanmarRegions";
+import { normalizeTownshipKey, myanmarTownshipSelectOptions } from "../utils/myanmarRegions";
 import { useLanguage } from "../contexts/LanguageContext";
 import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
 import { compressImageToFile, dataUrlToFile } from "../../utils/imageCompression";
@@ -578,9 +578,11 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                                       <Label className="text-xs">{t("logistics.form.township")}</Label>
                                       <MyanmarSearchableSelect
                                         value={selectedTownship}
-                                        onValueChange={(value) =>
-                                          changeTownshipExceptionKey(region, township, value)
-                                        }
+                                        onValueChange={(value) => {
+                                          const canonical =
+                                            normalizeTownshipKey(region, value) || value;
+                                          changeTownshipExceptionKey(region, township, canonical);
+                                        }}
                                         options={townshipOptions}
                                         placeholder={t("logistics.form.selectTownship")}
                                         searchPlaceholder={t("logistics.form.searchTownship")}

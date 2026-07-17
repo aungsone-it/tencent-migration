@@ -280,7 +280,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MO
 | Doc | Contents |
 |-----|----------|
 | [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) | **Backend truth:** KV model, SQL read model, Realtime pulses, auth, CloudBase/Tencent Pro limits, scaling |
-| [docs/DUMB_CLIENT_MANUAL.md](docs/DUMB_CLIENT_MANUAL.md) | **Frontend truth:** thin-client / dumb-client manual (presentation-style, 24 slides) |
+| [docs/CLIENT_MANUAL.md](docs/CLIENT_MANUAL.md) | **Frontend architecture:** thin-client manual for developers |
 | [docs/CODE_REVIEW_AND_ROUTING.md](docs/CODE_REVIEW_AND_ROUTING.md) | Routes, hosts, component map |
 | [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) | **TCB-first setup:** empty DB, console function deploy, EdgeOne, import Supabase later |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and env setup |

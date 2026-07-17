@@ -13,15 +13,28 @@ This version is intentionally short and non-technical.
 1. Open `https://www.nexa-mm.com/admin`.
 2. Sign in with your staff account.
 3. Use the left menu for Products, Orders, Vendors, Customers, Marketing, Chat, and Settings.
-4. If you cannot see a section, your role likely does not have permission.
+4. If you cannot see a section, your role likely does not have permission — see **Admin user roles** below.
 
 ### Settings
 
 - **General** — platform name, logo, support contact
-- **Users** — add/edit staff (store owner only)
+- **Users** — add/edit staff (**Store Owner only**)
 - **Activities** — see who did what across the whole platform (approvals, deletes, user changes)
 
 There is no separate **Appearance** tab; branding is under **General**.
+
+### Admin user roles
+
+Platform staff at `https://www.nexa-mm.com/admin` have one of **four roles**. The role controls which menu items appear.
+
+| Role | Access summary |
+|------|----------------|
+| **Store Owner** | Full access — all menus including **Finances** and **Settings → Users**. Can manage all staff roles. |
+| **Administrator** | Operations — products, orders, vendors, customers, chat, logistics, settings (General + Activities). **No Finances.** No **Settings → Users**. |
+| **Data Entry** | Catalog only — Home, Product (products/categories/inventory), Chat, limited Settings (General). |
+| **Warehouse** | Fulfillment — Home, Orders, Inventory, Logistics. No products, vendors, finances, settings, or global search. |
+
+**Who can add staff:** only **Store Owner** (Settings → Users). To fix a missing menu item, ask the Store Owner to check your role there.
 
 ### Vendors
 

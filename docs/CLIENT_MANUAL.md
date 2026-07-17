@@ -1,4 +1,4 @@
-# NEXA Platform — Dumb Client Manual
+# NEXA Platform — Client Manual (Technical Reference)
 
 > Presentation-style reference for how the **frontend** behaves across the entire system.  
 > The client is a **thin presentation layer**. The server owns truth.
@@ -9,9 +9,9 @@ Use this when onboarding developers, reviewing PRs, or deciding where new logic 
 
 ---
 
-## Slide 1 — What is the Dumb Client?
+## Slide 1 — What is the Frontend Client?
 
-The **dumb client** is the React SPA (`src/`). It:
+The **frontend client** is the React SPA (`src/`). It:
 
 - Renders UI (storefront, admin, vendor portal)
 - Sends HTTP requests to CloudBase Edge Functions
@@ -23,7 +23,7 @@ It does **not** own durable business state. All writes go to the server.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Browser (Dumb Client)                                      │
+│  Browser (Frontend Client)                                      │
 │  React 18 + Vite SPA                                        │
 │  ┌────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │ Pages/UI   │  │ module-cache│  │ OrderRealtimeBridge │  │
@@ -34,7 +34,7 @@ It does **not** own durable business state. All writes go to the server.
 └─────────────────────────┼───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  CloudBase Edge Functions (Smart Server)                    │
+│  CloudBase Edge Functions (Backend Server)                    │
 │  make-server-16010b6f (Hono)  │  kpay-webhook               │
 │  KV writes → SQL read-model sync → signed URLs → webhooks   │
 └─────────────────────────┼───────────────────────────────────┘
@@ -66,13 +66,13 @@ It does **not** own durable business state. All writes go to the server.
 
 ## Slide 3 — Three Surfaces, One Client
 
-All three portals share the same SPA and the same dumb-client rules.
+All three portals share the same SPA and the same thin-client rules.
 
 | Surface | URL pattern | Who uses it |
 |---------|-------------|-------------|
-| **Platform apex** | `walwal.online/` | Landing, super-admin, onboarding, KPay `/summary` |
-| **Vendor storefront** | `{label}.walwal.online/*` or custom domain | Customers shopping one vendor |
-| **Vendor admin** | `{label}.walwal.online/admin` or `/vendor/:slug/admin` | Store owners |
+| **Platform apex** | `www.nexa-mm.com/` | Landing, super-admin, onboarding, KPay `/summary` |
+| **Vendor storefront** | `{label}.nexa-mm.com/*` or custom domain | Customers shopping one vendor |
+| **Vendor admin** | `{label}.nexa-mm.com/admin` or `/vendor/:slug/admin` | Store owners |
 
 There is **no shared marketplace catalog**. Customers always shop **one vendor at a time**.
 
@@ -204,7 +204,7 @@ Philosophy from `module-cache.ts`:
 ## Slide 8 — Flow: Vendor Storefront Catalog
 
 ```
-Customer opens gogo.walwal.online
+Customer opens gogo.nexa-mm.com
         │
         ▼
 VendorStorefrontPage → VendorStoreView
@@ -225,7 +225,7 @@ Client caches by vendor + page + category + query
 Instant search filters loaded rows; debounced `q` refetches server
 ```
 
-**Dumb client rule:** Pagination and category filters always come from the server. Client filter is UX-only on loaded data.
+**Client rule:** Pagination and category filters always come from the server. Client filter is UX-only on loaded data.
 
 Files: `VendorStoreView.tsx`, `module-cache.ts`, `vendorStorefrontProductStats.ts`
 
@@ -280,10 +280,10 @@ Client: Realtime on kpay_txn:{orderId}  (primary)
         + poll ~1.5s                      (fallback)
               │
               ▼
-Redirect to walwal.online/summary → Continue Shopping → vendor store
+Redirect to www.nexa-mm.com/summary → Continue Shopping → vendor store
 ```
 
-**Dumb client rule:** Client never marks an order as paid. It waits for server state.
+**Client rule:** Client never marks an order as paid. It waits for server state.
 
 Files: `Checkout.tsx`, `kpayClient.ts`, `supabase/functions/.../kpay_routes.tsx`, `pwa_finalize.ts`
 
@@ -350,7 +350,7 @@ Pulse tables:
 
 Legacy fallback: full KV subscription only if pulse channel fails.
 
-**Dumb client rule:** Realtime tells you *something changed* — go ask the server.
+**Client rule:** Realtime tells you *something changed* — go ask the server.
 
 ---
 
@@ -400,7 +400,7 @@ Client displays via resolveCloudBaseMediaUrl() with thumb sizes:
   grid 480px · logo 128px · banner 960px
 ```
 
-**Dumb client rule:** Client prepares the file; server stores and serves it.
+**Client rule:** Client prepares the file; server stores and serves it.
 
 ---
 
@@ -434,7 +434,7 @@ Files: `AuthContext.tsx`, `VendorAuthContext.tsx`, `auth_routes.tsx`
 
 ## Slide 16 — File Map (Client)
 
-| File | Role in dumb client |
+| File | Role in thin client |
 |------|---------------------|
 | `src/app/routes.tsx` | Route tree; mounts `OrderRealtimeBridge` |
 | `src/utils/api-client.ts` | HTTP layer: retries, timeouts, errors |
@@ -541,7 +541,7 @@ Examples:
 
 ## Slide 21 — Common Mistakes to Avoid
 
-| Mistake | Why it breaks dumb client |
+| Mistake | Why it breaks thin client |
 |---------|---------------------------|
 | Filter paginated admin list in memory only | Page 2+ data never loaded |
 | Skip server refetch after category tab change | Wrong products shown |
@@ -572,8 +572,8 @@ After any client-side data change, verify:
 
 | Term | Meaning |
 |------|---------|
-| **Dumb client** | React SPA — display + cache + submit; no authoritative state |
-| **Smart server** | Edge Functions + KV — business logic and persistence |
+| **Frontend client** | React SPA — display + cache + submit; no authoritative state |
+| **Backend server** | Edge Functions + KV — business logic and persistence |
 | **KV store** | `kv_store_16010b6f` — JSONB documents; write source of truth |
 | **Read model** | `app_*` SQL tables synced from KV for fast list queries |
 | **Pulse** | Realtime invalidation signal (counter bump, not data payload) |
@@ -594,7 +594,7 @@ It renders vendor storefronts and admin portals, caches server responses aggress
 
 **The client never owns truth — it displays, caches, and submits.**
 
-When in doubt: put logic on the server, keep the client dumb.
+When in doubt: put logic on the server, not in the browser.
 
 ---
 

@@ -1,49 +1,53 @@
 import type { DeliveryPartner } from "../../utils/api";
-import { parseCostNumber } from "./logisticsRegions";
+import { parseCostNumber, resolveEffectiveRegionRate } from "./logisticsRegions";
+import { normalizePartnerStatus } from "./logisticsPartnerForm";
+import { normalizeTownshipKey } from "./myanmarRegions";
 
 export type CheckoutLogisticsQuote = {
   partner: DeliveryPartner;
   regionKey: string;
+  townshipKey?: string;
   estimatedDays: string;
   shippingFee: number;
   costMin: number;
   costMax: number | null;
   codSupported: boolean;
-  codFee: number;
+  isTownshipException: boolean;
 };
 
 export function resolveCheckoutLogisticsQuote(
   partners: DeliveryPartner[],
-  regionKey: string | undefined | null
+  regionKey: string | undefined | null,
+  townshipKey?: string | undefined | null
 ): CheckoutLogisticsQuote | null {
   const region = String(regionKey || "").trim();
   if (!region) return null;
 
+  const township = normalizeTownshipKey(region, townshipKey) || String(townshipKey || "").trim() || undefined;
+
   const candidates: CheckoutLogisticsQuote[] = [];
   for (const partner of partners) {
-    if (partner.status !== "active") continue;
-    const rate = partner.regionRates?.[region];
-    if (!rate) continue;
+    if (normalizePartnerStatus(partner.status) !== "active") continue;
+    const baseRate = partner.regionRates?.[region];
+    if (!baseRate) continue;
+
+    const rate = resolveEffectiveRegionRate(baseRate, township);
 
     const costMin = parseCostNumber(rate.costMin);
     if (costMin == null) continue;
 
     const costMaxRaw = parseCostNumber(rate.costMax);
-    const codFee =
-      partner.codSupported && partner.codFee
-        ? parseCostNumber(partner.codFee) ?? 0
-        : 0;
-
     candidates.push({
       partner,
       regionKey: region,
+      townshipKey: rate.isTownshipException ? rate.townshipKey : township,
       estimatedDays: rate.estimatedDays,
       shippingFee: costMin,
       costMin,
       costMax:
         costMaxRaw != null && costMaxRaw !== costMin ? costMaxRaw : null,
       codSupported: partner.codSupported,
-      codFee,
+      isTownshipException: rate.isTownshipException,
     });
   }
 

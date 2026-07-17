@@ -502,6 +502,7 @@ export type DeliveryPartnerRegionRate = {
   estimatedDays: string;
   costMin: string;
   costMax: string;
+  townshipExceptions?: Record<string, { costMin: string; costMax: string }>;
 };
 
 export type DeliveryPartner = {

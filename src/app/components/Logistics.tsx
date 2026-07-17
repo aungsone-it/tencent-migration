@@ -10,6 +10,7 @@ import {
   Plus,
   Package,
   Eye,
+  Power,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
@@ -31,7 +32,7 @@ import {
 } from "./ui/select";
 import { logisticsApi, type DeliveryPartner } from "../../utils/api";
 import { LOGISTICS_REGION_OPTIONS, getPartnerRegionKeys } from "../utils/logisticsRegions";
-import { logisticsApiErrorMessage } from "../utils/logisticsPartnerForm";
+import { logisticsApiErrorMessage, normalizePartnerStatus, partnerToUpdatePayload } from "../utils/logisticsPartnerForm";
 import {
   LOGISTICS_PARTNER_CREATE_PATH,
   logisticsPartnerEditPath,
@@ -92,8 +93,35 @@ export function Logistics() {
   }, [partners]);
 
   const totalPartners = partners.length;
-  const activePartners = partners.filter((s) => s.status === "active").length;
+  const activePartners = partners.filter((s) => normalizePartnerStatus(s.status) === "active").length;
   const codEnabledPartners = partners.filter((s) => s.codSupported).length;
+
+  const handleToggleStatus = async (partner: DeliveryPartner) => {
+    const previousPartner = partner;
+    const nextStatus =
+      normalizePartnerStatus(partner.status) === "active" ? "inactive" : "active";
+    setPartners((prev) =>
+      prev.map((item) =>
+        item.id === previousPartner.id ? { ...item, status: nextStatus } : item
+      )
+    );
+    try {
+      const res = await logisticsApi.updatePartner(previousPartner.id, {
+        ...partnerToUpdatePayload(previousPartner),
+        status: nextStatus,
+      });
+      setPartners((prev) =>
+        prev.map((item) => (item.id === previousPartner.id ? res.partner : item))
+      );
+      toast.success(t("logistics.form.updated"));
+    } catch (error) {
+      setPartners((prev) =>
+        prev.map((item) => (item.id === previousPartner.id ? previousPartner : item))
+      );
+      console.error("Failed to update delivery partner status:", error);
+      toast.error(logisticsApiErrorMessage(error, "save"));
+    }
+  };
 
   const handleDelete = async (partner: DeliveryPartner) => {
     const ok = window.confirm(
@@ -253,6 +281,7 @@ export function Logistics() {
             <div className="space-y-4">
               {filteredServices.map((service) => {
                 const regionKeys = getPartnerRegionKeys(service.regionRates);
+                const serviceActive = normalizePartnerStatus(service.status) === "active";
                 return (
                   <div
                     key={service.id}
@@ -277,12 +306,12 @@ export function Logistics() {
                             <Badge
                               variant="secondary"
                               className={
-                                service.status === "active"
+                                serviceActive
                                   ? "bg-green-100 text-green-700 border-green-200"
                                   : "bg-slate-100 text-slate-700 border-slate-200"
                               }
                             >
-                              {service.status === "active"
+                              {serviceActive
                                 ? t("logistics.status.active")
                                 : t("logistics.status.inactive")}
                             </Badge>
@@ -346,6 +375,14 @@ export function Logistics() {
                             >
                               <Edit className="w-4 h-4 mr-2" />
                               {t("logistics.edit")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => void handleToggleStatus(service)}
+                            >
+                              <Power className="w-4 h-4 mr-2" />
+                              {serviceActive
+                                ? t("logistics.status.inactive")
+                                : t("logistics.status.active")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-red-600"

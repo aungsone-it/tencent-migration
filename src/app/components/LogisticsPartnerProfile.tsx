@@ -4,6 +4,7 @@ import { Clock, Edit, Loader2, MapPin, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
 import { logisticsApi, type DeliveryPartner } from "../../utils/api";
 import {
   formatCostKyats,
@@ -11,9 +12,9 @@ import {
   getPartnerRegionKeys,
 } from "../utils/logisticsRegions";
 import { findPartnerBySlug, logisticsPartnerEditPath } from "../utils/logisticsPartnerSlug";
-import { getMyanmarRegionLabel } from "../utils/myanmarRegionLabels";
+import { getMyanmarRegionLabel, getMyanmarTownshipLabel } from "../utils/myanmarRegionLabels";
 import { formatEstimatedDeliveryLabel } from "../utils/checkoutLogistics";
-import { logisticsApiErrorMessage } from "../utils/logisticsPartnerForm";
+import { logisticsApiErrorMessage, normalizePartnerStatus, partnerToUpdatePayload } from "../utils/logisticsPartnerForm";
 import { useLanguage } from "../contexts/LanguageContext";
 
 type LogisticsPartnerProfileProps = {
@@ -25,6 +26,7 @@ export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) 
   const { t, language } = useLanguage();
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
   const [loading, setLoading] = useState(true);
+  const [togglingStatus, setTogglingStatus] = useState(false);
 
   const regionLabel = useCallback(
     (region: string) => getMyanmarRegionLabel(region, language),
@@ -68,6 +70,37 @@ export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) 
     () => (partner ? getPartnerRegionKeys(partner.regionRates) : []),
     [partner]
   );
+  const isActive = normalizePartnerStatus(partner?.status) === "active";
+
+  const handleToggleStatus = async () => {
+    if (!partner || togglingStatus) return;
+    const previousPartner = partner;
+    const nextStatus = isActive ? "inactive" : "active";
+    setTogglingStatus(true);
+    setPartners((prev) =>
+      prev.map((item) =>
+        item.id === previousPartner.id ? { ...item, status: nextStatus } : item
+      )
+    );
+    try {
+      const res = await logisticsApi.updatePartner(previousPartner.id, {
+        ...partnerToUpdatePayload(previousPartner),
+        status: nextStatus,
+      });
+      setPartners((prev) =>
+        prev.map((item) => (item.id === previousPartner.id ? res.partner : item))
+      );
+      toast.success(t("logistics.form.updated"));
+    } catch (error) {
+      setPartners((prev) =>
+        prev.map((item) => (item.id === previousPartner.id ? previousPartner : item))
+      );
+      console.error("Failed to update delivery partner status:", error);
+      toast.error(logisticsApiErrorMessage(error, "save"));
+    } finally {
+      setTogglingStatus(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -101,25 +134,35 @@ export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) 
             <Badge
               variant="secondary"
               className={
-                partner.status === "active"
+                isActive
                   ? "bg-green-100 text-green-700 border-green-200"
                   : "bg-slate-100 text-slate-700 border-slate-200"
               }
             >
-              {partner.status === "active"
-                ? t("logistics.status.active")
-                : t("logistics.status.inactive")}
+              {isActive ? t("logistics.status.active") : t("logistics.status.inactive")}
             </Badge>
           </div>
           <p className="text-slate-500">{t("logistics.profile.subtitle")}</p>
         </div>
-        <Button
-          className="bg-slate-900 hover:bg-slate-800 shrink-0"
-          onClick={() => navigate(logisticsPartnerEditPath(partner))}
-        >
-          <Edit className="w-4 h-4 mr-2" />
-          {t("logistics.edit")}
-        </Button>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
+            <span className="text-sm text-slate-600">
+              {isActive ? t("logistics.status.active") : t("logistics.status.inactive")}
+            </span>
+            <Switch
+              checked={isActive}
+              disabled={togglingStatus}
+              onCheckedChange={() => void handleToggleStatus()}
+            />
+          </div>
+          <Button
+            className="bg-slate-900 hover:bg-slate-800"
+            onClick={() => navigate(logisticsPartnerEditPath(partner))}
+          >
+            <Edit className="w-4 h-4 mr-2" />
+            {t("logistics.edit")}
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-start gap-4">
@@ -146,7 +189,6 @@ export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) 
             {partner.codSupported ? (
               <p className="text-sm font-medium text-green-600 mt-1">
                 {t("logistics.yes")}
-                {partner.codFee ? ` (+${formatCostKyats(partner.codFee)})` : ""}
               </p>
             ) : (
               <p className="text-sm font-medium text-slate-400 mt-1">
@@ -158,54 +200,106 @@ export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) 
       </div>
 
       {regionKeys.length > 0 ? (
-        <div>
-          <p className="text-sm font-medium text-slate-900 mb-2">
+        <div className="space-y-4">
+          <p className="text-sm font-medium text-slate-900">
             {t("logistics.profile.ratesByRegion")}
           </p>
-          <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left">
-                  <th className="px-3 py-2 font-medium text-slate-600">
-                    {t("logistics.profile.region")}
-                  </th>
-                  <th className="px-3 py-2 font-medium text-slate-600">
-                    {t("logistics.profile.delivery")}
-                  </th>
-                  <th className="px-3 py-2 font-medium text-slate-600">
-                    {t("logistics.profile.priceRange")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {regionKeys.map((region) => {
-                  const rate = partner.regionRates[region];
-                  const deliveryLabel = rate?.estimatedDays
-                    ? formatDeliveryLabel(rate.estimatedDays) || rate.estimatedDays
-                    : "—";
-                  return (
-                    <tr key={region} className="border-t border-slate-100">
-                      <td className="px-3 py-2">
-                        <span className="inline-flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-purple-500 shrink-0" />
-                          {regionLabel(region)}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="w-3 h-3 shrink-0" />
+          {regionKeys.map((region) => {
+            const rate = partner.regionRates[region];
+            const deliveryLabel = rate?.estimatedDays
+              ? formatDeliveryLabel(rate.estimatedDays) || rate.estimatedDays
+              : "—";
+            const exceptions = Object.entries(rate?.townshipExceptions || {}).sort(
+              ([a], [b]) =>
+                getMyanmarTownshipLabel(a, language).localeCompare(
+                  getMyanmarTownshipLabel(b, language),
+                  language === "my" ? "my" : "en"
+                )
+            );
+
+            return (
+              <div
+                key={region}
+                className="border border-slate-200 rounded-lg overflow-hidden bg-white"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-purple-50/70 border-b border-purple-100">
+                  <span className="inline-flex items-center gap-2 font-semibold text-slate-900">
+                    <MapPin className="w-4 h-4 text-purple-500 shrink-0" />
+                    {regionLabel(region)}
+                  </span>
+                  {exceptions.length > 0 && (
+                    <Badge variant="secondary" className="bg-white text-purple-700 border-purple-200">
+                      {t("logistics.profile.exceptionCount").replace(
+                        "{count}",
+                        String(exceptions.length)
+                      )}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="p-4 space-y-4">
+                  <div className="rounded-md border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {t("logistics.profile.defaultRate")}
+                    </p>
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-slate-500">{t("logistics.profile.delivery")}</p>
+                        <p className="mt-0.5 font-medium text-slate-900 inline-flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
                           {deliveryLabel}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {rate ? formatCostRangeKyats(rate.costMin, rate.costMax) : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">{t("logistics.profile.priceRange")}</p>
+                        <p className="mt-0.5 font-medium text-slate-900">
+                          {rate ? formatCostRangeKyats(rate.costMin, rate.costMax) : "—"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                      {t("logistics.profile.townshipExceptions")}
+                    </p>
+                    {exceptions.length > 0 ? (
+                      <div className="border border-slate-200 rounded-md overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-50 text-left">
+                              <th className="px-3 py-2 font-medium text-slate-600">
+                                {t("logistics.profile.township")}
+                              </th>
+                              <th className="px-3 py-2 font-medium text-slate-600">
+                                {t("logistics.profile.priceRange")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {exceptions.map(([township, exception]) => (
+                              <tr key={`${region}-${township}`} className="border-t border-slate-100">
+                                <td className="px-3 py-2 text-slate-800">
+                                  {getMyanmarTownshipLabel(township, language)}
+                                </td>
+                                <td className="px-3 py-2 font-medium text-slate-900">
+                                  {formatCostRangeKyats(exception.costMin, exception.costMax)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-400 italic">
+                        {t("logistics.profile.allTownshipsDefault")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <p className="text-sm text-slate-500">{t("logistics.profile.noRates")}</p>

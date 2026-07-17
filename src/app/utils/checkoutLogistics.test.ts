@@ -28,7 +28,6 @@ describe("checkoutLogistics", () => {
     expect(quote?.shippingFee).toBe(3000);
     expect(quote?.estimatedDays).toBe("2-3 days");
     expect(quote?.codSupported).toBe(true);
-    expect(quote?.codFee).toBe(500);
   });
 
   it("returns null when region is not covered", () => {
@@ -40,6 +39,42 @@ describe("checkoutLogistics", () => {
     expect(
       formatCheckoutShippingLabel(quote, (n) => `${n.toLocaleString()} ကျပ်`)
     ).toBe("3,000 ကျပ် – 3,500 ကျပ်");
+  });
+
+  it("uses township exception price when configured", () => {
+    const withExceptions: DeliveryPartner = {
+      ...partner,
+      regionRates: {
+        Yangon: {
+          estimatedDays: "2-3 days",
+          costMin: "4000",
+          costMax: "",
+          townshipExceptions: {
+            Mingaladon: { costMin: "5000", costMax: "" },
+            Dala: { costMin: "5000", costMax: "" },
+          },
+        },
+      },
+    };
+    const defaultQuote = resolveCheckoutLogisticsQuote([withExceptions], "Yangon", "Kamayut");
+    expect(defaultQuote?.shippingFee).toBe(4000);
+    expect(defaultQuote?.isTownshipException).toBe(false);
+
+    const exceptionQuote = resolveCheckoutLogisticsQuote(
+      [withExceptions],
+      "Yangon",
+      "Mingaladon"
+    );
+    expect(exceptionQuote?.shippingFee).toBe(5000);
+    expect(exceptionQuote?.isTownshipException).toBe(true);
+
+    const burmeseQuote = resolveCheckoutLogisticsQuote(
+      [withExceptions],
+      "Yangon",
+      "ဒလ"
+    );
+    expect(burmeseQuote?.shippingFee).toBe(5000);
+    expect(burmeseQuote?.isTownshipException).toBe(true);
   });
 
   it("uses the max day from estimated delivery ranges", () => {

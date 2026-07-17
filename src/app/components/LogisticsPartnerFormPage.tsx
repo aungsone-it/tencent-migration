@@ -1,36 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, ImageIcon, Loader2, Upload, X } from "lucide-react";
+import { ArrowLeft, ImageIcon, Loader2, Plus, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { Switch } from "./ui/switch";
 import { logisticsApi, type DeliveryPartner } from "../../utils/api";
 import { LOGISTICS_REGION_OPTIONS } from "../utils/logisticsRegions";
 import {
   emptyPartnerForm,
   emptyRegionRate,
+  emptyTownshipRate,
+  countPartnerTownshipExceptions,
   formToPayload,
   logisticsApiErrorMessage,
   partnerToForm,
+  sanitizePartnerForm,
   validatePartnerForm,
   type PartnerForm,
   type RegionRateForm,
+  type TownshipRateForm,
 } from "../utils/logisticsPartnerForm";
 import {
   findPartnerBySlug,
   logisticsPartnerProfilePath,
 } from "../utils/logisticsPartnerSlug";
 import { getMyanmarRegionLabel } from "../utils/myanmarRegionLabels";
+import { myanmarTownshipSelectOptions } from "../utils/myanmarRegions";
 import { useLanguage } from "../contexts/LanguageContext";
+import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
 import { compressImageToFile, dataUrlToFile } from "../../utils/imageCompression";
 
 type LogisticsPartnerFormPageProps =
@@ -51,6 +51,7 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
   const [formReady, setFormReady] = useState(isCreate);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const hydratedPartnerIdRef = useRef<string | null>(null);
 
   const regionLabel = useCallback(
     (region: string) => getMyanmarRegionLabel(region, language),
@@ -91,11 +92,14 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
     if (isCreate || loading) return;
     if (!partner) {
       setFormReady(false);
+      hydratedPartnerIdRef.current = null;
       return;
     }
+    if (hydratedPartnerIdRef.current === partner.id) return;
     setEditingId(partner.id);
     setForm(partnerToForm(partner));
     setFormReady(true);
+    hydratedPartnerIdRef.current = partner.id;
   }, [isCreate, loading, partner]);
 
   const cancelPath = isCreate
@@ -131,6 +135,96 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
         },
       },
     }));
+  };
+
+  const addTownshipException = (region: string) => {
+    const current = form.regionRates[region];
+    if (!current) return;
+    const used = new Set(Object.keys(current.townshipExceptions || {}));
+    const available = myanmarTownshipSelectOptions(region).filter((t) => !used.has(t));
+    if (available.length === 0) {
+      toast.error(t("logistics.form.allTownshipsUsed"));
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      regionRates: {
+        ...prev.regionRates,
+        [region]: {
+          ...prev.regionRates[region],
+          townshipExceptions: {
+            ...(prev.regionRates[region].townshipExceptions || {}),
+            [available[0]]: emptyTownshipRate(),
+          },
+        },
+      },
+    }));
+  };
+
+  const removeTownshipException = (region: string, township: string) => {
+    setForm((prev) => {
+      const rate = prev.regionRates[region];
+      if (!rate?.townshipExceptions) return prev;
+      const nextExceptions = { ...rate.townshipExceptions };
+      delete nextExceptions[township];
+      return {
+        ...prev,
+        regionRates: {
+          ...prev.regionRates,
+          [region]: {
+            ...rate,
+            townshipExceptions: nextExceptions,
+          },
+        },
+      };
+    });
+  };
+
+  const changeTownshipExceptionKey = (region: string, fromTownship: string, toTownship: string) => {
+    if (!toTownship || fromTownship === toTownship) return;
+    setForm((prev) => {
+      const rate = prev.regionRates[region];
+      if (!rate?.townshipExceptions?.[fromTownship]) return prev;
+      const nextExceptions = { ...rate.townshipExceptions };
+      const data = nextExceptions[fromTownship];
+      delete nextExceptions[fromTownship];
+      nextExceptions[toTownship] = data;
+      return {
+        ...prev,
+        regionRates: {
+          ...prev.regionRates,
+          [region]: { ...rate, townshipExceptions: nextExceptions },
+        },
+      };
+    });
+  };
+
+  const updateTownshipExceptionRate = (
+    region: string,
+    township: string,
+    field: keyof TownshipRateForm,
+    value: string
+  ) => {
+    setForm((prev) => {
+      const rate = prev.regionRates[region];
+      if (!rate) return prev;
+      return {
+        ...prev,
+        regionRates: {
+          ...prev.regionRates,
+          [region]: {
+            ...rate,
+            townshipExceptions: {
+              ...(rate.townshipExceptions || {}),
+              [township]: {
+                ...(rate.townshipExceptions?.[township] ?? emptyTownshipRate()),
+                [field]: value,
+              },
+            },
+          },
+        },
+      };
+    });
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -169,7 +263,8 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
   };
 
   const handleSave = async () => {
-    const validationError = validatePartnerForm(form);
+    const cleaned = sanitizePartnerForm(form);
+    const validationError = validatePartnerForm(cleaned);
     if (validationError) {
       toast.error(validationError);
       return;
@@ -178,11 +273,16 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
     setSaving(true);
     try {
       const payload = formToPayload({
-        ...form,
-        logo: await resolveLogoForSave(form.logo),
+        ...cleaned,
+        logo: await resolveLogoForSave(cleaned.logo),
       });
+      const sentExceptionCount = countPartnerTownshipExceptions(cleaned);
       if (isCreate) {
         const res = await logisticsApi.createPartner(payload);
+        const savedExceptionCount = countPartnerTownshipExceptions(partnerToForm(res.partner));
+        if (sentExceptionCount > 0 && savedExceptionCount === 0) {
+          toast.warning(t("logistics.form.townshipExceptionsNotPersisted"));
+        }
         toast.success(t("logistics.form.added"));
         navigate(logisticsPartnerProfilePath(res.partner));
         return;
@@ -190,6 +290,10 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
 
       if (!editingId) return;
       const res = await logisticsApi.updatePartner(editingId, payload);
+      const savedExceptionCount = countPartnerTownshipExceptions(partnerToForm(res.partner));
+      if (sentExceptionCount > 0 && savedExceptionCount === 0) {
+        toast.warning(t("logistics.form.townshipExceptionsNotPersisted"));
+      }
       toast.success(t("logistics.form.updated"));
       navigate(logisticsPartnerProfilePath(res.partner));
     } catch (error) {
@@ -332,59 +436,36 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
           />
         </div>
 
-        <div>
-          <Label htmlFor="status">{t("logistics.form.status")}</Label>
-          <Select
-            value={form.status}
-            onValueChange={(value: "active" | "inactive") =>
-              setForm((f) => ({ ...f, status: value }))
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 p-4">
+          <div>
+            <Label htmlFor="status">{t("logistics.form.status")}</Label>
+            <p className="text-sm text-slate-500 mt-1">
+              {form.status === "active"
+                ? t("logistics.status.active")
+                : t("logistics.status.inactive")}
+            </p>
+          </div>
+          <Switch
+            id="status"
+            checked={form.status === "active"}
+            onCheckedChange={(checked) =>
+              setForm((f) => ({ ...f, status: checked ? "active" : "inactive" }))
             }
-          >
-            <SelectTrigger className="mt-2">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="active">{t("logistics.status.active")}</SelectItem>
-              <SelectItem value="inactive">{t("logistics.status.inactive")}</SelectItem>
-            </SelectContent>
-          </Select>
+          />
         </div>
 
-        <div className="border border-slate-200 rounded-lg p-4 bg-amber-50">
-          <div className="flex items-start gap-3">
-            <Checkbox
-              id="codSupported"
-              className="mt-1"
-              checked={form.codSupported}
-              onCheckedChange={(checked) =>
-                setForm((f) => ({
-                  ...f,
-                  codSupported: checked === true,
-                  codFee: checked === true ? f.codFee : "",
-                }))
-              }
-            />
-            <div className="flex-1">
-              <Label htmlFor="codSupported" className="cursor-pointer font-semibold">
-                {t("logistics.form.codTitle")}
-              </Label>
-              <p className="text-sm text-slate-600 mt-1">{t("logistics.form.codDesc")}</p>
-              {form.codSupported && (
-                <div className="mt-3">
-                  <Label htmlFor="codFee" className="text-xs">
-                    {t("logistics.form.codFee")}
-                  </Label>
-                  <Input
-                    id="codFee"
-                    placeholder={t("logistics.form.codFeePlaceholder")}
-                    className="mt-1 max-w-xs"
-                    value={form.codFee}
-                    onChange={(e) => setForm((f) => ({ ...f, codFee: e.target.value }))}
-                  />
-                </div>
-              )}
-            </div>
+        <div className="flex items-center justify-between rounded-lg border border-slate-200 p-4">
+          <div>
+            <Label htmlFor="codSupported">{t("logistics.form.codTitle")}</Label>
+            <p className="text-sm text-slate-500 mt-1">{t("logistics.form.codDesc")}</p>
           </div>
+          <Switch
+            id="codSupported"
+            checked={form.codSupported}
+            onCheckedChange={(checked) =>
+              setForm((f) => ({ ...f, codSupported: checked === true }))
+            }
+          />
         </div>
 
         <div>
@@ -410,37 +491,149 @@ export function LogisticsPartnerFormPage(props: LogisticsPartnerFormPageProps) {
                   </label>
 
                   {enabled && rate && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 pl-6">
-                      <div>
-                        <Label className="text-xs">{t("logistics.form.estimatedDelivery")}</Label>
-                        <Input
-                          placeholder={t("logistics.form.estimatedPlaceholder")}
-                          className="mt-1"
-                          value={rate.estimatedDays}
-                          onChange={(e) =>
-                            updateRegionRate(region, "estimatedDays", e.target.value)
-                          }
-                        />
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 pl-6">
+                        <div>
+                          <Label className="text-xs">{t("logistics.form.estimatedDelivery")}</Label>
+                          <Input
+                            placeholder={t("logistics.form.estimatedPlaceholder")}
+                            className="mt-1"
+                            value={rate.estimatedDays}
+                            onChange={(e) =>
+                              updateRegionRate(region, "estimatedDays", e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">{t("logistics.form.minCost")}</Label>
+                          <Input
+                            placeholder="3000"
+                            className="mt-1"
+                            value={rate.costMin}
+                            onChange={(e) => updateRegionRate(region, "costMin", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">{t("logistics.form.maxCost")}</Label>
+                          <Input
+                            placeholder={t("logistics.form.maxCostPlaceholder")}
+                            className="mt-1"
+                            value={rate.costMax}
+                            onChange={(e) => updateRegionRate(region, "costMax", e.target.value)}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <Label className="text-xs">{t("logistics.form.minCost")}</Label>
-                        <Input
-                          placeholder="3000"
-                          className="mt-1"
-                          value={rate.costMin}
-                          onChange={(e) => updateRegionRate(region, "costMin", e.target.value)}
-                        />
+
+                      <div className="mt-4 ml-6 border-t border-purple-100 pt-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                          <div>
+                            <Label className="text-xs font-semibold">
+                              {t("logistics.form.townshipExceptions")}
+                            </Label>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {t("logistics.form.townshipExceptionsHint")}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => addTownshipException(region)}
+                          >
+                            <Plus className="w-3.5 h-3.5 mr-1" />
+                            {t("logistics.form.addTownshipException")}
+                          </Button>
+                        </div>
+
+                        {Object.keys(rate.townshipExceptions || {}).length === 0 ? (
+                          <p className="text-xs text-slate-400 italic">
+                            {t("logistics.form.noTownshipExceptions")}
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {Object.entries(rate.townshipExceptions || {}).map(
+                              ([township, exception]) => {
+                                const usedElsewhere = new Set(
+                                  Object.keys(rate.townshipExceptions || {}).filter(
+                                    (k) => k !== township
+                                  )
+                                );
+                                const townshipOptions = myanmarTownshipSelectOptions(region).filter(
+                                  (option) =>
+                                    option === township || !usedElsewhere.has(option)
+                                );
+                                return (
+                                  <div
+                                    key={`${region}-${township}`}
+                                    className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-end rounded-md border border-slate-200 bg-white p-2"
+                                  >
+                                    <div>
+                                      <Label className="text-xs">{t("logistics.form.township")}</Label>
+                                      <MyanmarSearchableSelect
+                                        value={township}
+                                        onValueChange={(value) =>
+                                          changeTownshipExceptionKey(region, township, value)
+                                        }
+                                        options={townshipOptions}
+                                        placeholder={t("logistics.form.selectTownship")}
+                                        searchPlaceholder={t("logistics.form.searchTownship")}
+                                        emptyText={t("logistics.form.noTownshipResults")}
+                                        className="mt-1 h-9 w-full"
+                                        language={language}
+                                        kind="township"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs">{t("logistics.form.minCost")}</Label>
+                                      <Input
+                                        placeholder="5000"
+                                        className="mt-1 h-9"
+                                        value={exception.costMin}
+                                        onChange={(e) =>
+                                          updateTownshipExceptionRate(
+                                            region,
+                                            township,
+                                            "costMin",
+                                            e.target.value
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs">{t("logistics.form.maxCost")}</Label>
+                                      <Input
+                                        placeholder={t("logistics.form.maxCostPlaceholder")}
+                                        className="mt-1 h-9"
+                                        value={exception.costMax}
+                                        onChange={(e) =>
+                                          updateTownshipExceptionRate(
+                                            region,
+                                            township,
+                                            "costMax",
+                                            e.target.value
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-9 w-9 text-slate-500 hover:text-red-600"
+                                      onClick={() => removeTownshipException(region, township)}
+                                      aria-label={t("logistics.form.removeTownshipException")}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <Label className="text-xs">{t("logistics.form.maxCost")}</Label>
-                        <Input
-                          placeholder={t("logistics.form.maxCostPlaceholder")}
-                          className="mt-1"
-                          value={rate.costMax}
-                          onChange={(e) => updateRegionRate(region, "costMax", e.target.value)}
-                        />
-                      </div>
-                    </div>
+                    </>
                   )}
                 </div>
               );

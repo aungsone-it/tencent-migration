@@ -18,6 +18,12 @@ export type RegionShippingRate = {
   estimatedDays: string;
   costMin: string;
   costMax: string;
+  townshipExceptions?: Record<string, TownshipShippingRate>;
+};
+
+export type TownshipShippingRate = {
+  costMin: string;
+  costMax: string;
 };
 
 export type DeliveryPartnerRecord = {
@@ -48,6 +54,28 @@ function newPartnerId(): string {
   return `logistics_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeTownshipException(raw: unknown): TownshipShippingRate | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const costMin = String(o.costMin ?? "").trim();
+  const hasExplicitMax = o.costMax !== undefined && o.costMax !== null;
+  const costMax = hasExplicitMax ? String(o.costMax).trim() : "";
+  if (!costMin) return null;
+  return { costMin, costMax };
+}
+
+function normalizeTownshipExceptions(raw: unknown): Record<string, TownshipShippingRate> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, TownshipShippingRate> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const township = String(key || "").trim();
+    if (!township) continue;
+    const rate = normalizeTownshipException(value);
+    if (rate) out[township] = rate;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function normalizeRegionRate(raw: unknown): RegionShippingRate | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -60,7 +88,13 @@ function normalizeRegionRate(raw: unknown): RegionShippingRate | null {
       ? String(o.cost).trim()
       : "";
   if (!estimatedDays && !costMin && !costMax) return null;
-  return { estimatedDays, costMin, costMax };
+  const townshipExceptions = normalizeTownshipExceptions(o.townshipExceptions);
+  return {
+    estimatedDays,
+    costMin,
+    costMax,
+    ...(townshipExceptions ? { townshipExceptions } : {}),
+  };
 }
 
 function normalizeRegionRates(raw: unknown): Record<string, RegionShippingRate> {
@@ -102,11 +136,33 @@ function migrateLegacyPartnerFields(
   return out;
 }
 
+function mergeRawTownshipExceptions(
+  rawRegionRates: unknown,
+  normalized: Record<string, RegionShippingRate>
+): Record<string, RegionShippingRate> {
+  if (!rawRegionRates || typeof rawRegionRates !== "object" || Array.isArray(rawRegionRates)) {
+    return normalized;
+  }
+  const out = { ...normalized };
+  for (const [region, rawRate] of Object.entries(rawRegionRates as Record<string, unknown>)) {
+    if (!out[region] || !rawRate || typeof rawRate !== "object") continue;
+    const rawObj = rawRate as Record<string, unknown>;
+    const recovered = normalizeTownshipExceptions(rawObj.townshipExceptions);
+    if (recovered) {
+      out[region] = { ...out[region], townshipExceptions: recovered };
+    }
+  }
+  return out;
+}
+
 function normalizePartner(raw: unknown, id: string): DeliveryPartnerRecord | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const status = String(o.status || "active").toLowerCase() === "inactive" ? "inactive" : "active";
-  const regionRates = migrateLegacyPartnerFields(o, normalizeRegionRates(o.regionRates));
+  const regionRates = mergeRawTownshipExceptions(
+    o.regionRates,
+    migrateLegacyPartnerFields(o, normalizeRegionRates(o.regionRates))
+  );
 
   return {
     id,
@@ -156,6 +212,11 @@ function parsePartnerBody(body: Record<string, unknown>): Omit<
     }
     if (!rate.costMin) {
       return { error: `Minimum shipping cost is required for ${region}` };
+    }
+    for (const [township, exception] of Object.entries(rate.townshipExceptions || {})) {
+      if (!exception.costMin) {
+        return { error: `Minimum shipping cost is required for ${township} (${region} exception)` };
+      }
     }
   }
 

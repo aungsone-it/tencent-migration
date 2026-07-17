@@ -1247,16 +1247,24 @@ export function Checkout({
     [shippingInfo.state]
   );
 
+  const checkoutTownshipKey = useMemo(
+    () => shippingInfo.city,
+    [shippingInfo.city]
+  );
+
   const logisticsQuote = useMemo(
-    () => resolveCheckoutLogisticsQuote(logisticsPartners, checkoutRegionKey),
-    [logisticsPartners, checkoutRegionKey]
+    () =>
+      resolveCheckoutLogisticsQuote(
+        logisticsPartners,
+        checkoutRegionKey,
+        checkoutTownshipKey
+      ),
+    [logisticsPartners, checkoutRegionKey, checkoutTownshipKey]
   );
 
   const hasSelectedRegion = Boolean(checkoutRegionKey);
   const shippingUnavailable = hasSelectedRegion && !logisticsQuote;
   const shippingFee = logisticsQuote?.shippingFee ?? 0;
-  const codFeeAmount =
-    paymentMethod === "COD" && logisticsQuote?.codSupported ? logisticsQuote.codFee : 0;
 
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
@@ -1271,7 +1279,7 @@ export function Checkout({
   const summaryDisplayItems = checkoutItems;
   const summaryDisplayTotal = checkoutSubtotal;
   const payableSubtotal = Math.max(Number(summaryDisplayTotal || 0), 0);
-  const finalTotal = Math.max(payableSubtotal - discountAmount + shippingFee + codFeeAmount, 0);
+  const finalTotal = Math.max(payableSubtotal - discountAmount + shippingFee, 0);
 
   const shippingSummaryLabel = useMemo(() => {
     if (!checkoutRegionKey) return t("checkout.selectRegionForShipping");
@@ -1839,15 +1847,15 @@ export function Checkout({
         subtotal: payableSubtotal,
         total: finalTotal,
         discount: discountAmount,
-        shippingFee: shippingFee + codFeeAmount,
-        shippingCost: shippingFee + codFeeAmount,
-        shipping: shippingFee + codFeeAmount,
+        shippingFee,
+        shippingCost: shippingFee,
+        shipping: shippingFee,
         deliveryPartnerId: logisticsQuote?.partner.id || null,
         deliveryPartnerName: logisticsQuote?.partner.name || null,
         deliveryService: logisticsQuote?.partner.name || null,
         deliveryServiceLogo: logisticsQuote?.partner.logo || null,
         estimatedDelivery: estimatedDeliveryLabel,
-        codFee: codFeeAmount,
+        codFee: 0,
         couponCode: appliedCoupon?.campaign?.code || null,
         couponId: appliedCoupon?.campaign?.id || null,
         notes: orderNote,
@@ -2091,7 +2099,7 @@ export function Checkout({
     // 🔥 SAVE items and total BEFORE clearing cart
     setConfirmedItems(checkoutItems);
     setConfirmedTotal(finalTotal);
-    setConfirmedShippingFee(shippingFee + codFeeAmount);
+    setConfirmedShippingFee(shippingFee);
     setConfirmedDeliveryPartnerName(logisticsQuote?.partner.name || "");
     setConfirmedOrderNote(orderNote);
     setConfirmedCoupon(appliedCoupon);
@@ -2137,15 +2145,15 @@ export function Checkout({
         total: finalTotal,
         subtotal: payableSubtotal,
         discount: discountAmount,
-        shippingFee: shippingFee + codFeeAmount,
-        shippingCost: shippingFee + codFeeAmount,
-        shipping: shippingFee + codFeeAmount,
+        shippingFee,
+        shippingCost: shippingFee,
+        shipping: shippingFee,
         deliveryPartnerId: logisticsQuote?.partner.id || null,
         deliveryPartnerName: logisticsQuote?.partner.name || null,
         deliveryService: logisticsQuote?.partner.name || null,
         deliveryServiceLogo: logisticsQuote?.partner.logo || null,
         estimatedDelivery: estimatedDeliveryLabel,
-        codFee: codFeeAmount,
+        codFee: 0,
         date: new Date().toISOString(),
         vendor: vendorName || storeName, // 🔥 Add vendor name to order
         // 🎫 Include coupon information for tracking
@@ -2369,7 +2377,7 @@ export function Checkout({
         orderNote,
         coupon: appliedCoupon,
         discount: discountAmount,
-        shippingFee: shippingFee + codFeeAmount,
+        shippingFee,
         deliveryPartnerName: logisticsQuote?.partner.name || "",
         shippingInfo: { ...shippingInfo },
         paymentMethod,
@@ -3013,15 +3021,6 @@ export function Checkout({
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">{t("checkout.estimatedDelivery")}</span>
                     <span className="text-slate-600">{estimatedDeliveryLabel}</span>
-                  </div>
-                )}
-
-                {codFeeAmount > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-600">COD fee</span>
-                    <span className="font-semibold text-slate-900">
-                      {formatStorefrontPrice(codFeeAmount)}
-                    </span>
                   </div>
                 )}
 

@@ -1,6 +1,6 @@
 /** Myanmar states/regions and their townships — checkout cascading selects. */
 
-import { MYANMAR_REGION_LABELS_MY } from "./myanmarRegionLabelsMy";
+import { MYANMAR_REGION_LABELS_MY, MYANMAR_TOWNSHIP_LABELS_MY } from "./myanmarRegionLabelsMy";
 
 export const MYANMAR_REGIONS = [
   "Yangon",
@@ -306,9 +306,16 @@ for (const region of MYANMAR_REGIONS) {
 }
 
 const TOWNSHIP_TO_REGION = new Map<string, MyanmarRegion>();
+const TOWNSHIP_LABEL_LOOKUP = new Map<string, string>();
 for (const region of MYANMAR_REGIONS) {
   for (const township of REGION_TOWNSHIPS[region]) {
     TOWNSHIP_TO_REGION.set(township.toLowerCase(), region);
+    TOWNSHIP_LABEL_LOOKUP.set(township.toLowerCase(), township);
+    const burmese = MYANMAR_TOWNSHIP_LABELS_MY[township as keyof typeof MYANMAR_TOWNSHIP_LABELS_MY];
+    if (burmese) {
+      TOWNSHIP_LABEL_LOOKUP.set(burmese.toLowerCase(), township);
+      TOWNSHIP_TO_REGION.set(burmese.toLowerCase(), region);
+    }
   }
 }
 
@@ -361,6 +368,21 @@ export function isTownshipInMyanmarRegion(region?: string, township?: string): b
   const trimmed = String(township || "").trim();
   if (!regionKey || !trimmed) return false;
   return REGION_TOWNSHIPS[regionKey].some((t) => t.toLowerCase() === trimmed.toLowerCase());
+}
+
+/** Canonical English township key within a region (for logistics exception keys). */
+export function normalizeTownshipKey(region?: string, township?: string): string | undefined {
+  const regionKey = normalizeRegionKey(region);
+  const trimmed = String(township || "").trim();
+  if (!trimmed) return undefined;
+
+  const canonical = TOWNSHIP_LABEL_LOOKUP.get(trimmed.toLowerCase());
+  if (!canonical) return undefined;
+
+  const townshipRegion = TOWNSHIP_TO_REGION.get(trimmed.toLowerCase());
+  if (regionKey && townshipRegion && townshipRegion !== regionKey) return undefined;
+
+  return canonical;
 }
 
 /** Backward-compatible aliases used elsewhere. */

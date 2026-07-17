@@ -75,7 +75,10 @@ interface OrderItem {
   notes?: string;
   deliveryService?: string;
   deliveryServiceLogo?: string;
+  deliveryPartnerName?: string;
   shippingFee?: number;
+  shippingCost?: number;
+  shipping?: number;
   paymentMethod?: "credit-card" | "cod" | "bank-transfer" | "kbz-qr" | "kbz-pwa";
   kpay?: unknown;
   timeline: {
@@ -193,6 +196,24 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
   
   // Calculate discount percentage
   const discountPercentage = displaySubtotal > 0 ? Math.round((actualDiscount / displaySubtotal) * 100) : 0;
+
+  const parseOrderAmount = (value: number | string | undefined): number => {
+    if (typeof value === "number") return value;
+    if (typeof value === "string") return parseFloat(value.replace(/[^0-9.-]+/g, "")) || 0;
+    return 0;
+  };
+
+  const deliveryCompany = String(
+    order.deliveryService || order.deliveryPartnerName || ""
+  ).trim();
+  const shippingFeeRaw = parseOrderAmount(
+    order.shippingFee ?? order.shippingCost ?? order.shipping ?? 0
+  );
+  const orderTotal = parseOrderAmount(order.total);
+  const shippingFee =
+    shippingFeeRaw > 0
+      ? shippingFeeRaw
+      : Math.max(0, orderTotal - displaySubtotal + (hasDiscount ? actualDiscount : 0));
 
   const invoiceSheetOrder = useMemo(() => toInvoiceSheetOrder({
     ...order,
@@ -432,10 +453,25 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                           <span className="font-medium text-green-600">-{actualDiscount.toLocaleString()} Ks ({discountPercentage}%)</span>
                         </div>
                       )}
-                      <div className="flex justify-between text-slate-600">
-                        <span>Shipping</span>
-                        <span className="font-medium">Free</span>
-                      </div>
+                      {shippingFee > 0 ? (
+                        <>
+                          {deliveryCompany && (
+                            <div className="flex justify-between text-slate-600">
+                              <span>Delivery</span>
+                              <span className="font-medium text-slate-900">{deliveryCompany}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-slate-600">
+                            <span>Shipping fee</span>
+                            <span className="font-medium">{shippingFee.toLocaleString()} Ks</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between text-slate-600">
+                          <span>Shipping</span>
+                          <span className="font-medium">Free</span>
+                        </div>
+                      )}
                       <div className="flex justify-between pt-3 border-t border-slate-200">
                         <span className="font-semibold text-slate-900 text-lg">Total</span>
                         <span className="font-bold text-slate-900 text-xl">{order.total.toLocaleString()} Ks</span>

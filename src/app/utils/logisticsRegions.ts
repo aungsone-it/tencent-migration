@@ -23,7 +23,37 @@ export type RegionShippingRate = {
   estimatedDays: string;
   costMin: string;
   costMax: string;
+  /** Township-specific overrides within this region (canonical English township keys). */
+  townshipExceptions?: Record<string, TownshipShippingRate>;
 };
+
+export type TownshipShippingRate = {
+  costMin: string;
+  costMax: string;
+};
+
+export function resolveEffectiveRegionRate(
+  rate: RegionShippingRate,
+  townshipKey?: string | null
+): RegionShippingRate & { isTownshipException: boolean; townshipKey?: string } {
+  const township = String(townshipKey || "").trim();
+  if (township && rate.townshipExceptions) {
+    const match = Object.entries(rate.townshipExceptions).find(
+      ([key]) => key.toLowerCase() === township.toLowerCase()
+    );
+    if (match) {
+      const [townshipKey, exception] = match;
+      return {
+        estimatedDays: rate.estimatedDays,
+        costMin: exception.costMin,
+        costMax: exception.costMax,
+        isTownshipException: true,
+        townshipKey,
+      };
+    }
+  }
+  return { ...rate, isTownshipException: false };
+}
 
 export function getPartnerRegionKeys(
   regionRates: Record<string, RegionShippingRate> | undefined | null

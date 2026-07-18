@@ -20,6 +20,13 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
 import { useCart } from "./CartContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -77,6 +84,7 @@ import { logisticsApi, type DeliveryPartner } from "../../utils/api";
 import {
   formatCheckoutShippingLabel,
   formatEstimatedDeliveryLabel,
+  listCheckoutLogisticsQuotes,
   resolveCheckoutLogisticsQuote,
 } from "../utils/checkoutLogistics";
 
@@ -1228,6 +1236,7 @@ export function Checkout({
     String(initialSummarySnapshot?.deliveryPartnerName || "").trim()
   );
   const [logisticsPartners, setLogisticsPartners] = useState<DeliveryPartner[]>([]);
+  const [selectedDeliveryPartnerId, setSelectedDeliveryPartnerId] = useState("");
   const [miniSummaryItems, setMiniSummaryItems] = useState<any[]>(
     () => (Array.isArray(initialMiniSummaryCache?.items) ? initialMiniSummaryCache!.items : [])
   );
@@ -1284,9 +1293,9 @@ export function Checkout({
     [shippingInfo.city]
   );
 
-  const logisticsQuote = useMemo(
+  const logisticsQuotes = useMemo(
     () =>
-      resolveCheckoutLogisticsQuote(
+      listCheckoutLogisticsQuotes(
         logisticsPartners,
         checkoutRegionKey,
         checkoutTownshipKey
@@ -1294,9 +1303,46 @@ export function Checkout({
     [logisticsPartners, checkoutRegionKey, checkoutTownshipKey]
   );
 
+  useEffect(() => {
+    setSelectedDeliveryPartnerId((current) => {
+      if (logisticsQuotes.some((quote) => quote.partner.id === current)) {
+        return current;
+      }
+      return logisticsQuotes[0]?.partner.id ?? "";
+    });
+  }, [logisticsQuotes]);
+
+  const logisticsQuote = useMemo(
+    () =>
+      resolveCheckoutLogisticsQuote(
+        logisticsPartners,
+        checkoutRegionKey,
+        checkoutTownshipKey,
+        selectedDeliveryPartnerId
+      ),
+    [
+      logisticsPartners,
+      checkoutRegionKey,
+      checkoutTownshipKey,
+      selectedDeliveryPartnerId,
+    ]
+  );
+
   const hasSelectedRegion = Boolean(checkoutRegionKey);
-  const shippingUnavailable = hasSelectedRegion && !logisticsQuote;
-  const shippingFee = logisticsQuote?.shippingFee ?? 0;
+  const hasSelectedTownship = Boolean(String(shippingInfo.city || "").trim());
+  const showDeliveryPartnerSelect =
+    hasSelectedRegion &&
+    hasSelectedTownship &&
+    logisticsQuotes.length > 1;
+  const shippingUnavailable = hasSelectedRegion && hasSelectedTownship && !logisticsQuote;
+  const shippingMethodComplete = Boolean(
+    hasSelectedRegion &&
+      hasSelectedTownship &&
+      logisticsQuote &&
+      (!showDeliveryPartnerSelect || selectedDeliveryPartnerId)
+  );
+  const paymentSelectionEnabled = shippingMethodComplete;
+  const shippingFee = shippingMethodComplete ? (logisticsQuote?.shippingFee ?? 0) : 0;
 
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
@@ -1315,9 +1361,10 @@ export function Checkout({
 
   const shippingSummaryLabel = useMemo(() => {
     if (!checkoutRegionKey) return t("checkout.selectRegionForShipping");
+    if (!hasSelectedTownship) return t("checkout.selectTownship");
     if (!logisticsQuote) return t("checkout.shippingUnavailable");
     return formatCheckoutShippingLabel(logisticsQuote, formatStorefrontPrice) || t("checkout.free");
-  }, [checkoutRegionKey, logisticsQuote, t]);
+  }, [checkoutRegionKey, hasSelectedTownship, logisticsQuote, t]);
 
   const estimatedDeliveryLabel = useMemo(() => {
     if (!logisticsQuote?.estimatedDays) return null;
@@ -1326,8 +1373,32 @@ export function Checkout({
     );
   }, [logisticsQuote?.estimatedDays, t]);
 
+  const deliveryPartnerSelectOptions = useMemo(
+    () =>
+      logisticsQuotes.map((quote) => {
+        const priceLabel =
+          formatCheckoutShippingLabel(quote, formatStorefrontPrice) ||
+          t("checkout.free");
+        const etaLabel = quote.estimatedDays
+          ? formatEstimatedDeliveryLabel(quote.estimatedDays, (days) =>
+              t("checkout.withinDays").replace("{days}", String(days))
+            )
+          : null;
+        const label = etaLabel
+          ? `${quote.partner.name} — ${priceLabel} (${etaLabel})`
+          : `${quote.partner.name} — ${priceLabel}`;
+        return { id: quote.partner.id, label };
+      }),
+    [logisticsQuotes, t]
+  );
+
   const codPaymentAvailable =
-    Boolean(logisticsQuote?.codSupported) && !shippingUnavailable;
+    paymentSelectionEnabled && Boolean(logisticsQuote?.codSupported);
+
+  useEffect(() => {
+    if (paymentSelectionEnabled) return;
+    setPaymentMethod("None");
+  }, [paymentSelectionEnabled]);
 
   useEffect(() => {
     if (paymentMethod !== "COD") return;
@@ -1822,15 +1893,33 @@ export function Checkout({
     if (!shippingInfo.address.trim()) missingFields.push(t("checkout.address"));
     if (!shippingInfo.state.trim()) missingFields.push(t("checkout.stateRegion"));
     if (!shippingInfo.city.trim()) missingFields.push(t("checkout.township"));
+    if (showDeliveryPartnerSelect && !selectedDeliveryPartnerId) {
+      missingFields.push(t("checkout.deliveryMethod"));
+    }
+    if (hasSelectedRegion && hasSelectedTownship && shippingUnavailable) {
+      missingFields.push(t("checkout.deliveryMethod"));
+    }
     return missingFields;
   };
 
   const checkoutFieldsComplete = useMemo(
     () => getMissingRequiredFields().length === 0,
-    [shippingInfo, t]
+    [
+      shippingInfo,
+      t,
+      showDeliveryPartnerSelect,
+      selectedDeliveryPartnerId,
+      shippingUnavailable,
+      hasSelectedRegion,
+      hasSelectedTownship,
+    ]
   );
 
   const handleSelectKPayQr = () => {
+    if (!paymentSelectionEnabled) {
+      toast.error(t("checkout.selectDeliveryMethodFirst"));
+      return;
+    }
     const missingFields = getMissingRequiredFields();
     if (missingFields.length > 0) {
       toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
@@ -1840,6 +1929,10 @@ export function Checkout({
   };
 
   const handleSelectKPayPwa = () => {
+    if (!paymentSelectionEnabled) {
+      toast.error(t("checkout.selectDeliveryMethodFirst"));
+      return;
+    }
     const missingFields = getMissingRequiredFields();
     if (missingFields.length > 0) {
       toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
@@ -1855,6 +1948,10 @@ export function Checkout({
   // can finish placing the order once payment is confirmed.
   const handleStartKPayPwa = async () => {
     try {
+      if (!paymentSelectionEnabled) {
+        toast.error(t("checkout.selectDeliveryMethodFirst"));
+        return;
+      }
       const missingFields = getMissingRequiredFields();
       if (missingFields.length > 0) {
         toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
@@ -2074,7 +2171,11 @@ export function Checkout({
       return;
     }
     if (paymentMethod === "None") {
-      toast.error("Please select a payment method");
+      toast.error(t("checkout.selectPaymentMethod"));
+      return;
+    }
+    if (!shippingMethodComplete) {
+      toast.error(t("checkout.selectDeliveryMethodFirst"));
       return;
     }
     if (shippingUnavailable) {
@@ -2796,6 +2897,30 @@ export function Checkout({
                 </div>
               </div>
 
+              {showDeliveryPartnerSelect && (
+                <div>
+                  <Label htmlFor="vs-delivery-partner" className={checkoutLabelClass}>
+                    {t("checkout.deliveryMethod")} *
+                  </Label>
+                  <Select
+                    value={selectedDeliveryPartnerId}
+                    onValueChange={setSelectedDeliveryPartnerId}
+                    required
+                  >
+                    <SelectTrigger id="vs-delivery-partner" className={checkoutSelectClass}>
+                      <SelectValue placeholder={t("checkout.selectDeliveryMethod")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {deliveryPartnerSelectOptions.map((option) => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {/* Payment */}
               <div>
                 <h2 className="mb-3 text-lg font-semibold text-slate-900" style={{ fontFamily: "Rubik, sans-serif" }}>
@@ -2811,11 +2936,17 @@ export function Checkout({
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                {!paymentSelectionEnabled && (
+                  <p className="mb-3 text-xs text-amber-700">
+                    {t("checkout.selectDeliveryMethodFirst")}
+                  </p>
+                )}
+
+                <div className={`space-y-3 ${!paymentSelectionEnabled ? "opacity-60" : ""}`}>
                   <button
                     type="button"
                     onClick={() => codPaymentAvailable && setPaymentMethod("COD")}
-                    disabled={!codPaymentAvailable}
+                    disabled={!codPaymentAvailable || !paymentSelectionEnabled}
                     className={`w-full rounded-lg border p-4 text-left transition-colors ${
                       paymentMethod === "COD"
                         ? "border-slate-900 bg-slate-50"
@@ -2852,10 +2983,13 @@ export function Checkout({
                   <button
                     type="button"
                     onClick={handleSelectKPayQr}
+                    disabled={!paymentSelectionEnabled}
                     className={`w-full rounded-lg border p-4 text-left transition-colors ${
                       paymentMethod === "KPay"
                         ? "border-slate-900 bg-slate-50"
-                        : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                        : paymentSelectionEnabled
+                          ? "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                          : "border-slate-200 bg-slate-100 cursor-not-allowed"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -2954,10 +3088,13 @@ export function Checkout({
                   <button
                     type="button"
                     onClick={handleSelectKPayPwa}
+                    disabled={!paymentSelectionEnabled}
                     className={`w-full rounded-lg border p-4 text-left transition-colors ${
                       paymentMethod === "KPay-PWA"
                         ? "border-slate-900 bg-slate-50"
-                        : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                        : paymentSelectionEnabled
+                          ? "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                          : "border-slate-200 bg-slate-100 cursor-not-allowed"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -3080,9 +3217,10 @@ export function Checkout({
                     ? () => void handleStartKPayPwa()
                     : () => void handlePlaceOrder()
                 }
-                disabled={
+                  disabled={
                   loading ||
                   kpayPwaLoading ||
+                  !shippingMethodComplete ||
                   shippingUnavailable ||
                   paymentMethod === "None" ||
                   (paymentMethod === "KPay" && (!canSubmitKPayOrder || !kpayWebhookConfirmed))

@@ -15,15 +15,18 @@ export type CheckoutLogisticsQuote = {
   isTownshipException: boolean;
 };
 
-export function resolveCheckoutLogisticsQuote(
+function buildCheckoutLogisticsQuotes(
   partners: DeliveryPartner[],
   regionKey: string | undefined | null,
   townshipKey?: string | undefined | null
-): CheckoutLogisticsQuote | null {
+): CheckoutLogisticsQuote[] {
   const region = String(regionKey || "").trim();
-  if (!region) return null;
+  if (!region) return [];
 
-  const township = normalizeTownshipKey(region, townshipKey) || String(townshipKey || "").trim() || undefined;
+  const township =
+    normalizeTownshipKey(region, townshipKey) ||
+    String(townshipKey || "").trim() ||
+    undefined;
 
   const candidates: CheckoutLogisticsQuote[] = [];
   for (const partner of partners) {
@@ -44,16 +47,41 @@ export function resolveCheckoutLogisticsQuote(
       estimatedDays: rate.estimatedDays,
       shippingFee: costMin,
       costMin,
-      costMax:
-        costMaxRaw != null && costMaxRaw !== costMin ? costMaxRaw : null,
+      costMax: costMaxRaw != null && costMaxRaw !== costMin ? costMaxRaw : null,
       codSupported: partner.codSupported,
       isTownshipException: rate.isTownshipException,
     });
   }
 
-  if (candidates.length === 0) return null;
   candidates.sort((a, b) => a.shippingFee - b.shippingFee);
-  return candidates[0];
+  return candidates;
+}
+
+/** All active partner quotes for a region/township, cheapest first. */
+export function listCheckoutLogisticsQuotes(
+  partners: DeliveryPartner[],
+  regionKey: string | undefined | null,
+  townshipKey?: string | undefined | null
+): CheckoutLogisticsQuote[] {
+  return buildCheckoutLogisticsQuotes(partners, regionKey, townshipKey);
+}
+
+export function resolveCheckoutLogisticsQuote(
+  partners: DeliveryPartner[],
+  regionKey: string | undefined | null,
+  townshipKey?: string | undefined | null,
+  partnerId?: string | undefined | null
+): CheckoutLogisticsQuote | null {
+  const quotes = buildCheckoutLogisticsQuotes(partners, regionKey, townshipKey);
+  if (quotes.length === 0) return null;
+
+  const selectedId = String(partnerId || "").trim();
+  if (selectedId) {
+    const selected = quotes.find((quote) => quote.partner.id === selectedId);
+    if (selected) return selected;
+  }
+
+  return quotes[0];
 }
 
 export function formatCheckoutShippingLabel(

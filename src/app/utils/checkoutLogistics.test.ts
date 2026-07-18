@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatCheckoutShippingLabel,
   formatEstimatedDeliveryLabel,
+  listCheckoutLogisticsQuotes,
   parseEstimatedDeliveryMaxDays,
   resolveCheckoutLogisticsQuote,
 } from "./checkoutLogistics";
@@ -87,5 +88,55 @@ describe("checkoutLogistics", () => {
     expect(formatEstimatedDeliveryLabel("3 to 10 days", (days) => `${days} ရက်အတွင်း`)).toBe(
       "10 ရက်အတွင်း"
     );
+  });
+
+  it("lists all partner quotes sorted by price", () => {
+    const cheaper: DeliveryPartner = {
+      ...partner,
+      id: "cheap",
+      name: "Cheap Carrier",
+      regionRates: {
+        Yangon: { estimatedDays: "2 days", costMin: "2000", costMax: "" },
+      },
+    };
+    const pricier: DeliveryPartner = {
+      ...partner,
+      id: "premium",
+      name: "Premium Carrier",
+      regionRates: {
+        Yangon: { estimatedDays: "1 day", costMin: "5000", costMax: "" },
+      },
+    };
+
+    const quotes = listCheckoutLogisticsQuotes([pricier, cheaper], "Yangon");
+    expect(quotes.map((quote) => quote.partner.id)).toEqual(["cheap", "premium"]);
+  });
+
+  it("returns the selected partner quote when partnerId is provided", () => {
+    const cheaper: DeliveryPartner = {
+      ...partner,
+      id: "cheap",
+      name: "Cheap Carrier",
+      regionRates: {
+        Yangon: { estimatedDays: "2 days", costMin: "2000", costMax: "" },
+      },
+    };
+    const pricier: DeliveryPartner = {
+      ...partner,
+      id: "premium",
+      name: "Premium Carrier",
+      regionRates: {
+        Yangon: { estimatedDays: "1 day", costMin: "5000", costMax: "" },
+      },
+    };
+
+    const quote = resolveCheckoutLogisticsQuote(
+      [cheaper, pricier],
+      "Yangon",
+      undefined,
+      "premium"
+    );
+    expect(quote?.partner.id).toBe("premium");
+    expect(quote?.shippingFee).toBe(5000);
   });
 });

@@ -63,6 +63,8 @@ export const MYANMAR_TOWNSHIP_LABELS_MY = {
   "Daik-U": "ဒိုက်ဦး",
   "Dala": "ဒလ",
   "Danubyu": "ဓနုဖြူ",
+  "Daga": "ဒဂါ",
+  "Dauntgyi": "ဒေါင်းကြည်",
   "Dawbon": "ဒေါပုံ",
   "Dawei": "ထားဝယ်",
   "Dawthponeyan": "ဒေါ့ဖုန်းယန်",

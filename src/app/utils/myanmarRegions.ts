@@ -614,6 +614,8 @@ const TOWNSHIP_ALIASES: Record<string, string> = {
   "Pyinoolwin": "Pyin Oo Lwin",
   "Seikgyikanaungto": "Seikgyi Kanaungto",
   "Tatkone": "Tatkon",
+  "Thapaung": "Thabaung",
+  "Thapaung Township": "Thabaung",
   "Toungup": "Taungup",
   "Za Bu Thi Ri": "Zabuthiri",
   "Zay Yar Thi Ri": "Zeyarthiri",

@@ -893,7 +893,6 @@ authApp.get("/check-setup", async (c) => {
 authApp.get("/email-health", async (c) => {
   try {
     const sesConfig = readSesConfig();
-    const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
     const issues = validateSesConfig(sesConfig);
     const fromBuilt =
       sesConfig?.fromEmail ? buildSesFromAddress(sesConfig.fromEmail, sesConfig.fromName) : null;
@@ -901,7 +900,6 @@ authApp.get("/email-health", async (c) => {
     return c.json({
       ok: issues.length === 0,
       provider: "tencent-ses",
-      debugOtpEnabled: allowDebugOtp,
       region: sesConfig?.region,
       fromEmailConfigured: !!sesConfig?.fromEmail,
       fromName: sesConfig?.fromName,
@@ -1685,44 +1683,23 @@ authApp.post("/send-email-otp", async (c) => {
 
     console.log(`📧 OTP stored for ${email} (expires in 10 minutes)`);
 
-    // Send REAL email via Tencent SES (debug OTP is opt-in via ALLOW_DEBUG_OTP=true)
+    // Send email via Tencent SES
     try {
       const sesConfig = readSesConfig();
-      const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
 
       if (!sesConfig) {
-        console.warn("Tencent SES not configured — OTP stored; enable ALLOW_DEBUG_OTP for dev");
-        if (allowDebugOtp) {
-          return c.json({
-            success: true,
-            emailSent: false,
-            deliveryConfigured: false,
-            message: "OTP generated (debug mode enabled)",
-            debug_otp: otp,
-          });
-        }
+        console.error("Tencent SES not configured — cannot send password reset email");
         return c.json({
-          success: true,
           emailSent: false,
           deliveryConfigured: false,
-          message:
-            "Reset code was generated but email is not configured on the server. Set TENCENT_SECRET_ID, TENCENT_SECRET_KEY, and TENCENT_SES_FROM_EMAIL on the Cloud Function, or ask an admin to reset your password from Settings → Users.",
-        });
+          error:
+            "Password reset email is not configured on the server. Ask an admin to reset your password from Settings → Users.",
+        }, 503);
       }
 
       const fromBuilt = buildSesFromAddress(sesConfig.fromEmail, sesConfig.fromName);
       if ("error" in fromBuilt) {
         console.error("❌ Invalid TENCENT_SES_FROM_EMAIL:", fromBuilt.error);
-        if (allowDebugOtp) {
-          return c.json({
-            success: true,
-            emailSent: false,
-            deliveryConfigured: true,
-            message: "OTP generated (debug mode enabled)",
-            debug_otp: otp,
-            email_error: fromBuilt.error,
-          });
-        }
         return c.json({
           emailSent: false,
           deliveryConfigured: true,
@@ -1751,17 +1728,6 @@ authApp.post("/send-email-otp", async (c) => {
       });
     } catch (emailError: any) {
       console.error('Email sending error:', emailError);
-      const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
-      if (allowDebugOtp) {
-        return c.json({
-          success: true,
-          emailSent: false,
-          deliveryConfigured: true,
-          message: "OTP generated (debug mode enabled)",
-          debug_otp: otp,
-          email_error: emailError?.message || "Unknown email error",
-        });
-      }
       return c.json({
         emailSent: false,
         deliveryConfigured: true,

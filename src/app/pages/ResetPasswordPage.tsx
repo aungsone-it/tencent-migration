@@ -20,8 +20,6 @@ export function ResetPasswordPage() {
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [debugOtp, setDebugOtp] = useState('');
-  const [deliveryNotice, setDeliveryNotice] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
 
   const isVendorRoute = location.pathname.startsWith('/vendor/');
@@ -62,38 +60,15 @@ export function ResetPasswordPage() {
 
       const data = await response.json();
 
-      if (!response.ok) {
-        const message = data.email_error || data.error || 'Failed to send OTP';
+      if (!response.ok || data.emailSent === false) {
+        const message = data.email_error || data.error || data.message || 'Failed to send OTP';
         setError(message);
         toast.error(message);
         return false;
       }
 
       setError('');
-      if (data.debug_otp) {
-        setDebugOtp(data.debug_otp);
-        setDeliveryNotice('');
-      } else {
-        setDebugOtp('');
-        if (data.emailSent === false) {
-          setDeliveryNotice(
-            data.message ||
-              'Email delivery is not configured on the server. Ask an admin to reset your password from Settings → Users.'
-          );
-        } else {
-          setDeliveryNotice('');
-        }
-      }
-
-      if (data.debug_otp) {
-        toast.success('OTP generated (debug mode)');
-      } else if (data.emailSent === false) {
-        toast.warning(data.message || 'Reset code created, but email was not sent.');
-      } else if (data.message) {
-        toast.success(data.message);
-      } else {
-        toast.success('Password reset code sent to your email!');
-      }
+      toast.success(data.message || 'Password reset code sent to your email!');
       return true;
     } catch (err: any) {
       console.error('Send OTP error:', err);
@@ -287,23 +262,6 @@ export function ResetPasswordPage() {
                 Enter the 6-digit code sent to {email}
               </p>
             </div>
-
-            {deliveryNotice && !debugOtp && (
-              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
-                <p className="font-semibold">Email not sent</p>
-                <p className="mt-1">{deliveryNotice}</p>
-              </div>
-            )}
-
-            {debugOtp && (
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
-                <p className="font-semibold text-green-800">🔐 Demo Code:</p>
-                <p className="text-2xl font-bold text-green-700 text-center mt-2">{debugOtp}</p>
-                <p className="text-xs text-green-600 mt-2 text-center">
-                  (In production, this would be sent via email)
-                </p>
-              </div>
-            )}
 
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div>

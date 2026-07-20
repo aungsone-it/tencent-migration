@@ -40,8 +40,8 @@ export function ForgotPassword({ onBack }: ForgotPasswordProps) {
       );
 
       const data = await response.json();
-      if (!response.ok) {
-        setError(data.error || t('auth.forgotPassword.error'));
+      if (!response.ok || data.emailSent === false) {
+        setError(data.email_error || data.error || t('auth.forgotPassword.error'));
         setLoading(false);
         return;
       }

@@ -102,7 +102,7 @@ curl -sS "$VITE_CLOUDBASE_API_BASE_URL/auth/email-health" \
   -H "Authorization: Bearer $VITE_CLOUDBASE_PUBLISHABLE_KEY"
 ```
 
-Expect `"ok": true` and `"provider": "tencent-ses"`. For local/staging without SES, set `ALLOW_DEBUG_OTP=true` on the function — the reset page will show the code on screen.
+Expect `"ok": true` and `"provider": "tencent-ses"`. Password reset will fail with a clear error until SES credentials and a verified sender are configured.
 
 ### 4. Enable Authentication (+ optional Cloud Storage)
 

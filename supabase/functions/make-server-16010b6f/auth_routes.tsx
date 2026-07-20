@@ -13,6 +13,13 @@ import {
 } from "./staff_activity_helpers.tsx";
 import { queueCustomerReadModelSync } from "./read_model.ts";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
+import {
+  buildPasswordResetOtpEmailHtml,
+  buildSesFromAddress,
+  readSesConfig,
+  sendSesEmail,
+  validateSesConfig,
+} from "./tencent_ses.tsx";
 
 const authApp = new Hono();
 
@@ -867,45 +874,6 @@ function generatePassword(): string {
   return password;
 }
 
-function stripEnvQuotes(value: string): string {
-  const v = String(value || "").trim();
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-    return v.slice(1, -1).trim();
-  }
-  return v;
-}
-
-const EMAIL_ADDR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Build Resend `from` — accepts plain email or full `Name <email@domain>` in RESEND_FROM_EMAIL. */
-function buildResendFromAddress(
-  fromEmailRaw: string,
-  fromNameRaw: string,
-): { from: string } | { error: string } {
-  const fromEmail = stripEnvQuotes(fromEmailRaw);
-  const fromName = stripEnvQuotes(fromNameRaw);
-
-  const namedMatch = fromEmail.match(/^(.+?)\s*<([^<>]+)>$/);
-  if (namedMatch) {
-    const addr = namedMatch[2].trim();
-    if (!EMAIL_ADDR_RE.test(addr)) {
-      return { error: `Invalid RESEND_FROM_EMAIL address: ${addr}` };
-    }
-    return { from: fromEmail };
-  }
-
-  const plainEmail = fromEmail.replace(/^<|>$/g, "").trim();
-  if (EMAIL_ADDR_RE.test(plainEmail)) {
-    const safeName = (fromName || "Migoo Marketplace").replace(/[<>]/g, "").trim();
-    return { from: `${safeName} <${plainEmail}>` };
-  }
-
-  return {
-    error:
-      "Invalid RESEND_FROM_EMAIL. Set a plain address like noreply@yourdomain.com (recommended), not only a display name.",
-  };
-}
-
 // ============================================
 // CHECK IF SETUP IS NEEDED
 // ============================================
@@ -920,27 +888,23 @@ authApp.get("/check-setup", async (c) => {
 });
 
 // ============================================
-// EMAIL DELIVERY HEALTH (Resend config quick check)
+// EMAIL DELIVERY HEALTH (Tencent SES config quick check)
 // ============================================
 authApp.get("/email-health", async (c) => {
   try {
-    const resendApiKey = String(Deno.env.get("RESEND_API_KEY") || "").trim();
-    const resendFromEmail = String(Deno.env.get("RESEND_FROM_EMAIL") || "").trim();
-    const resendFromName = String(Deno.env.get("RESEND_FROM_NAME") || "Migoo Marketplace").trim();
+    const sesConfig = readSesConfig();
     const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
-
-    const issues: string[] = [];
-    if (!resendApiKey) issues.push("Missing RESEND_API_KEY");
-    if (!resendFromEmail) issues.push("Missing RESEND_FROM_EMAIL");
-    const fromBuilt = resendFromEmail ? buildResendFromAddress(resendFromEmail, resendFromName) : null;
-    if (fromBuilt && "error" in fromBuilt) issues.push(fromBuilt.error);
+    const issues = validateSesConfig(sesConfig);
+    const fromBuilt =
+      sesConfig?.fromEmail ? buildSesFromAddress(sesConfig.fromEmail, sesConfig.fromName) : null;
 
     return c.json({
       ok: issues.length === 0,
-      provider: "resend",
+      provider: "tencent-ses",
       debugOtpEnabled: allowDebugOtp,
-      fromEmailConfigured: !!resendFromEmail,
-      fromName: resendFromName,
+      region: sesConfig?.region,
+      fromEmailConfigured: !!sesConfig?.fromEmail,
+      fromName: sesConfig?.fromName,
       fromField: fromBuilt && "from" in fromBuilt ? fromBuilt.from : undefined,
       issues,
     }, issues.length === 0 ? 200 : 503);
@@ -1721,15 +1685,13 @@ authApp.post("/send-email-otp", async (c) => {
 
     console.log(`📧 OTP stored for ${email} (expires in 10 minutes)`);
 
-    // Send REAL email via Resend (debug OTP is opt-in via ALLOW_DEBUG_OTP=true)
+    // Send REAL email via Tencent SES (debug OTP is opt-in via ALLOW_DEBUG_OTP=true)
     try {
-      const resendApiKey = String(Deno.env.get("RESEND_API_KEY") || "").trim();
-      const resendFromEmail = String(Deno.env.get("RESEND_FROM_EMAIL") || "").trim();
-      const resendFromName = String(Deno.env.get("RESEND_FROM_NAME") || "Migoo Marketplace").trim();
+      const sesConfig = readSesConfig();
       const allowDebugOtp = String(Deno.env.get("ALLOW_DEBUG_OTP") || "").toLowerCase() === "true";
 
-      if (!resendApiKey) {
-        console.warn("RESEND_API_KEY not configured — OTP stored; enable ALLOW_DEBUG_OTP for dev");
+      if (!sesConfig) {
+        console.warn("Tencent SES not configured — OTP stored; enable ALLOW_DEBUG_OTP for dev");
         if (allowDebugOtp) {
           return c.json({
             success: true,
@@ -1744,31 +1706,13 @@ authApp.post("/send-email-otp", async (c) => {
           emailSent: false,
           deliveryConfigured: false,
           message:
-            "Reset code was generated but email is not configured on the server. Set RESEND_API_KEY and RESEND_FROM_EMAIL on the Cloud Function, or ask an admin to reset your password from Settings → Users.",
+            "Reset code was generated but email is not configured on the server. Set TENCENT_SECRET_ID, TENCENT_SECRET_KEY, and TENCENT_SES_FROM_EMAIL on the Cloud Function, or ask an admin to reset your password from Settings → Users.",
         });
       }
 
-      if (!resendFromEmail) {
-        console.error("❌ RESEND_FROM_EMAIL not configured");
-        if (allowDebugOtp) {
-          return c.json({
-            success: true,
-            emailSent: false,
-            deliveryConfigured: false,
-            message: "OTP generated (debug mode enabled)",
-            debug_otp: otp,
-          });
-        }
-        return c.json({
-          emailSent: false,
-          deliveryConfigured: false,
-          error: "Password reset sender is not configured. Please contact support.",
-        }, 503);
-      }
-
-      const fromBuilt = buildResendFromAddress(resendFromEmail, resendFromName);
+      const fromBuilt = buildSesFromAddress(sesConfig.fromEmail, sesConfig.fromName);
       if ("error" in fromBuilt) {
-        console.error("❌ Invalid RESEND_FROM_EMAIL:", fromBuilt.error);
+        console.error("❌ Invalid TENCENT_SES_FROM_EMAIL:", fromBuilt.error);
         if (allowDebugOtp) {
           return c.json({
             success: true,
@@ -1787,83 +1731,17 @@ authApp.post("/send-email-otp", async (c) => {
         }, 503);
       }
 
-      const emailResponse = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${resendApiKey}`,
-        },
-        body: JSON.stringify({
-          from: fromBuilt.from,
-          to: [email],
-          subject: 'Password Reset Code - Migoo',
-          html: `
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <meta charset="utf-8">
-                <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #0f172a; background: #f1f5f9; margin: 0; padding: 24px; }
-                  .container { max-width: 600px; margin: 0 auto; }
-                  .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08); }
-                  .header { background: linear-gradient(135deg, #1a1d29 0%, #0f172a 55%, #1e3a8a 100%); color: #ffffff; padding: 28px 30px; text-align: center; }
-                  .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: 0.02em; }
-                  .content { padding: 32px 30px; color: #334155; }
-                  .content p { margin: 0 0 16px; }
-                  .otp-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px 20px; text-align: center; margin: 24px 0; }
-                  .otp-label { margin: 0; color: #64748b; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
-                  .otp-code { font-size: 36px; font-weight: 700; color: #0f172a; letter-spacing: 8px; margin: 12px 0; font-variant-numeric: tabular-nums; }
-                  .otp-expiry { margin: 0; color: #64748b; font-size: 13px; }
-                  .content ul { margin: 0 0 16px; padding-left: 20px; color: #475569; }
-                  .content li { margin-bottom: 6px; }
-                  .footer { text-align: center; margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; }
-                  .footer p { margin: 0 0 6px; }
-                </style>
-              </head>
-              <body>
-                <div class="container">
-                  <div class="card">
-                    <div class="header">
-                      <h1>Password Reset</h1>
-                    </div>
-                    <div class="content">
-                      <p>Hello,</p>
-                      <p>You requested to reset your password for your Migoo account. Use the verification code below:</p>
-                      
-                      <div class="otp-box">
-                        <p class="otp-label">Your verification code</p>
-                        <div class="otp-code">${otp}</div>
-                        <p class="otp-expiry">Valid for 10 minutes</p>
-                      </div>
-                      
-                      <p><strong>Important:</strong></p>
-                      <ul>
-                        <li>This code expires in <strong>10 minutes</strong></li>
-                        <li>Do not share this code with anyone</li>
-                        <li>If you didn't request this, please ignore this email</li>
-                      </ul>
-                      
-                      <div class="footer">
-                        <p>© 2026 Migoo Marketplace — Myanmar's Premier E-Commerce Platform</p>
-                        <p>This is an automated email, please do not reply.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </body>
-            </html>
-          `,
-        }),
+      const sendResult = await sendSesEmail({
+        config: sesConfig,
+        from: fromBuilt.from,
+        to: [email],
+        subject: "Password Reset Code - Migoo",
+        html: buildPasswordResetOtpEmailHtml(otp),
+        text: `Your Migoo password reset code is ${otp}. It expires in 10 minutes.`,
+        triggerType: 1,
       });
 
-      const emailResult = await emailResponse.json();
-
-      if (!emailResponse.ok) {
-        console.error('❌ Resend API error:', emailResult);
-        throw new Error(emailResult.message || 'Failed to send email');
-      }
-
-      console.log(`✅ Email sent successfully via Resend:`, emailResult.id);
+      console.log(`✅ Email sent successfully via Tencent SES:`, sendResult.messageId);
 
       return c.json({
         success: true,

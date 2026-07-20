@@ -129,7 +129,7 @@ src/app/components/VendorAdminPortal.tsx → vendor admin shell
 | **Vendors** | Application approval, subdomain assignment, delete audit |
 | **Storage** | Blob persist in KV (`storage:obj:*`), signed URL generation |
 | **Audit** | Staff activity log (`staff:activity:*`) |
-| **Secrets** | Admin operation secret, KPay keys, Resend email, Meta CAPI token |
+| **Secrets** | Admin operation secret, KPay keys, Tencent SES email, Meta CAPI token |
 
 Client must **never** embed secrets or bypass server validation.
 

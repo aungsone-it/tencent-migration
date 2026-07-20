@@ -77,13 +77,23 @@ Minimum:
 
 ### Email (password reset OTP)
 
-Password reset stores a code in KV, then sends it via [Resend](https://resend.com). Without these vars, **no email is sent** (the UI will warn instead of pretending delivery succeeded).
+Password reset stores a code in KV, then sends it via [Tencent Cloud SES](https://www.tencentcloud.com/products/ses). Without these vars, **no email is sent** (the UI will warn instead of pretending delivery succeeded).
 
 | Variable | Value |
 |----------|-------|
-| `RESEND_API_KEY` | API key from Resend dashboard |
-| `RESEND_FROM_EMAIL` | Verified sender **email only**, e.g. `noreply@yourdomain.com` (not the display name) |
-| `RESEND_FROM_NAME` | Optional display name (default: `Migoo Marketplace`) |
+| `TENCENT_SECRET_ID` | API SecretId from Tencent CAM |
+| `TENCENT_SECRET_KEY` | API SecretKey from Tencent CAM |
+| `TENCENT_SES_FROM_EMAIL` | Verified sender **email only**, e.g. `noreply@yourdomain.com` (not the display name) |
+| `TENCENT_SES_FROM_NAME` | Optional display name (default: `Migoo Marketplace`) |
+| `TENCENT_SES_REGION` | Optional SES region (default: `CLOUDBASE_REGION` or `ap-singapore`) |
+| `TENCENT_SES_REPLY_TO` | Optional reply-to address |
+
+**SES console setup (one-time):**
+
+1. Open [Tencent SES console](https://console.cloud.tencent.com/ses) in the same region as `TENCENT_SES_REGION`.
+2. **Sender domain** → add your domain → publish the DNS records (SPF, DKIM, etc.) until verified.
+3. **Sender address** → create `TENCENT_SES_FROM_EMAIL` under that domain.
+4. **CAM** → create an API key with SES send permissions (`ses:SendEmail`).
 
 Verify delivery after deploy:
 
@@ -92,7 +102,7 @@ curl -sS "$VITE_CLOUDBASE_API_BASE_URL/auth/email-health" \
   -H "Authorization: Bearer $VITE_CLOUDBASE_PUBLISHABLE_KEY"
 ```
 
-Expect `"ok": true`. For local/staging without Resend, set `ALLOW_DEBUG_OTP=true` on the function — the reset page will show the code on screen.
+Expect `"ok": true` and `"provider": "tencent-ses"`. For local/staging without SES, set `ALLOW_DEBUG_OTP=true` on the function — the reset page will show the code on screen.
 
 ### 4. Enable Authentication (+ optional Cloud Storage)
 

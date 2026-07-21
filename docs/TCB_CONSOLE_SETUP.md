@@ -240,6 +240,26 @@ Upload `dist/` to EdgeOne. Configure SPA fallback:
 
 (`public/_redirects` is copied into `dist/` for Netlify-style hosts.)
 
+**Automatic cache refresh after deploy**
+
+Each production build writes `dist/version.json` with a unique `buildId`. On the next visit (or within ~2 minutes for open tabs):
+
+1. The browser clears app caches (`localStorage` catalog/admin caches, in-memory module cache).
+2. Service workers and Cache Storage are removed.
+3. The page hard-reloads once to fetch the new JS/CSS.
+
+Auth sessions (`migoo-user`, CloudBase auth keys) and in-flight KBZPay state are kept.
+
+Ensure EdgeOne/CDN does **not** long-cache these files:
+
+| File | Cache policy |
+|------|----------------|
+| `/index.html` | `no-cache` |
+| `/version.json` | `no-cache` |
+| `/assets/*` | long cache OK (Vite hashes filenames) |
+
+This repo ships `public/_headers` with those rules (Netlify-style). In EdgeOne Makers, mirror the same CDN cache rules if `_headers` is not applied automatically.
+
 ---
 
 ## Phase 5 — Smoke test (empty DB)

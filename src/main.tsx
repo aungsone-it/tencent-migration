@@ -20,6 +20,10 @@ import {
   UNIFIED_KPAY_SUMMARY_PATH,
 } from "./app/utils/vendorCheckoutPaths";
 import { primeVendorStorefrontHeadFromCache } from "./app/utils/vendorStorefrontBrandingCache";
+import {
+  bootstrapDeployVersionFromBundle,
+  startDeployVersionWatcher,
+} from "./app/utils/deployVersion";
 
 const AUTH_USER_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -81,7 +85,7 @@ function isAdminAppPath(pathname: string): boolean {
   return p === "/admin" || p.startsWith("/admin/");
 }
 
-// Cache bust: 20260307181500
+// Cache bust: deployVersion.ts + /version.json (see vite.config.ts)
 function isUnifiedSummaryRoute(): boolean {
   if (typeof window === "undefined") return false;
   const path = (window.location.pathname.split("?")[0] || "").replace(/\/+$/, "") || "/";
@@ -113,6 +117,8 @@ if (
 
 if (typeof window !== "undefined") {
   installActorHeaderFetchBridge();
+  void bootstrapDeployVersionFromBundle();
+  startDeployVersionWatcher();
 }
 
 function mountApp(): void {

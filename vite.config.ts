@@ -58,10 +58,115 @@ const injectCloudBaseRuntimeConfigPlugin = () => ({
   },
 });
 
-export default defineConfig(() => {
+function generateDeployBuildId(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
+  ].join('');
+}
+
+function buildDeployBootstrapScript(buildId: string): string {
+  return `<script data-deploy-bootstrap="1">
+(function () {
+  var BUILD_ID = ${JSON.stringify(buildId)};
+  var VERSION_KEY = "migoo-deploy-version";
+  var RELOAD_GUARD = "migoo-deploy-reload-guard";
+  var CACHE_PREFIXES = ["migoo-ls-", "migoo_cache_", "migoo-notifications", "migoo-checkout", "migoo-shipping-addresses-", "vendor_storefront_", "vendorAuth"];
+  function purgeCaches() {
+    try {
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (!key) continue;
+        if (key.indexOf("nexa-cloudbase") === 0) continue;
+        if (key === "migoo-user" || key === "migoo-staff-actor-id") continue;
+        if (key.indexOf("migoo-") === 0) keys.push(key);
+        for (var p = 0; p < CACHE_PREFIXES.length; p++) {
+          if (key.indexOf(CACHE_PREFIXES[p]) === 0) keys.push(key);
+        }
+      }
+      for (var j = 0; j < keys.length; j++) localStorage.removeItem(keys[j]);
+      var keep = { kpay_pwa_pending_order: 1, kpay_summary_storefront_origin: 1 };
+      var sessionKeys = [];
+      for (var s = 0; s < sessionStorage.length; s++) {
+        var sessionKey = sessionStorage.key(s);
+        if (!sessionKey || keep[sessionKey] || sessionKey.indexOf("nexa-cloudbase") === 0) continue;
+        sessionKeys.push(sessionKey);
+      }
+      for (var t = 0; t < sessionKeys.length; t++) sessionStorage.removeItem(sessionKeys[t]);
+    } catch (e) {}
+  }
+  function reloadNow() {
+    try { sessionStorage.setItem(RELOAD_GUARD, BUILD_ID); } catch (e) {}
+    var url = new URL(window.location.href);
+    url.searchParams.set("_dv", BUILD_ID);
+    window.location.replace(url.toString());
+  }
+  try {
+    var previous = localStorage.getItem(VERSION_KEY);
+    if (!previous) {
+      localStorage.setItem(VERSION_KEY, BUILD_ID);
+      sessionStorage.removeItem(RELOAD_GUARD);
+      return;
+    }
+    if (previous === BUILD_ID) {
+      sessionStorage.removeItem(RELOAD_GUARD);
+      return;
+    }
+    if (sessionStorage.getItem(RELOAD_GUARD) === BUILD_ID) {
+      localStorage.setItem(VERSION_KEY, BUILD_ID);
+      sessionStorage.removeItem(RELOAD_GUARD);
+      return;
+    }
+    purgeCaches();
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        regs.forEach(function (reg) { reg.unregister(); });
+      });
+    }
+    if ("caches" in window) {
+      caches.keys().then(function (names) {
+        names.forEach(function (name) { caches.delete(name); });
+      });
+    }
+    localStorage.setItem(VERSION_KEY, BUILD_ID);
+    reloadNow();
+  } catch (e) {}
+})();
+</script>`;
+}
+
+/** Writes /version.json and injects a pre-app cache purge when a new build ships. */
+const deployVersionPlugin = (mode: string, buildId: string) => ({
+  name: 'deploy-version',
+  buildStart() {
+    if (mode !== 'production') return;
+    const versionFile = path.resolve(__dirname, 'public/version.json');
+    fs.writeFileSync(
+      versionFile,
+      `${JSON.stringify({ buildId, builtAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+  },
+  transformIndexHtml(html: string) {
+    if (mode !== 'production') return html;
+    const script = buildDeployBootstrapScript(buildId);
+    return html.replace('</head>', `    ${script}\n  </head>`);
+  },
+});
+
+export default defineConfig(({ mode }) => {
+  const buildId = mode === 'development' ? 'dev' : generateDeployBuildId();
   return {
   // Do not use `define` for import.meta.env.VITE_* — it overrides Vite's env injection
   // and can embed wrong values on Vercel (breaking vendor subdomains like gogo.walwal.online).
+  define: {
+    'import.meta.env.VITE_BUILD_ID': JSON.stringify(buildId),
+  },
   plugins: [
     // The React and Tailwind plugins are both required for Make, even if
     // Tailwind is not being actively used – do not remove them
@@ -70,6 +175,7 @@ export default defineConfig(() => {
     figmaAssetPlugin(),
     inlinePublicHeadScriptsPlugin(),
     injectCloudBaseRuntimeConfigPlugin(),
+    deployVersionPlugin(mode, buildId),
   ],
   resolve: {
     alias: {

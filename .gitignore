@@ -11,6 +11,7 @@ cloudbase/kpay-secrets.env
 # Build Outputs
 dist/
 build/
+public/version.json
 .cloudbase/
 *.log
 

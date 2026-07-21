@@ -522,7 +522,7 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
               </div>
             </div>
 
-            {/* Remember Me */}
+            {/* Remember Me & Forgot Password */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -537,6 +537,15 @@ export function VendorLogin({ storeName, portalMismatchError }: VendorLoginProps
                   {t('auth.login.rememberMe')}
                 </Label>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigate('/reset-password?returnTo=%2Fadmin&account=vendor');
+                }}
+                className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
+              >
+                {t('auth.login.forgotPassword')}
+              </button>
             </div>
 
             {/* Terms Agreement */}

@@ -11,7 +11,7 @@ import {
   getGlobalStaffActivityFeed,
   isValidStaffActorId,
 } from "./staff_activity_helpers.tsx";
-import { queueCustomerReadModelSync } from "./read_model.ts";
+import { queueCustomerReadModelSync, queueVendorReadModelSync } from "./read_model.ts";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import {
   buildPasswordResetOtpEmailHtml,
@@ -214,13 +214,6 @@ async function createKvCustomerAuthUser(opts: {
   return userId;
 }
 
-type PasswordResetAccountKind = "staff" | "customer_kv" | "cloudbase";
-
-type PasswordResetAccount = {
-  userId: string;
-  kind: PasswordResetAccountKind;
-};
-
 async function findCloudbaseAuthUserByEmail(emailLower: string): Promise<{ id: string } | null> {
   let page = 1;
   const perPage = 200;
@@ -244,23 +237,71 @@ async function findCloudbaseAuthUserByEmail(emailLower: string): Promise<{ id: s
   return null;
 }
 
-async function resolvePasswordResetAccount(email: string): Promise<PasswordResetAccount | null> {
+type PasswordResetAccountKind = "staff" | "vendor" | "customer_kv" | "cloudbase";
+type PasswordResetAccountHint = PasswordResetAccountKind | "auto";
+
+type PasswordResetAccount = {
+  userId: string;
+  kind: PasswordResetAccountKind;
+};
+
+async function findVendorAuthByEmail(emailLower: string): Promise<{ id: string; needsSetup?: boolean } | null> {
+  const validVendors = await kv.getVendorProfiles();
+  const vendor = validVendors.find(
+    (v: Record<string, unknown>) => String(v.email || "").trim().toLowerCase() === emailLower,
+  );
+  if (!vendor?.id) return null;
+  if (String(vendor.status || "").trim().toLowerCase() !== "active") return null;
+  if (!vendor.password) {
+    return { id: String(vendor.id), needsSetup: true };
+  }
+  return { id: String(vendor.id) };
+}
+
+async function resolvePasswordResetAccount(
+  email: string,
+  hint: PasswordResetAccountHint = "auto",
+): Promise<PasswordResetAccount | null> {
   const emailLower = String(email || "").trim().toLowerCase();
   if (!emailLower) return null;
 
-  const staffUser = await findStaffUserByEmail(emailLower);
-  if (staffUser?.id) {
-    return { userId: String(staffUser.id), kind: "staff" };
+  const tryStaff = hint === "auto" || hint === "staff";
+  const tryVendor = hint === "auto" || hint === "vendor";
+  const tryCustomer = hint === "auto" || hint === "customer_kv";
+  const tryCloudbase = hint === "auto" || hint === "cloudbase";
+
+  if (hint === "vendor") {
+    const vendor = await findVendorAuthByEmail(emailLower);
+    if (vendor?.needsSetup) return null;
+    if (vendor?.id) return { userId: vendor.id, kind: "vendor" };
+    return null;
   }
 
-  const customer = await findCustomerAuthByEmail(emailLower);
-  if (customer?.id) {
-    return { userId: customer.id, kind: "customer_kv" };
+  if (tryStaff) {
+    const staffUser = await findStaffUserByEmail(emailLower);
+    if (staffUser?.id) {
+      return { userId: String(staffUser.id), kind: "staff" };
+    }
   }
 
-  const cloudbaseUser = await findCloudbaseAuthUserByEmail(emailLower);
-  if (cloudbaseUser?.id) {
-    return { userId: cloudbaseUser.id, kind: "cloudbase" };
+  if (tryVendor) {
+    const vendor = await findVendorAuthByEmail(emailLower);
+    if (vendor?.needsSetup) return null;
+    if (vendor?.id) return { userId: vendor.id, kind: "vendor" };
+  }
+
+  if (tryCustomer) {
+    const customer = await findCustomerAuthByEmail(emailLower);
+    if (customer?.id) {
+      return { userId: customer.id, kind: "customer_kv" };
+    }
+  }
+
+  if (tryCloudbase) {
+    const cloudbaseUser = await findCloudbaseAuthUserByEmail(emailLower);
+    if (cloudbaseUser?.id) {
+      return { userId: cloudbaseUser.id, kind: "cloudbase" };
+    }
   }
 
   return null;
@@ -1646,23 +1687,41 @@ authApp.post("/reset-password/:userId", async (c) => {
 // ============================================
 authApp.post("/send-email-otp", async (c) => {
   try {
-    const { email } = await c.req.json();
+    const { email, accountHint } = await c.req.json();
 
     if (!email) {
       return c.json({ error: "Email is required" }, 400);
     }
 
-    console.log(`📧 Generating OTP for email: ${email}`);
+    const normalizedHint = String(accountHint || "auto").trim().toLowerCase() as PasswordResetAccountHint;
+    const allowedHints = new Set(["auto", "staff", "vendor", "customer_kv", "cloudbase"]);
+    const hint: PasswordResetAccountHint = allowedHints.has(normalizedHint)
+      ? normalizedHint
+      : "auto";
+
+    console.log(`📧 Generating OTP for email: ${email} (hint=${hint})`);
 
     const normalizedEmail = String(email || "").trim().toLowerCase();
-    const account = await resolvePasswordResetAccount(normalizedEmail);
+
+    if (hint === "vendor") {
+      const vendorLookup = await findVendorAuthByEmail(normalizedEmail);
+      if (vendorLookup?.needsSetup) {
+        return c.json({
+          error: "Please complete vendor setup first to set your initial password.",
+          needsSetup: true,
+        }, 400);
+      }
+    }
+
+    const account = await resolvePasswordResetAccount(normalizedEmail, hint);
 
     if (!account?.userId) {
       console.log(`❌ No user found with email: ${email}`);
-      return c.json({
-        error:
-          "This email is not registered. Use the email from admin setup, or contact your administrator.",
-      }, 404);
+      const notFoundMessage =
+        hint === "vendor"
+          ? "No vendor account found with this email, or the account is not active yet."
+          : "This email is not registered. Use the email from admin setup, or contact your administrator.";
+      return c.json({ error: notFoundMessage }, 404);
     }
 
     const userId = account.userId;
@@ -1789,9 +1848,36 @@ authApp.post("/verify-otp-and-reset", async (c) => {
       if (staffProfile && typeof staffProfile === "object") {
         accountKind = "staff";
       } else {
-        const customerRec = await kv.get(`customer_auth:${storedOtpData.userId}`);
-        accountKind = customerRec && typeof customerRec === "object" ? "customer_kv" : "cloudbase";
+        const vendorRec = await kv.get(`vendor:${storedOtpData.userId}`);
+        if (vendorRec && typeof vendorRec === "object") {
+          accountKind = "vendor";
+        } else {
+          const customerRec = await kv.get(`customer_auth:${storedOtpData.userId}`);
+          accountKind = customerRec && typeof customerRec === "object" ? "customer_kv" : "cloudbase";
+        }
       }
+    }
+
+    if (accountKind === "vendor") {
+      const fullVendor = (await kv.get(`vendor:${storedOtpData.userId}`)) as Record<string, unknown> | null;
+      if (!fullVendor?.id) {
+        return c.json({ error: "Vendor account not found" }, 404);
+      }
+      const passwordHash = await hashPasswordPlain(newPassword);
+      const updatedVendor = {
+        ...fullVendor,
+        password: passwordHash,
+        updatedAt: new Date().toISOString(),
+      };
+      await kv.set(`vendor:${storedOtpData.userId}`, updatedVendor);
+      queueVendorReadModelSync(String(storedOtpData.userId), updatedVendor);
+      await kv.del(`otp:email:${normalizedEmail}`);
+      console.log(`✅ Vendor password updated for: ${normalizedEmail}`);
+      return c.json({
+        success: true,
+        message: "Password updated successfully",
+        accountKind: "vendor",
+      });
     }
 
     if (accountKind === "staff") {

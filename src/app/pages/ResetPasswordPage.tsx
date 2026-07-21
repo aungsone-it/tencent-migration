@@ -5,6 +5,9 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
+import { API_BASE_URL } from '../../utils/api-client';
+import { storeSlugFromBusinessName } from '../../utils/storeSlug';
+import { setVendorAuthSessionCookie } from '../utils/vendorAuthCookie';
 import { toast } from 'sonner';
 import { notifyMigooUserSessionChanged } from '../../constants';
 import { createTencentCloudBaseCompatClient } from '../../utils/tencentCloudbaseClient';
@@ -27,8 +30,10 @@ export function ResetPasswordPage() {
     ? `/vendor/${storeName}`
     : '/';
   const returnTo = searchParams.get('returnTo');
+  const accountHint = (searchParams.get('account') || '').trim().toLowerCase();
+  const isVendorAccount = accountHint === 'vendor';
   const goBackPath = returnTo || storefrontBasePath;
-  const isAdminReturn = Boolean((returnTo || '').includes('/admin'));
+  const isAdminReturn = Boolean((returnTo || '').includes('/admin')) && !isVendorAccount;
 
   useEffect(() => {
     const prefillEmail = (searchParams.get('email') || '').trim();
@@ -54,7 +59,10 @@ export function ResetPasswordPage() {
             ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
             'apikey': publicAnonKey,
           },
-          body: JSON.stringify({ email: targetEmail.trim() })
+          body: JSON.stringify({
+            email: targetEmail.trim(),
+            ...(accountHint ? { accountHint } : {}),
+          })
         }
       );
 
@@ -64,6 +72,9 @@ export function ResetPasswordPage() {
         const message = data.email_error || data.error || data.message || 'Failed to send OTP';
         setError(message);
         toast.error(message);
+        if (data.needsSetup && isVendorAccount) {
+          setTimeout(() => navigate('/vendor/setup'), 1200);
+        }
         return false;
       }
 
@@ -128,9 +139,44 @@ export function ResetPasswordPage() {
       // Auto-login after successful password reset
       const accountKind = String(data.accountKind || '').trim();
       const useStaffLogin = accountKind === 'staff' || (!accountKind && isAdminReturn);
+      const useVendorLogin = accountKind === 'vendor' || isVendorAccount;
 
       try {
-        if (useStaffLogin) {
+        if (useVendorLogin) {
+          const loginResponse = await fetch(`${API_BASE_URL}/vendor-auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...getCloudBaseRequestHeaders(),
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+            },
+            body: JSON.stringify({
+              email: email.trim(),
+              password: newPassword,
+            }),
+          });
+          const loginData = await loginResponse.json();
+          if (loginResponse.ok && loginData?.success && loginData?.vendor) {
+            let storeSlug =
+              loginData.vendor.storeSlug ||
+              storeSlugFromBusinessName(loginData.vendor.storeName || loginData.vendor.name || '');
+            const vendorData = {
+              id: loginData.vendor.id,
+              email: loginData.vendor.email,
+              name: loginData.vendor.name,
+              businessName: loginData.vendor.businessName,
+              phone: loginData.vendor.phone,
+              vendorId: loginData.vendor.id,
+              storeName: loginData.vendor.storeName,
+              storeSlug,
+            };
+            localStorage.setItem('vendorAuth', JSON.stringify(vendorData));
+            setVendorAuthSessionCookie(vendorData, true);
+            toast.success('Password reset successful! You are now signed in.');
+          } else {
+            toast.success('Password reset successful! Please sign in with your new password.');
+          }
+        } else if (useStaffLogin) {
           const client = createTencentCloudBaseCompatClient();
           const { data: loginData, error: loginError } = await client.auth.signInStaffWithPassword({
             email: email.trim(),
@@ -198,7 +244,7 @@ export function ResetPasswordPage() {
                 className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors mb-4"
               >
                 <ArrowLeft className="w-4 h-4" />
-                Back to Store
+                {isVendorAccount || (returnTo || '').includes('/admin') ? 'Back to Login' : 'Back to Store'}
               </button>
               <h1 className="text-2xl font-bold text-slate-900 mb-2">
                 RESET PASSWORD

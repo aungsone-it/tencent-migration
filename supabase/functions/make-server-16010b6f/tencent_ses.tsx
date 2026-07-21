@@ -68,11 +68,11 @@ export function buildSesFromAddress(fromEmailRaw: string, fromNameRaw: string): 
 }
 
 export function readSesConfig(): SesConfig | null {
-  const secretId = String(Deno.env.get("TENCENT_SECRET_ID") || "").trim();
-  const secretKey = String(Deno.env.get("TENCENT_SECRET_KEY") || "").trim();
-  const fromEmail = String(Deno.env.get("TENCENT_SES_FROM_EMAIL") || "").trim();
-  const fromName = String(Deno.env.get("TENCENT_SES_FROM_NAME") || "Migoo Marketplace").trim();
-  const replyTo = String(Deno.env.get("TENCENT_SES_REPLY_TO") || "").trim();
+  const secretId = stripEnvQuotes(String(Deno.env.get("TENCENT_SECRET_ID") || ""));
+  const secretKey = stripEnvQuotes(String(Deno.env.get("TENCENT_SECRET_KEY") || ""));
+  const fromEmail = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_FROM_EMAIL") || ""));
+  const fromName = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_FROM_NAME") || "Migoo Marketplace"));
+  const replyTo = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_REPLY_TO") || ""));
 
   if (!secretId || !secretKey || !fromEmail) return null;
 
@@ -115,7 +115,14 @@ async function signedSesRequest(
   const hashedRequestPayload = sha256Hex(payloadStr);
   const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`;
   const signedHeaders = "content-type;host";
-  const canonicalRequest = ["POST", "/", "", canonicalHeaders, signedHeaders, hashedRequestPayload].join("\n");
+  const canonicalRequest = [
+    "POST",
+    "/",
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    hashedRequestPayload,
+  ].join("\n");
   const credentialScope = `${date}/${SES_SERVICE}/tc3_request`;
   const stringToSign = ["TC3-HMAC-SHA256", String(timestamp), credentialScope, sha256Hex(canonicalRequest)].join(
     "\n",
@@ -125,8 +132,7 @@ async function signedSesRequest(
   const secretSigning = hmacSha256(secretService, "tc3_request");
   const signature = hmacSha256(secretSigning, stringToSign).toString("hex");
   const authorization = [
-    "TC3-HMAC-SHA256",
-    `Credential=${config.secretId}/${credentialScope}`,
+    `TC3-HMAC-SHA256 Credential=${config.secretId}/${credentialScope}`,
     `SignedHeaders=${signedHeaders}`,
     `Signature=${signature}`,
   ].join(", ");

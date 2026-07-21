@@ -14,10 +14,9 @@ import {
 import { queueCustomerReadModelSync, queueVendorReadModelSync } from "./read_model.ts";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import {
-  buildPasswordResetOtpEmailHtml,
   buildSesFromAddress,
   readSesConfig,
-  sendSesEmail,
+  sendPasswordResetOtpEmail,
   validateSesConfig,
 } from "./tencent_ses.tsx";
 
@@ -944,6 +943,8 @@ authApp.get("/email-health", async (c) => {
       region: sesConfig?.region,
       fromEmailConfigured: !!sesConfig?.fromEmail,
       fromName: sesConfig?.fromName,
+      passwordResetTemplateId: sesConfig?.passwordResetTemplateId,
+      templateOtpVar: sesConfig?.passwordResetTemplateOtpVar,
       fromField: fromBuilt && "from" in fromBuilt ? fromBuilt.from : undefined,
       issues,
     }, issues.length === 0 ? 200 : 503);
@@ -1767,14 +1768,11 @@ authApp.post("/send-email-otp", async (c) => {
         }, 503);
       }
 
-      const sendResult = await sendSesEmail({
+      const sendResult = await sendPasswordResetOtpEmail({
         config: sesConfig,
         from: fromBuilt.from,
-        to: [email],
-        subject: "Password Reset Code - Migoo",
-        html: buildPasswordResetOtpEmailHtml(otp),
-        text: `Your Migoo password reset code is ${otp}. It expires in 10 minutes.`,
-        triggerType: 1,
+        to: email,
+        otp,
       });
 
       console.log(`✅ Email sent successfully via Tencent SES:`, sendResult.messageId);

@@ -13,6 +13,10 @@ export type SesConfig = {
   fromEmail: string;
   fromName: string;
   replyTo?: string;
+  /** Approved SES template ID (required — inline HTML is not permitted on most accounts). */
+  passwordResetTemplateId?: number;
+  /** Template variable name for the OTP, must match {{otp_code}} (or similar) in the SES template. */
+  passwordResetTemplateOtpVar: string;
 };
 
 export type SesFromAddress = { from: string } | { error: string };
@@ -57,7 +61,7 @@ export function buildSesFromAddress(fromEmailRaw: string, fromNameRaw: string): 
 
   const plainEmail = fromEmail.replace(/^<|>$/g, "").trim();
   if (EMAIL_ADDR_RE.test(plainEmail)) {
-    const safeName = (fromName || "Migoo Marketplace").replace(/[<>]/g, "").trim();
+    const safeName = (fromName || "Nexa Marketplace").replace(/[<>]/g, "").trim();
     return { from: `${safeName} <${plainEmail}>` };
   }
 
@@ -71,8 +75,13 @@ export function readSesConfig(): SesConfig | null {
   const secretId = stripEnvQuotes(String(Deno.env.get("TENCENT_SECRET_ID") || ""));
   const secretKey = stripEnvQuotes(String(Deno.env.get("TENCENT_SECRET_KEY") || ""));
   const fromEmail = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_FROM_EMAIL") || ""));
-  const fromName = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_FROM_NAME") || "Migoo Marketplace"));
+  const fromName = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_FROM_NAME") || "Nexa Marketplace"));
   const replyTo = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_REPLY_TO") || ""));
+  const templateIdRaw = stripEnvQuotes(String(Deno.env.get("TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID") || ""));
+  const templateId = templateIdRaw ? Number(templateIdRaw) : undefined;
+  const passwordResetTemplateOtpVar = stripEnvQuotes(
+    String(Deno.env.get("TENCENT_SES_TEMPLATE_OTP_VAR") || "otp_code"),
+  );
 
   if (!secretId || !secretKey || !fromEmail) return null;
 
@@ -83,6 +92,8 @@ export function readSesConfig(): SesConfig | null {
     fromEmail,
     fromName,
     replyTo: replyTo || undefined,
+    passwordResetTemplateId: Number.isFinite(templateId) ? templateId : undefined,
+    passwordResetTemplateOtpVar,
   };
 }
 
@@ -99,6 +110,9 @@ export function validateSesConfig(config: SesConfig | null): string[] {
   if (!config.fromEmail) issues.push("Missing TENCENT_SES_FROM_EMAIL");
   const fromBuilt = buildSesFromAddress(config.fromEmail, config.fromName);
   if ("error" in fromBuilt) issues.push(fromBuilt.error);
+  if (!config.passwordResetTemplateId) {
+    issues.push("Missing TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID (approved SES template required)");
+  }
   return issues;
 }
 
@@ -171,27 +185,23 @@ async function signedSesRequest(
   return { ok: true, data: responseBody };
 }
 
-export async function sendSesEmail(params: {
+export async function sendSesTemplateEmail(params: {
   config: SesConfig;
   from: string;
   to: string[];
   subject: string;
-  html: string;
-  text?: string;
+  templateId: number;
+  templateData: Record<string, string>;
   triggerType?: 0 | 1;
 }): Promise<{ messageId: string }> {
-  const simple: Record<string, string> = {
-    Html: Buffer.from(params.html, "utf8").toString("base64"),
-  };
-  if (params.text) {
-    simple.Text = Buffer.from(params.text, "utf8").toString("base64");
-  }
-
   const payload: Record<string, unknown> = {
     FromEmailAddress: params.from,
     Destination: params.to,
     Subject: params.subject,
-    Simple: simple,
+    Template: {
+      TemplateID: params.templateId,
+      TemplateData: JSON.stringify(params.templateData),
+    },
     TriggerType: params.triggerType ?? 1,
   };
   if (params.config.replyTo) {
@@ -206,56 +216,25 @@ export async function sendSesEmail(params: {
   return { messageId };
 }
 
-export function buildPasswordResetOtpEmailHtml(otp: string): string {
-  return `<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #0f172a; background: #f1f5f9; margin: 0; padding: 24px; }
-      .container { max-width: 600px; margin: 0 auto; }
-      .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08); }
-      .header { background: linear-gradient(135deg, #1a1d29 0%, #0f172a 55%, #1e3a8a 100%); color: #ffffff; padding: 28px 30px; text-align: center; }
-      .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: 0.02em; }
-      .content { padding: 32px 30px; color: #334155; }
-      .content p { margin: 0 0 16px; }
-      .otp-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px 20px; text-align: center; margin: 24px 0; }
-      .otp-label { margin: 0; color: #64748b; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
-      .otp-code { font-size: 36px; font-weight: 700; color: #0f172a; letter-spacing: 8px; margin: 12px 0; font-variant-numeric: tabular-nums; }
-      .otp-expiry { margin: 0; color: #64748b; font-size: 13px; }
-      .content ul { margin: 0 0 16px; padding-left: 20px; color: #475569; }
-      .content li { margin-bottom: 6px; }
-      .footer { text-align: center; margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; }
-      .footer p { margin: 0 0 6px; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <div class="card">
-        <div class="header">
-          <h1>Password Reset</h1>
-        </div>
-        <div class="content">
-          <p>Hello,</p>
-          <p>You requested to reset your password for your Migoo account. Use the verification code below:</p>
-          <div class="otp-box">
-            <p class="otp-label">Your verification code</p>
-            <div class="otp-code">${otp}</div>
-            <p class="otp-expiry">Valid for 10 minutes</p>
-          </div>
-          <p><strong>Important:</strong></p>
-          <ul>
-            <li>This code expires in <strong>10 minutes</strong></li>
-            <li>Do not share this code with anyone</li>
-            <li>If you didn't request this, please ignore this email</li>
-          </ul>
-          <div class="footer">
-            <p>© 2026 Migoo Marketplace — Myanmar's Premier E-Commerce Platform</p>
-            <p>This is an automated email, please do not reply.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </body>
-</html>`;
+/** Send password-reset OTP using an approved SES template (TemplateID + {{otp_code}}). */
+export async function sendPasswordResetOtpEmail(params: {
+  config: SesConfig;
+  from: string;
+  to: string;
+  otp: string;
+}): Promise<{ messageId: string }> {
+  const templateId = params.config.passwordResetTemplateId;
+  if (!templateId) {
+    throw new Error("Missing TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID");
+  }
+  const otpVar = params.config.passwordResetTemplateOtpVar || "otp_code";
+  return sendSesTemplateEmail({
+    config: params.config,
+    from: params.from,
+    to: [params.to],
+    subject: "Password Reset Code - Nexa Marketplace",
+    templateId,
+    templateData: { [otpVar]: params.otp },
+    triggerType: 1,
+  });
 }

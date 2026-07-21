@@ -84,16 +84,19 @@ Password reset stores a code in KV, then sends it via [Tencent Cloud SES](https:
 | `TENCENT_SECRET_ID` | API SecretId from Tencent CAM |
 | `TENCENT_SECRET_KEY` | API SecretKey from Tencent CAM |
 | `TENCENT_SES_FROM_EMAIL` | Verified sender **email only**, e.g. `noreply@yourdomain.com` (not the display name) |
-| `TENCENT_SES_FROM_NAME` | Optional display name (default: `Migoo Marketplace`) |
+| `TENCENT_SES_FROM_NAME` | Optional display name (default: `Nexa Marketplace`) |
 | `TENCENT_SES_REGION` | Optional SES region (default: `CLOUDBASE_REGION` or `ap-singapore`) |
 | `TENCENT_SES_REPLY_TO` | Optional reply-to address |
+| `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID` | **Required** — approved SES template ID (e.g. `70882`) |
+| `TENCENT_SES_TEMPLATE_OTP_VAR` | Optional — template variable for OTP (default: `otp_code`, must match `{{otp_code}}` in template) |
 
 **SES console setup (one-time):**
 
 1. Open [Tencent SES console](https://console.cloud.tencent.com/ses) in the same region as `TENCENT_SES_REGION`.
 2. **Sender domain** → add your domain → publish the DNS records (SPF, DKIM, etc.) until verified.
 3. **Sender address** → create `TENCENT_SES_FROM_EMAIL` under that domain.
-4. **CAM** → create an API key with SES send permissions (`ses:SendEmail`).
+4. **Email Template** → create password-reset template with `{{otp_code}}` → wait for **Approved** status → set `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID`.
+5. **CAM** → create an API key with SES send permissions (`ses:SendEmail`).
 
 Verify delivery after deploy:
 

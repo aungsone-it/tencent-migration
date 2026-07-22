@@ -42,6 +42,12 @@ import {
   writeSessionCatalogList,
   writeSessionScrollPosition,
 } from "../utils/persistedSessionCache";
+import {
+  applyBrowseScrollTop,
+  captureBrowseScrollTop,
+  patchVendorBrowseScrollHistoryState,
+  readVendorBrowseScrollFromLocationState,
+} from "../utils/vendorBrowseScroll";
 import { normalizeVendorStorefrontProducts } from "../utils/vendorStorefrontProductStats";
 import { formatOrderNumberDisplay } from "../utils/orderNumber";
 import {
@@ -90,7 +96,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
-import { useNavigate, useLocation, matchPath } from "react-router";
+import { useNavigate, useLocation, matchPath, useNavigationType } from "react-router";
 import { 
   ShoppingCart, 
   Heart, 
@@ -1032,6 +1038,7 @@ export function VendorStoreView({
 }: VendorStoreViewProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const { language, setLanguage, t } = useLanguage();
   const { chatUnreadCount, openFloatingChat } = useChatNotification();
 
@@ -1094,6 +1101,7 @@ export function VendorStoreView({
   const pendingBrowseScrollRestoreRef = useRef(false);
   const browseScrollByCategoryRef = useRef(new Map<string, SessionScrollPositionState>());
   const browseScrollRestoreCleanupRef = useRef<(() => void) | null>(null);
+  const browseScrollRestoredForKeyRef = useRef<string | null>(null);
 
   const navigateStoreHome = useCallback(() => {
     wasOnVendorProductRouteRef.current = false;
@@ -1557,14 +1565,16 @@ export function VendorStoreView({
     (productId?: string, category?: string) => {
       if (savedPage || isVendorProductDetailPath) return;
       const el = vendorScrollRootRef.current;
-      if (!el) return;
+      const scrollTop = captureBrowseScrollTop(el);
+      if (scrollTop <= 0) return;
       const key = catalogSliceMemoryKey(category ?? catalogCategoryForFetch);
       const snapshot: SessionScrollPositionState = {
-        scrollTop: el.scrollTop,
+        scrollTop,
         ...(productId ? { anchorProductId: productId } : {}),
       };
       browseScrollByCategoryRef.current.set(key, snapshot);
       writeSessionScrollPosition(ssVendorScrollPositionKey(key), snapshot);
+      patchVendorBrowseScrollHistoryState(snapshot, key);
     },
     [savedPage, isVendorProductDetailPath, catalogSliceMemoryKey, catalogCategoryForFetch]
   );
@@ -1577,89 +1587,105 @@ export function VendorStoreView({
   const readBrowseScrollSnapshot = useCallback(
     (category?: string): SessionScrollPositionState | null => {
       const key = catalogSliceMemoryKey(category ?? catalogCategoryForFetch);
+      const fromHistory = readVendorBrowseScrollFromLocationState(location.state, key);
+      if (fromHistory) return fromHistory;
       return (
         browseScrollByCategoryRef.current.get(key) ??
         readSessionScrollPosition(ssVendorScrollPositionKey(key))
       );
     },
-    [catalogSliceMemoryKey, catalogCategoryForFetch]
+    [catalogSliceMemoryKey, catalogCategoryForFetch, location.state]
   );
 
-  const scheduleVendorBrowseScrollRestore = useCallback(() => {
-    if (savedPage || isVendorProductDetailPath) return;
-    cancelVendorBrowseScrollRestore();
+  const scheduleVendorBrowseScrollRestore = useCallback(
+    (snapshotOverride?: SessionScrollPositionState | null) => {
+      if (savedPage || isVendorProductDetailPath) return;
+      cancelVendorBrowseScrollRestore();
 
-    const snapshot = readBrowseScrollSnapshot();
-    if (!snapshot || snapshot.scrollTop <= 0) {
-      pendingBrowseScrollRestoreRef.current = false;
-      return;
-    }
+      const snapshot = snapshotOverride ?? readBrowseScrollSnapshot();
+      if (!snapshot || snapshot.scrollTop <= 0) {
+        pendingBrowseScrollRestoreRef.current = false;
+        return;
+      }
 
-    const targetTop = snapshot.scrollTop;
-    const anchorProductId = snapshot.anchorProductId;
-    let attempts = 0;
-    const maxAttempts = 40;
+      const targetTop = snapshot.scrollTop;
+      const anchorProductId = snapshot.anchorProductId;
+      let attempts = 0;
+      const maxAttempts = 60;
 
-    const apply = (): boolean => {
+      const apply = (): boolean => {
+        if (isVendorProductDetailPath) return false;
+        const el = vendorScrollRootRef.current;
+
+        applyBrowseScrollTop(el, targetTop);
+
+        if (anchorProductId && el) {
+          const node = el.querySelector(
+            `[data-vendor-product-id="${CSS.escape(anchorProductId)}"]`,
+          );
+          if (node instanceof HTMLElement) {
+            node.scrollIntoView({ block: "start", behavior: "auto" });
+            applyBrowseScrollTop(el, targetTop);
+          }
+        }
+
+        const appliedTop = captureBrowseScrollTop(el);
+        lastVendorScrollTopRef.current = appliedTop;
+        setVendorNavbarSticky(appliedTop > 0);
+
+        const maxScroll = el
+          ? Math.max(0, el.scrollHeight - el.clientHeight)
+          : Math.max(
+              0,
+              document.documentElement.scrollHeight - window.innerHeight,
+            );
+        if (targetTop <= 0) return true;
+        if (Math.abs(appliedTop - targetTop) <= 8) return true;
+        if (maxScroll > 0 && appliedTop >= maxScroll - 8 && targetTop >= maxScroll - 8) {
+          return true;
+        }
+        return false;
+      };
+
+      const tryApply = () => {
+        attempts += 1;
+        if (apply() || attempts >= maxAttempts) {
+          pendingBrowseScrollRestoreRef.current = false;
+          cancelVendorBrowseScrollRestore();
+        }
+      };
+
+      tryApply();
+      const raf1 = requestAnimationFrame(tryApply);
+      const raf2 = requestAnimationFrame(() => requestAnimationFrame(tryApply));
+      const timers = [16, 50, 120, 250, 500, 900, 1500, 2500].map((ms) =>
+        window.setTimeout(tryApply, ms),
+      );
+
       const el = vendorScrollRootRef.current;
-      if (!el || isVendorProductDetailPath) return false;
-
-      if (anchorProductId) {
-        const node = el.querySelector(
-          `[data-vendor-product-id="${CSS.escape(anchorProductId)}"]`,
-        );
-        if (node instanceof HTMLElement) {
-          node.scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
+      let resizeObserver: ResizeObserver | undefined;
+      if (el && typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(() => tryApply());
+        resizeObserver.observe(el);
+        if (el.firstElementChild instanceof HTMLElement) {
+          resizeObserver.observe(el.firstElementChild);
         }
       }
 
-      if (targetTop > 0) {
-        el.scrollTop = targetTop;
-      }
-
-      const appliedTop = el.scrollTop;
-      lastVendorScrollTopRef.current = appliedTop;
-      setVendorNavbarSticky(appliedTop > 0);
-
-      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
-      if (targetTop <= 0) return true;
-      if (Math.abs(appliedTop - targetTop) <= 4) return true;
-      if (maxScroll > 0 && appliedTop >= maxScroll - 4 && targetTop >= maxScroll - 4) return true;
-      return false;
-    };
-
-    const tryApply = () => {
-      attempts += 1;
-      if (apply() || attempts >= maxAttempts) {
-        pendingBrowseScrollRestoreRef.current = false;
-        cancelVendorBrowseScrollRestore();
-      }
-    };
-
-    tryApply();
-    const raf1 = requestAnimationFrame(tryApply);
-    const raf2 = requestAnimationFrame(() => requestAnimationFrame(tryApply));
-    const timers = [50, 150, 350, 700, 1200].map((ms) => window.setTimeout(tryApply, ms));
-
-    const el = vendorScrollRootRef.current;
-    let resizeObserver: ResizeObserver | undefined;
-    if (el && typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(() => tryApply());
-      resizeObserver.observe(el);
-    }
-
-    browseScrollRestoreCleanupRef.current = () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
-      for (const id of timers) window.clearTimeout(id);
-      resizeObserver?.disconnect();
-    };
-  }, [
-    savedPage,
-    isVendorProductDetailPath,
-    cancelVendorBrowseScrollRestore,
-    readBrowseScrollSnapshot,
-  ]);
+      browseScrollRestoreCleanupRef.current = () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+        for (const id of timers) window.clearTimeout(id);
+        resizeObserver?.disconnect();
+      };
+    },
+    [
+      savedPage,
+      isVendorProductDetailPath,
+      cancelVendorBrowseScrollRestore,
+      readBrowseScrollSnapshot,
+    ],
+  );
 
   const openVendorProductDetail = useCallback(
     (product: Product) => {
@@ -5528,23 +5554,77 @@ export function VendorStoreView({
     [serverStatus, isCategoryCatalogStale, catalogVisibleProducts.length]
   );
 
-  // Restore browse grid scroll after product detail → list (wait for grid layout/images on slow networks).
+  // Keep sessionStorage + history.state in sync while browsing (survives remounts on production hosts).
   useEffect(() => {
-    if (savedPage || isVendorProductDetailPath) {
-      cancelVendorBrowseScrollRestore();
-      return;
-    }
-    if (!pendingBrowseScrollRestoreRef.current) return;
-    if (isCategoryCatalogStale || !showCatalogProductGrid || products.length === 0) return;
-    scheduleVendorBrowseScrollRestore();
+    if (savedPage || isVendorProductDetailPath) return;
+    const el = vendorScrollRootRef.current;
+    if (!el) return;
+    let debounceId = 0;
+    const persistLiveScroll = () => {
+      window.clearTimeout(debounceId);
+      debounceId = window.setTimeout(() => {
+        const scrollTop = captureBrowseScrollTop(el);
+        if (scrollTop <= 0) return;
+        const key = catalogSliceMemoryKey(catalogCategoryForFetch);
+        const snapshot: SessionScrollPositionState = { scrollTop };
+        browseScrollByCategoryRef.current.set(key, snapshot);
+        writeSessionScrollPosition(ssVendorScrollPositionKey(key), snapshot);
+        patchVendorBrowseScrollHistoryState(snapshot, key);
+      }, 120);
+    };
+    el.addEventListener("scroll", persistLiveScroll, { passive: true });
+    window.addEventListener("scroll", persistLiveScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", persistLiveScroll);
+      window.removeEventListener("scroll", persistLiveScroll);
+      window.clearTimeout(debounceId);
+    };
   }, [
     savedPage,
     isVendorProductDetailPath,
+    catalogCategoryForFetch,
+    catalogSliceMemoryKey,
+    vendorViewMode,
+    selectedProduct?.id,
+  ]);
+
+  // Restore browse grid scroll after product detail → list (history.state, sessionStorage, or pending back).
+  useEffect(() => {
+    if (savedPage || isVendorProductDetailPath) {
+      browseScrollRestoredForKeyRef.current = null;
+      cancelVendorBrowseScrollRestore();
+      return;
+    }
+
+    const sliceKey = catalogSliceMemoryKey(catalogCategoryForFetch);
+    const snapshot = readBrowseScrollSnapshot();
+    const fromHistory = readVendorBrowseScrollFromLocationState(location.state, sliceKey);
+    const shouldRestore =
+      pendingBrowseScrollRestoreRef.current ||
+      (navigationType === "POP" &&
+        ((fromHistory != null && fromHistory.scrollTop > 0) ||
+          (snapshot != null && snapshot.scrollTop > 0)));
+
+    if (!shouldRestore || !snapshot || snapshot.scrollTop <= 0) return;
+    if (browseScrollRestoredForKeyRef.current === location.key) return;
+    if (isCategoryCatalogStale || !showCatalogProductGrid || products.length === 0) return;
+
+    browseScrollRestoredForKeyRef.current = location.key;
+    pendingBrowseScrollRestoreRef.current = false;
+    scheduleVendorBrowseScrollRestore(snapshot);
+  }, [
+    savedPage,
+    isVendorProductDetailPath,
+    location.key,
+    location.state,
+    navigationType,
     isCategoryCatalogStale,
     showCatalogProductGrid,
     products.length,
     catalogCategoryForFetch,
     catalogVisibleProducts.length,
+    readBrowseScrollSnapshot,
+    catalogSliceMemoryKey,
     scheduleVendorBrowseScrollRestore,
     cancelVendorBrowseScrollRestore,
   ]);

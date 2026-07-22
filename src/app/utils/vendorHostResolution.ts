@@ -125,7 +125,7 @@ export async function fetchVendorSlugByCustomDomain(
 }
 
 /** Mirrors AnimatedOutlet grouping for vendor-only hosts (subdomain/custom domain). */
-function isVendorOnlyHostCustomerPath(pathname: string): boolean {
+export function isVendorOnlyHostCustomerPath(pathname: string): boolean {
   const vendorRootReserved = new Set(["admin", "setup", "vendor", "store", "blog", "auth"]);
   const first = pathname.split("/").filter(Boolean)[0] || "";
   const p = pathname.replace(/\/+$/, "") || "/";
@@ -139,6 +139,33 @@ function isVendorOnlyHostCustomerPath(pathname: string): boolean {
     p === "/order-confirmation" ||
     p === "/summary";
   return isVendorStorefrontRootPath || (!!first && !vendorRootReserved.has(first));
+}
+
+/** Customer-facing vendor storefront paths (subdomain, custom domain, or `/vendor/:slug`). */
+export function isVendorStorefrontCustomerPath(pathname: string): boolean {
+  const p = (pathname.replace(/\/+$/, "") || "/").split("#")[0] ?? "/";
+
+  if (p.startsWith("/vendor/")) {
+    const parts = p.split("/").filter(Boolean);
+    if (parts[0] === "vendor" && parts.length >= 2) {
+      const reserved = new Set(["application", "setup", "login"]);
+      if (reserved.has(parts[1].toLowerCase())) return false;
+      if (p.includes("/admin")) return false;
+      return true;
+    }
+  }
+  if (p.startsWith("/vendor-") && !p.includes("/admin")) return true;
+
+  if (typeof window !== "undefined") {
+    if (resolveVendorSubdomainStoreSlug() != null) {
+      return isVendorOnlyHostCustomerPath(p);
+    }
+    if (getCachedVendorHostSlug()) {
+      return isVendorOnlyHostCustomerPath(p);
+    }
+  }
+
+  return false;
 }
 
 /**

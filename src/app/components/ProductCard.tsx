@@ -113,6 +113,7 @@ export const ProductCard = ({
         )}
         <div className="transition-transform duration-150 hover:-translate-y-0.5">
           <Card
+            data-vendor-product-id={String((product as { id?: string }).id || "")}
             className="group overflow-hidden border-0 hover:shadow-xl transition-all duration-300 cursor-pointer bg-white shadow-md rounded-2xl animate-scale-in w-full"
             onClick={onProductClick}
           >
@@ -207,6 +208,7 @@ export const ProductCard = ({
       )}
       <div className="transition-transform duration-150 hover:-translate-y-1">
         <Card
+          data-vendor-product-id={String((product as { id?: string }).id || "")}
           className="group overflow-hidden border-0 hover:shadow-xl transition-all duration-300 cursor-pointer flex flex-col gap-3 bg-white shadow-md rounded-lg animate-scale-in w-full"
           onClick={onProductClick}
         >

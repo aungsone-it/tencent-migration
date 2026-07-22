@@ -38,6 +38,7 @@ import {
   removeSessionCatalogList,
   ssVendorCatalogListKey,
   ssVendorScrollPositionKey,
+  type SessionScrollPositionState,
   writeSessionCatalogList,
   writeSessionScrollPosition,
 } from "../utils/persistedSessionCache";
@@ -1091,7 +1092,8 @@ export function VendorStoreView({
   const wasOnVendorProductRouteRef = useRef(false);
   /** Restore list scroll after browser back / PDP back from a saved browse position. */
   const pendingBrowseScrollRestoreRef = useRef(false);
-  const browseScrollByCategoryRef = useRef(new Map<string, number>());
+  const browseScrollByCategoryRef = useRef(new Map<string, SessionScrollPositionState>());
+  const browseScrollRestoreCleanupRef = useRef<(() => void) | null>(null);
 
   const navigateStoreHome = useCallback(() => {
     wasOnVendorProductRouteRef.current = false;
@@ -1552,42 +1554,116 @@ export function VendorStoreView({
   const lastVendorProductSlugForScrollRef = useRef<string | undefined>(undefined);
 
   const saveVendorBrowseScrollPosition = useCallback(
-    (category?: string) => {
+    (productId?: string, category?: string) => {
       if (savedPage || isVendorProductDetailPath) return;
       const el = vendorScrollRootRef.current;
       if (!el) return;
       const key = catalogSliceMemoryKey(category ?? catalogCategoryForFetch);
-      const top = el.scrollTop;
-      browseScrollByCategoryRef.current.set(key, top);
-      writeSessionScrollPosition(ssVendorScrollPositionKey(key), top);
+      const snapshot: SessionScrollPositionState = {
+        scrollTop: el.scrollTop,
+        ...(productId ? { anchorProductId: productId } : {}),
+      };
+      browseScrollByCategoryRef.current.set(key, snapshot);
+      writeSessionScrollPosition(ssVendorScrollPositionKey(key), snapshot);
     },
     [savedPage, isVendorProductDetailPath, catalogSliceMemoryKey, catalogCategoryForFetch]
   );
 
-  const restoreVendorBrowseScrollPosition = useCallback(() => {
+  const cancelVendorBrowseScrollRestore = useCallback(() => {
+    browseScrollRestoreCleanupRef.current?.();
+    browseScrollRestoreCleanupRef.current = null;
+  }, []);
+
+  const readBrowseScrollSnapshot = useCallback(
+    (category?: string): SessionScrollPositionState | null => {
+      const key = catalogSliceMemoryKey(category ?? catalogCategoryForFetch);
+      return (
+        browseScrollByCategoryRef.current.get(key) ??
+        readSessionScrollPosition(ssVendorScrollPositionKey(key))
+      );
+    },
+    [catalogSliceMemoryKey, catalogCategoryForFetch]
+  );
+
+  const scheduleVendorBrowseScrollRestore = useCallback(() => {
     if (savedPage || isVendorProductDetailPath) return;
-    const key = catalogSliceMemoryKey(catalogCategoryForFetch);
-    const top =
-      browseScrollByCategoryRef.current.get(key) ??
-      readSessionScrollPosition(ssVendorScrollPositionKey(key));
-    if (top == null || top <= 0) return;
-    const el = vendorScrollRootRef.current;
-    if (!el) return;
-    const apply = () => {
-      el.scrollTop = top;
-      lastVendorScrollTopRef.current = top;
-      setVendorNavbarSticky(top > 0);
+    cancelVendorBrowseScrollRestore();
+
+    const snapshot = readBrowseScrollSnapshot();
+    if (!snapshot || snapshot.scrollTop <= 0) {
+      pendingBrowseScrollRestoreRef.current = false;
+      return;
+    }
+
+    const targetTop = snapshot.scrollTop;
+    const anchorProductId = snapshot.anchorProductId;
+    let attempts = 0;
+    const maxAttempts = 40;
+
+    const apply = (): boolean => {
+      const el = vendorScrollRootRef.current;
+      if (!el || isVendorProductDetailPath) return false;
+
+      if (anchorProductId) {
+        const node = el.querySelector(
+          `[data-vendor-product-id="${CSS.escape(anchorProductId)}"]`,
+        );
+        if (node instanceof HTMLElement) {
+          node.scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
+        }
+      }
+
+      if (targetTop > 0) {
+        el.scrollTop = targetTop;
+      }
+
+      const appliedTop = el.scrollTop;
+      lastVendorScrollTopRef.current = appliedTop;
+      setVendorNavbarSticky(appliedTop > 0);
+
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (targetTop <= 0) return true;
+      if (Math.abs(appliedTop - targetTop) <= 4) return true;
+      if (maxScroll > 0 && appliedTop >= maxScroll - 4 && targetTop >= maxScroll - 4) return true;
+      return false;
     };
-    apply();
-    requestAnimationFrame(() => {
-      apply();
-      requestAnimationFrame(apply);
-    });
-  }, [savedPage, isVendorProductDetailPath, catalogSliceMemoryKey, catalogCategoryForFetch]);
+
+    const tryApply = () => {
+      attempts += 1;
+      if (apply() || attempts >= maxAttempts) {
+        pendingBrowseScrollRestoreRef.current = false;
+        cancelVendorBrowseScrollRestore();
+      }
+    };
+
+    tryApply();
+    const raf1 = requestAnimationFrame(tryApply);
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(tryApply));
+    const timers = [50, 150, 350, 700, 1200].map((ms) => window.setTimeout(tryApply, ms));
+
+    const el = vendorScrollRootRef.current;
+    let resizeObserver: ResizeObserver | undefined;
+    if (el && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => tryApply());
+      resizeObserver.observe(el);
+    }
+
+    browseScrollRestoreCleanupRef.current = () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      for (const id of timers) window.clearTimeout(id);
+      resizeObserver?.disconnect();
+    };
+  }, [
+    savedPage,
+    isVendorProductDetailPath,
+    cancelVendorBrowseScrollRestore,
+    readBrowseScrollSnapshot,
+  ]);
 
   const openVendorProductDetail = useCallback(
     (product: Product) => {
-      saveVendorBrowseScrollPosition();
+      saveVendorBrowseScrollPosition(String(product.id || "").trim() || undefined);
       const segment = buildVendorProductUrlSegment(product);
       navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
         state: { vendorProduct: product },
@@ -4768,21 +4844,6 @@ export function VendorStoreView({
     setVendorNavbarSticky(false);
   }, [productSlugFromPath, initialProductSlug, savedPage, location.pathname]);
 
-  // Restore browse grid scroll when returning from product detail (browser back or header back).
-  useLayoutEffect(() => {
-    if (savedPage || isVendorProductDetailPath) return;
-    if (!pendingBrowseScrollRestoreRef.current) return;
-    if (products.length === 0) return;
-    pendingBrowseScrollRestoreRef.current = false;
-    restoreVendorBrowseScrollPosition();
-  }, [
-    savedPage,
-    isVendorProductDetailPath,
-    catalogCategoryForFetch,
-    products.length,
-    restoreVendorBrowseScrollPosition,
-  ]);
-
   useEffect(() => {
     if (savedPage) return;
     const slug = productSlugFromPath ?? initialProductSlug;
@@ -5466,6 +5527,33 @@ export function VendorStoreView({
       (isCategoryCatalogStale || catalogVisibleProducts.length > 0),
     [serverStatus, isCategoryCatalogStale, catalogVisibleProducts.length]
   );
+
+  // Restore browse grid scroll after product detail → list (wait for grid layout/images on slow networks).
+  useEffect(() => {
+    if (savedPage || isVendorProductDetailPath) {
+      cancelVendorBrowseScrollRestore();
+      return;
+    }
+    if (!pendingBrowseScrollRestoreRef.current) return;
+    if (isCategoryCatalogStale || !showCatalogProductGrid || products.length === 0) return;
+    scheduleVendorBrowseScrollRestore();
+  }, [
+    savedPage,
+    isVendorProductDetailPath,
+    isCategoryCatalogStale,
+    showCatalogProductGrid,
+    products.length,
+    catalogCategoryForFetch,
+    catalogVisibleProducts.length,
+    scheduleVendorBrowseScrollRestore,
+    cancelVendorBrowseScrollRestore,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      cancelVendorBrowseScrollRestore();
+    };
+  }, [cancelVendorBrowseScrollRestore]);
 
   /** Full-page skeleton on /saved: wishlist GET or first product hydration — not while refetching with cards visible */
   const showSavedPageSkeleton = useMemo(

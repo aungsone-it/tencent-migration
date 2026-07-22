@@ -29,23 +29,42 @@ export function ssVendorScrollPositionKey(sliceKey: string): string {
   return `${SS_VENDOR_SCROLL_PREFIX}${encodeURIComponent(sliceKey)}-v1`;
 }
 
-export function readSessionScrollPosition(key: string): number | null {
+export type SessionScrollPositionState = {
+  scrollTop: number;
+  anchorProductId?: string;
+};
+
+export function readSessionScrollPosition(key: string): SessionScrollPositionState | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(key);
     if (raw == null) return null;
+    try {
+      const parsed = JSON.parse(raw) as SessionScrollPositionState;
+      if (parsed && typeof parsed.scrollTop === "number" && parsed.scrollTop >= 0) {
+        return parsed;
+      }
+    } catch {
+      /* legacy plain number */
+    }
     const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : null;
+    return Number.isFinite(n) && n >= 0 ? { scrollTop: n } : null;
   } catch {
     return null;
   }
 }
 
-export function writeSessionScrollPosition(key: string, scrollTop: number): void {
+export function writeSessionScrollPosition(key: string, state: SessionScrollPositionState): void {
   if (typeof sessionStorage === "undefined") return;
-  if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
+  if (!Number.isFinite(state.scrollTop) || state.scrollTop < 0) return;
   try {
-    sessionStorage.setItem(key, String(Math.round(scrollTop)));
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        scrollTop: Math.round(state.scrollTop),
+        ...(state.anchorProductId ? { anchorProductId: state.anchorProductId } : {}),
+      }),
+    );
   } catch (e) {
     devWarn("[persistedSessionCache] scroll write failed (quota?)", key, e);
   }

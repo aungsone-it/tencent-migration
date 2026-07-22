@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useLocation } from "react-router";
+import { isVendorStorefrontCustomerPath } from "../utils/vendorHostResolution";
 
 /**
  * 🔥 SINGLE SOURCE OF TRUTH FOR ALL SCROLL BEHAVIOR
@@ -14,6 +15,7 @@ import { useLocation } from "react-router";
  */
 export function ScrollController() {
   const location = useLocation();
+  const previousPathnameRef = useRef(location.pathname);
 
   // Disable browser's scroll restoration immediately
   useEffect(() => {
@@ -22,19 +24,26 @@ export function ScrollController() {
     }
   }, []);
 
-  // Reset scroll INSTANTLY on ANY route change
+  // Reset scroll INSTANTLY on route change — except vendor storefront list ↔ product hops
+  // (VendorStoreView restores its own internal scroll container on back navigation).
   useEffect(() => {
-    // Immediate synchronous scroll - BEFORE any paint
+    const previousPathname = previousPathnameRef.current;
+    previousPathnameRef.current = location.pathname;
+
+    if (
+      isVendorStorefrontCustomerPath(previousPathname) &&
+      isVendorStorefrontCustomerPath(location.pathname)
+    ) {
+      return;
+    }
+
     const scrollToTop = () => {
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
     };
-    
-    // Execute immediately
+
     scrollToTop();
-    
-    // Double-check after a microtask
     Promise.resolve().then(scrollToTop);
   }, [location.pathname, location.search, location.hash, location.key]);
 

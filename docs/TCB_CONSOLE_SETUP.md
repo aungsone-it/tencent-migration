@@ -105,7 +105,35 @@ curl -sS "$VITE_CLOUDBASE_API_BASE_URL/auth/email-health" \
   -H "Authorization: Bearer $VITE_CLOUDBASE_PUBLISHABLE_KEY"
 ```
 
-Expect `"ok": true` and `"provider": "tencent-ses"`. Password reset will fail with a clear error until SES credentials and a verified sender are configured.
+Expect `"ok": true`, `"provider": "tencent-ses"`, and `"passwordResetTemplateId": <your-template-id>`. Password reset fails with a clear API error until SES domain, sender, template, and function env are all configured.
+
+**Common SES errors after deploy:**
+
+| Error | Cause |
+|-------|--------|
+| `FailedOperation.WithoutPermission: Use a template` | Missing `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID` or old function code (inline HTML send) |
+| `AuthFailure.InvalidAuthorization` | Wrong CAM keys or region mismatch — use keys from [CAM console](https://console.cloud.tencent.com/cam/capi), not CloudBase Auth JWT |
+
+### 3b. Update an existing function (console)
+
+If the function already exists, do **not** use “Create via code package” again:
+
+1. **Cloud Function** → select `make-server-16010b6f`
+2. **Function Code** → Local upload → choose `.cloudbase/dist/make-server-16010b6f.zip`
+3. **Save** (wait for deploy to finish)
+4. Confirm env vars (especially `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID`) are saved separately under **Environment variables**
+
+### 3c. CLI deploy (alternative)
+
+```bash
+npx tcb config set isIntl true
+npx tcb logout && npx tcb login
+npm run deploy:functions
+```
+
+If `tcb env list` is empty, use console zip upload with the same account that owns the TCB console.
+
+---
 
 ### 4. Enable Authentication (+ optional Cloud Storage)
 
@@ -137,7 +165,7 @@ Copy **`KPAY_*`** values from Supabase → **Project Settings → Edge Functions
 | Variable | TCB value |
 |----------|-----------|
 | `KPAY_NOTIFY_URL` | Public URL of the **`kpay-webhook`** function (see Phase 3 gateway route below). KBZ POSTs here with no JWT — signature is verified in the handler. |
-| `KPAY_PWA_FRONTEND_RETURN_URL` | Unified apex summary page, e.g. `https://walwal.online/summary` |
+| `KPAY_PWA_FRONTEND_RETURN_URL` | Unified apex summary page, e.g. `https://nexa-apex.online/summary` |
 
 **Minimum set on `make-server-16010b6f`:**
 

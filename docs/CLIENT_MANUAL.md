@@ -121,7 +121,7 @@ src/app/components/VendorAdminPortal.tsx → vendor admin shell
 
 | Domain | Server owns |
 |--------|-------------|
-| **Auth** | CloudBase Auth JWT validation, vendor/staff KV auth, password reset OTP |
+| **Auth** | CloudBase Auth JWT validation, vendor/staff KV auth, password reset OTP via **Tencent SES template** |
 | **Products** | SKU uniqueness, inventory adjustment, category sync |
 | **Orders** | Creation, status transitions, refund/cancel, read-model sync |
 | **Payments** | KBZPay signing, webhook verification, PWA draft storage, order finalize |
@@ -129,7 +129,7 @@ src/app/components/VendorAdminPortal.tsx → vendor admin shell
 | **Vendors** | Application approval, subdomain assignment, delete audit |
 | **Storage** | Blob persist in KV (`storage:obj:*`), signed URL generation |
 | **Audit** | Staff activity log (`staff:activity:*`) |
-| **Secrets** | Admin operation secret, KPay keys, Tencent SES email, Meta CAPI token |
+| **Secrets** | Admin operation secret, KPay keys, **Tencent SES** (CAM keys + template ID), Meta CAPI token |
 
 Client must **never** embed secrets or bypass server validation.
 
@@ -227,7 +227,32 @@ Instant search filters loaded rows; debounced `q` refetches server
 
 **Client rule:** Pagination and category filters always come from the server. Client filter is UX-only on loaded data.
 
-Files: `VendorStoreView.tsx`, `module-cache.ts`, `vendorStorefrontProductStats.ts`
+Files: `VendorStoreView.tsx`, `module-cache.ts`, `vendorStorefrontProductStats.ts`, `vendorBrowseScroll.ts`, `ScrollController.tsx`
+
+---
+
+## Slide 8b — Flow: Product detail → Back (scroll restore)
+
+```
+Customer scrolls vendor grid → taps product
+        │
+        ▼
+VendorStoreView saves scrollTop (window + container) + category tab
+        │  history.state + sessionStorage (persistedSessionCache)
+        ▼
+Product detail route (/product/:slug)
+        │
+        ▼
+Customer taps Back (browser or header)
+        │
+        ▼
+ScrollController skips scroll-to-top on list ↔ product transition
+        │
+        ▼
+VendorStoreView restores scroll + optional anchor (data-vendor-product-id)
+```
+
+**Client rule:** Scroll position is UX state only — catalog data still comes from server cache/refetch.
 
 ---
 
@@ -280,7 +305,7 @@ Client: Realtime on kpay_txn:{orderId}  (primary)
         + poll ~1.5s                      (fallback)
               │
               ▼
-Redirect to www.nexa-mm.com/summary → Continue Shopping → vendor store
+Redirect to apex `/summary` (e.g. `nexa-apex.online/summary`) → Continue Shopping → vendor store
 ```
 
 **Client rule:** Client never marks an order as paid. It waits for server state.
@@ -415,6 +440,8 @@ Client displays via resolveCloudBaseMediaUrl() with thumb sizes:
 
 Guest browsers **do not** count toward Auth MAU limits.
 
+**Password reset:** `/reset-password` → `POST /auth/send-email-otp` → email OTP (Tencent SES template) → `POST /auth/verify-otp-and-reset`. Vendor admin: `?returnTo=/admin&account=vendor`. Verify backend: `GET /auth/email-health`.
+
 Every API call includes:
 
 ```
@@ -428,7 +455,29 @@ x-admin-operation-secret: {VITE_ADMIN_OPERATION_SECRET}
 x-actor-user-id: {UUID from localStorage}
 ```
 
-Files: `AuthContext.tsx`, `VendorAuthContext.tsx`, `auth_routes.tsx`
+Files: `AuthContext.tsx`, `VendorAuthContext.tsx`, `auth_routes.tsx`, `tencent_ses.tsx`, `ResetPasswordPage.tsx`, `ForgotPassword.tsx`
+
+---
+
+## Slide 15b — Deploy version watcher
+
+```
+EdgeOne deploy → new dist/version.json { buildId }
+        │
+        ▼
+Open tabs poll /version.json (2 min + tab focus)
+        │
+        ▼
+buildId ≠ localStorage migoo-deploy-version
+        │
+        ▼
+purgeDeployClientCaches() — keep auth + KBZPay session keys
+        │
+        ▼
+Hard reload once (?_dv=buildId) — user gets new JS bundle
+```
+
+Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 
 ---
 
@@ -443,7 +492,10 @@ Files: `AuthContext.tsx`, `VendorAuthContext.tsx`, `auth_routes.tsx`
 | `src/app/utils/persistedLocalCache.ts` | localStorage TTL cache |
 | `src/app/components/OrderRealtimeBridge.tsx` | Global pulse listener |
 | `src/app/components/CartContext.tsx` | Cart state (guest local / signed-in server) |
-| `src/app/components/VendorStoreView.tsx` | Storefront catalog + wishlist |
+| `src/app/components/VendorStoreView.tsx` | Storefront catalog + wishlist + scroll restore |
+| `src/app/utils/deployVersion.ts` | Post-deploy cache purge + hard reload |
+| `src/app/utils/vendorBrowseScroll.ts` | Storefront scroll save/restore |
+| `src/app/components/ScrollController.tsx` | Route-level scroll behavior |
 | `src/app/components/Checkout.tsx` | Checkout + KPay wait loop |
 | `src/app/components/Orders.tsx` | Admin orders + optimistic status |
 | `src/app/utils/kpayClient.ts` | KPay API wrapper → server |
@@ -460,7 +512,8 @@ Files: `AuthContext.tsx`, `VendorAuthContext.tsx`, `auth_routes.tsx`
 | `kv_store.tsx` | KV get/set/del/prefix |
 | `read_model.ts` | KV → SQL sync |
 | `server_cache.ts` | Per-isolate edge cache |
-| `auth_routes.tsx` | Auth, staff activities |
+| `auth_routes.tsx` | Auth, staff activities, OTP reset |
+| `tencent_ses.tsx` | Tencent SES template send |
 | `customer_routes.tsx` | Customer CRUD + paginated admin |
 | `kpay_routes.tsx` | KBZPay QR + PWA start |
 | `pwa_finalize.ts` | Post-payment order creation |
@@ -480,7 +533,7 @@ Base: `$VITE_CLOUDBASE_API_BASE_URL` → typically `…/v1/functions/make-server
 | Products (admin) | `GET/POST/PUT/DELETE /products`, `GET /check-sku/:sku` |
 | Orders | `GET/POST/PUT/DELETE /orders`, `GET /user/:userId/orders` |
 | Customers | `GET/POST/PUT /customers` |
-| Auth | `/auth/*`, `/vendor-auth/*`, `/wishlist/:userId` |
+| Auth | `/auth/send-email-otp`, `/auth/verify-otp-and-reset`, `/auth/email-health`, `/auth/*`, `/vendor-auth/*`, `/wishlist/:userId` |
 | Settings | `/settings/general`, upload logo/banner |
 | KPay | `/kpay/create-qr`, `/kpay/pwa/start`, `/kpay/pwa/finalize/:id` |
 | Storage | `GET /storage/object?bucket=&path=&sig=` |
@@ -497,10 +550,9 @@ Prefer event-driven invalidation. Polling is a **last resort**.
 |---------|----------|-----|
 | KPay checkout | ~1.5s | WebView return + webhook latency |
 | Settings → Activities | 30s | Incremental staff audit feed while tab open |
+| Deploy version | 2 min + focus | One hard reload after EdgeOne deploy |
 
 Do **not** add new polling loops without reviewing CloudBase invocation limits.
-
----
 
 ## Slide 20 — Decision Tree: Where Does This Logic Go?
 
@@ -565,6 +617,9 @@ After any client-side data change, verify:
 - [ ] KPay checkout in mobile WebView — does order appear after payment?
 - [ ] Admin order status change — badge updates without full-page blink?
 - [ ] Guest → sign-in — cart behavior correct per actor type?
+- [ ] Product detail → Back — storefront scroll and category tab restored?
+- [ ] Password reset — OTP email arrives; `/auth/email-health` ok on server?
+- [ ] After EdgeOne deploy — open tab reloads once with new `buildId` in `/version.json`?
 
 ---
 

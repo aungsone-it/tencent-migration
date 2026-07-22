@@ -7,7 +7,7 @@ This guide documents operator workflows for the current **NEXA Platform** app (*
 ### Super admin
 
 - Portal: `/admin` and `/admin/:section`
-- Host: platform apex (e.g. `https://walwal.online/admin`)
+- Host: platform apex (e.g. `https://www.nexa-mm.com/admin` or `https://nexa-apex.online/admin`)
 
 ### Vendor public storefront
 
@@ -15,7 +15,7 @@ Customers shop on **one vendor at a time**:
 
 | Deployment | Public store URL |
 |------------|------------------|
-| Subdomain (production) | `https://{label}.{baseDomain}/` (e.g. `https://gogo.walwal.online/`) |
+| Subdomain (production) | `https://{label}.{VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN}/` (e.g. `https://gogo.nexa-apex.online/` or `https://migoo.nexa-mm.com/`) |
 | Custom domain | `https://your-domain.com/` |
 | Path-based (dev) | `https://your-domain/vendor/{store-slug}/` |
 
@@ -30,6 +30,7 @@ Customers shop on **one vendor at a time**:
 - `/vendor/application` — apply to sell
 - `/vendor/setup` — complete setup after approval
 - `/vendor/login` — vendor sign-in (redirects to correct admin host when configured)
+- `/reset-password?returnTo=/admin&account=vendor` — vendor admin OTP reset (linked from storefront login **Forgot Password?**)
 
 ## 2) Super-admin workflows
 
@@ -107,6 +108,8 @@ After approval, the vendor completes setup at `/vendor/setup` and signs in at `/
 2. If setup is incomplete, complete vendor setup flow.
 3. Vendor lands in admin portal routes under `/vendor/{store-slug}/admin/*` (or vendor-host `/admin`).
 
+**Forgot password (vendor admin):** From `/vendor/login`, use **Forgot Password?** → `/reset-password?returnTo=/admin&account=vendor`. Enter email, receive OTP via Tencent SES, set a new password. Requires function env `TENCENT_SES_*` and approved SES template (see [DEPLOYMENT.md](./DEPLOYMENT.md)).
+
 ### Vendor admin areas
 
 - Analytics
@@ -121,6 +124,7 @@ After approval, the vendor completes setup at `/vendor/setup` and signs in at `/
 Use **preview / open store** from vendor admin to verify:
 
 - catalog visibility and category tabs (`/`, `/{category-slug}`)
+- **scroll position** when opening a product and going back (same category tab)
 - pricing and stock
 - checkout readiness: Cash on Delivery, KBZPay QR, and KBZPay PWA
 - storefront contact: phone menu offers native Dial and Viber chat
@@ -154,7 +158,7 @@ Before release windows, confirm:
 - vendor storefront on **subdomain** and **path-based** URLs
 - category routes (e.g. `/cosmetic`) show full category catalog without requiring “Load more” on home first
 - order updates sync correctly across admin/vendor/customer views
-- KBZPay return lands on apex `/summary` and Continue Shopping returns to the vendor storefront
+- KBZPay return lands on apex `/summary` (e.g. `nexa-apex.online/summary`) and Continue Shopping returns to the vendor storefront
 - chat and notification flows are healthy
 - **Settings → Activities** updates after vendor approve/delete and staff user changes
 - **Landing page** carousel logos load; cards link to correct vendor store URL

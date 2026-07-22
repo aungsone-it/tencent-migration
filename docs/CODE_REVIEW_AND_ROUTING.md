@@ -32,8 +32,8 @@ This file is the evergreen technical reference for the **current** app structure
 
 | Host type | Example | `/` behavior |
 |-----------|---------|--------------|
-| Platform apex | `walwal.online` | `LandingPage` — stats, vendor carousel (logos, revenue-sorted), FloatingChat |
-| Vendor subdomain | `gogo.walwal.online` | `VendorStorefrontPage` (that vendor’s catalog) |
+| Platform apex | `nexa-mm.com`, `nexa-apex.online` | `LandingPage` — stats, vendor carousel (logos, revenue-sorted), FloatingChat |
+| Vendor subdomain | `gogo.nexa-apex.online` (or `{label}.nexa-mm.com` per env) | `VendorStorefrontPage` (that vendor’s catalog) |
 | Custom domain | `migoo.store` | `VendorStorefrontPage` (resolved slug) |
 | Localhost path dev | `localhost:5173` | `LandingPage` or `/vendor/:slug` |
 
@@ -48,6 +48,7 @@ Vendor identity is resolved from **hostname** (subdomain map, custom domain look
 | `/` | Apex: `LandingPage` (vendor carousel, stats, FloatingChat). Vendor host: `VendorStorefrontPage`. Carousel cards use `resolveLandingVendorStoreUrl()` (custom domain → subdomain → `/vendor/:slug`). |
 | `/admin/*` | Super-admin portal |
 | `/vendor/application`, `/vendor/setup`, `/vendor/login` | Vendor onboarding / auth |
+| `/reset-password` | OTP password reset (`?returnTo=/admin&account=vendor` for vendor admin) |
 | `/summary` | Unified KBZPay post-payment summary (`VendorHostOnlyStorefront` on apex) |
 | `/kpay/return` | `KPayReturnPage` |
 | `/terms`, `/privacy` | Policy pages (vendor content when on vendor host) |
@@ -108,7 +109,7 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 
 - Checkout starts on the **vendor storefront** host where the customer is shopping.
 - Active payment choices are **Cash on Delivery**, **KBZPay QR**, and **KBZPay PWA**. Card/bank/Stripe helpers are not production checkout paths.
-- PWA return URL targets unified apex summary: `walwal.online/summary` (see `vendorCheckoutPaths.ts`, `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, edge `middleware.ts`).
+- PWA return URL targets unified apex summary (e.g. `nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; see `vendorCheckoutPaths.ts`, `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, edge `middleware.ts`).
 - `storefrontOrigin` on the checkout draft drives **Continue Shopping** back to the vendor host.
 
 ## 8) Data/API model
@@ -137,7 +138,8 @@ Details and scale limits: [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKE
 - Throttled badge/profile refresh.
 - Typed timeout/network errors from API client.
 - Early vendor branding: `vendorStorefrontBrandingCache.ts` + `vendor-storefront-head.js`.
-- **RootLayout:** `FloatingChat` lazy-loaded globally — shown on apex landing and storefronts; hidden on admin portals, `/vendor/application`, reset-password, and vendor login routes.
+- **RootLayout:** `FloatingChat` lazy-loaded globally — shown on apex landing and storefronts; hidden on admin portals, `/vendor/application`, `/reset-password`, and vendor login routes.
+- **Scroll restore:** `VendorStoreView` saves grid scroll position (window + inner container) when opening a product; restores on browser Back or header back via `vendorBrowseScroll.ts`, `persistedSessionCache.ts`, and `ScrollController.tsx` (skips scroll-to-top between list ↔ product paths).
 - **Add to Home:** `VendorInstallFab` (portal to `document.body`) mounted from `VendorStoreView` above the chat FAB stack; injects per-vendor web manifest + registers `public/sw.js` for Chrome install eligibility. See [VENDOR_ADD_TO_HOME.md](./VENDOR_ADD_TO_HOME.md).
 - **Settings (`Settings.tsx`):** Activities tab with global feed; Appearance tab filtered out; `scrollbar-thin` on nav and main pane.
 - **Vendor admin list (`Vendor.tsx`):** no Add Vendor button; horizontal table scroll uses `scrollbar-thin-x` (4px, inset track).

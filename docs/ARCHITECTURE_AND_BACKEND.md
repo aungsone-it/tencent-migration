@@ -10,7 +10,7 @@ For routing and host models, see [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_
 
 | Layer | Implementation |
 |-------|----------------|
-| **Frontend** | React 18 + TypeScript + Vite SPA, hosted as static files (e.g. Vercel) |
+| **Frontend** | React 18 + TypeScript + Vite SPA, hosted as static files (production: **Tencent EdgeOne**)
 | **API** | CloudBase/Tencent HTTP Function `make-server-16010b6f` — Hono app in `supabase/functions/make-server-16010b6f/index.tsx` |
 | **Payment webhook** | Separate function `kpay-webhook` (signature verified in handler) |
 | **Database** | TencentDB for PostgreSQL — KV table `kv_store_16010b6f` + SQL read-model `app_*` tables |
@@ -154,6 +154,23 @@ Uses server pagination + category filter (see `fetchVendorProducts` in `module-c
 
 The app does **not** currently use `signInAnonymously()` for guests.
 
+### Password reset (OTP email)
+
+Password reset is **server-only** via Tencent Cloud SES approved templates (not inline HTML, not Resend):
+
+| Step | Behavior |
+|------|----------|
+| Client | `POST /auth/send-email-otp` with email (+ optional `accountType: "vendor"`) |
+| Server | Generates OTP, stores hash in KV, sends via `SendEmail` + `TemplateID` + `TemplateData` (`otp_code`) |
+| Client | `POST /auth/verify-otp-and-reset` with email, OTP, new password |
+| Health | `GET /auth/email-health` → `{ ok, provider: "tencent-ses", passwordResetTemplateId }` |
+
+**Function env (required):** `TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`, `TENCENT_SES_FROM_EMAIL`, `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID` (see `cloudbase/function-env.template.env`).
+
+**UI routes:** `/reset-password` — vendor admin uses `?returnTo=/admin&account=vendor` from storefront login **Forgot Password?**
+
+Redeploy the **function zip** after changing SES code or template env vars.
+
 ---
 
 ## 6) Realtime (current behavior)
@@ -215,7 +232,8 @@ Do not document Stripe as a supported customer payment method unless it is integ
 | **Client session cache** | `src/app/utils/module-cache.ts` | In-memory Map; coalesced fetches; localStorage for some page-1 slices |
 | **Edge in-memory cache** | `server_cache.ts` (`getCached` / `setCache` / `clearCache`) | Per-isolate Map; cleared on order mutations |
 | **Client orders cache** | `module-cache.ts` | Paginated `admin-orders-page-*` keys; optimistic patches on status/recover (no full refetch) |
-| **CDN / static** | Vercel `vercel.json` headers | Long cache on `/assets/*`; short on `index.html` |
+| **CDN / static** | EdgeOne / `public/_headers` | Long cache on `/assets/*`; `no-cache` on `index.html` and `/version.json` |
+| **Deploy version** | `deployVersion.ts` + `dist/version.json` | Open tabs poll every 2 min; hard-reload once after EdgeOne deploy (preserves auth + KBZPay session keys) |
 | **Image transforms** | Client-side compression + optional `VITE_CLOUDBASE_THUMB_MAX` | Upload target ~500KB; grid thumbs via transform width when CDN/storage render URLs are available |
 
 See [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md).

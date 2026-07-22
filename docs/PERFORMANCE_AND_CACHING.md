@@ -19,6 +19,34 @@ This document summarizes active performance and cache behavior that should be ma
 - First four product cards per grid use `priority` on `LazyImage` / `ProductCard` for faster above-the-fold paint.
 - Banner slides use `<img fetchPriority="high">` instead of CSS `background-image`.
 
+## Deploy cache refresh (EdgeOne)
+
+Each production build writes a unique `buildId` to `dist/version.json` (via `vite.config.ts`).
+
+| Mechanism | Behavior |
+|-----------|----------|
+| `bootstrapDeployVersionFromBundle()` | On app boot, compares bundled `VITE_BUILD_ID` to stored version |
+| `startDeployVersionWatcher()` | Polls `/version.json` every **2 minutes** + on tab focus/visibility |
+| `applyDeployUpdateIfNeeded()` | Purges catalog/admin caches, unregisters SW, hard-reloads **once** per deploy |
+| Preserved session keys | Auth tokens, in-flight KBZPay pending order, summary storefront origin |
+
+Configure CDN so `/index.html` and `/version.json` are **no-cache** (`public/_headers`). Hashed `/assets/*` can stay long-lived.
+
+Files: `src/app/utils/deployVersion.ts`, `src/app/App.tsx` (watcher bootstrap).
+
+## Storefront scroll restore
+
+When a customer opens a product from the vendor grid and goes back (browser Back or header back), the grid restores the previous scroll position and category tab.
+
+| Piece | Role |
+|-------|------|
+| `vendorBrowseScroll.ts` | Saves/restores window + container scroll; patches `history.state` |
+| `persistedSessionCache.ts` | SessionStorage fallback if history state is lost on remount |
+| `ScrollController.tsx` | Skips global scroll-to-top between product list and product detail routes |
+| `ProductCard.tsx` | `data-vendor-product-id` anchor for retry scroll-into-view |
+
+Frontend-only — deploy **`dist/`** to EdgeOne after changes (no function zip).
+
 ## Vendor catalog caching
 
 - Vendor product pages are fetched with server pagination and optional **category** filter (`VendorStoreView` → `fetchVendorProducts`).
@@ -66,6 +94,7 @@ When changing data-fetching behavior:
 |---------|----------|-------|
 | KPay checkout | ~1.5s | Fallback while waiting for webhook/Realtime |
 | Settings → Activities | 30s | Incremental `GET /auth/staff-activities?since=` while tab is open; session cache on tab switch |
+| Deploy version | 2 min + focus | `GET /version.json` — triggers one hard reload after EdgeOne deploy |
 
 Activities cache key: `ADMIN_STAFF_ACTIVITIES` (`module-cache.ts`). Invalidate on vendor approve/delete via `invalidateStaffActivitiesCache()`.
 
@@ -92,4 +121,6 @@ Before high-traffic events, read [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AN
 - Add/remove wishlist, then hard refresh immediately.
 - Confirm changes appear across two logged-in sessions.
 - Confirm admin/order badge updates do not trigger redundant bursts.
+- Open a product on a vendor storefront, go back — scroll position and category tab are restored.
+- After EdgeOne deploy, an open tab reloads once; `/version.json` shows a new `buildId`.
 - Review CloudBase/Tencent usage dashboard after repetitive workflow testing.

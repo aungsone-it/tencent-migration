@@ -6,8 +6,8 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 
 ## What the platform includes
 
-- **Platform landing page** on the marketplace apex (`walwal.online/`) — branding, vendor discovery, links to apply/login (not a product catalog)
-- **Vendor storefronts** — path-based (`/vendor/:slug/*`), vendor subdomains (`{label}.walwal.online`), and custom domains
+- **Platform landing page** on the marketplace apex (`nexa-mm.com/`, `nexa-apex.online/`) — branding, vendor discovery, links to apply/login (not a product catalog)
+- **Vendor storefronts** — path-based (`/vendor/:slug/*`), vendor subdomains (`{label}.{VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN}`), and custom domains
 - **Super-admin portal** — `/admin/*`
 - **Vendor-admin portal** — `/vendor/:slug/admin/*` (and legacy `/store/:slug/admin/*` redirects where configured)
 - **CloudBase/Tencent Edge backend** — auth, orders, products, payments, notifications
@@ -16,12 +16,15 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 
 | Area | What shipped |
 |------|----------------|
+| **Password reset email** | [Tencent Cloud SES](https://www.tencentcloud.com/products/ses) replaces Resend — OTP via **approved SES template** (`SendEmail` + `TemplateID`); no demo/debug OTP in API or UI |
+| **Vendor admin reset** | `/reset-password?returnTo=/admin&account=vendor` — vendor KV accounts can self-reset from storefront login **Forgot Password?** |
+| **Auto cache refresh on deploy** | Each build writes `dist/version.json`; open tabs poll and hard-reload once after EdgeOne deploy (keeps auth + KBZPay state) |
+| **Storefront scroll restore** | Vendor product grid restores scroll position when returning from product detail (browser Back or header back) |
+| **TCB function deploy** | Console zip (`.cloudbase/dist/*.zip`) or CLI (`npm run deploy:functions`); CLI requires `tcb config set isIntl true` for Singapore envs |
 | **TencentDB migration** | Supabase → TencentDB for PostgreSQL: KV + SQL read-model tables imported; **KPay txn/draft** and **chat** KV skipped (KPay already on TCB). Scripts: `test:db`, `import:supabase-data`, `db:schema`, `setup:tcb-first` |
-| **TCB function deploy** | Console upload zips (`.cloudbase/dist/*.zip`); shared `server_cache.ts`; order delete syncs SQL read model synchronously |
-| **Super-admin Orders** | KBZPay **draft recovery** panel; optimistic list updates (no blink on recover/cancel); badge count normalization; bulk **Delete** hidden in UI (code retained) |
-| **Schema migrations** | `supabase/migrations/` applied to TencentDB; `setup:tcb-first` skips KV backfill INSERTs when `SKIP_DATA_COPY=1` (safe re-run on populated DB) |
-| **Logistics admin** | Delivery partners CRUD, per-region rates, logo upload (~500KB compress), warehouse role access, Chinese UI on list/profile/form |
-| **Image storage** | **Production default:** files in TencentDB KV (`storage:obj:*` keys); entity records hold URLs only. Optional CloudBase object storage via `CLOUDBASE_STORAGE_API_BASE_URL` — not used on NEXA TCB env |
+| **Super-admin Orders** | KBZPay **draft recovery** panel; optimistic list updates; badge count normalization |
+| **Logistics admin** | Delivery partners CRUD, per-region rates, logo upload (~500KB compress), warehouse role access |
+| **Image storage** | **Production default:** files in TencentDB KV (`storage:obj:*` keys); optional CloudBase object storage via `CLOUDBASE_STORAGE_API_BASE_URL` |
 
 ### Earlier (June 2026)
 
@@ -47,7 +50,7 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | Chat KV | Not migrated — chat remains on prior store until cutover |
 | Image uploads (new) | Stored in **TencentDB KV** + signed URLs; compress ~500KB on upload. Legacy Supabase Storage URLs in imported data may need re-upload |
 | CloudBase object storage | **Optional** — set `CLOUDBASE_STORAGE_API_BASE_URL` only if migrating off KV blobs later |
-| Auth users | Separate migration / password reset may be needed |
+| Auth users | Separate migration / password reset via SES OTP (staff, vendor KV, customer KV, CloudBase Auth) |
 
 See [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) and [migration.md](migration.md).
 
@@ -73,6 +76,7 @@ See [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) and [migration.md](mi
 Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared marketplace `Storefront` route).
 
 - Browse products, categories, product detail, saved items, cart, checkout
+- **Scroll position preserved** when opening a product and going back (same category tab)
 - Customer profile, addresses, order history, order detail
 - Host modes:
   - **Vendor subdomain / custom domain** — clean URLs at host root (`/`, `/product/:sku`, `/checkout`, `/:categorySlug`, `/saved`, `/profile/*`)
@@ -84,7 +88,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 
 ### Platform apex (non-shopping)
 
-- `/` on `walwal.online` (and similar apex hosts) — **LandingPage** (platform marketing, stats, vendor partner carousel)
+- `/` on platform apex hosts (`nexa-mm.com`, `nexa-apex.online`, etc.) — **LandingPage** (platform marketing, stats, vendor partner carousel)
 - **FloatingChat** on the apex landing page and vendor storefronts (hidden on admin, vendor application, and login routes)
 - `/summary` — unified KBZPay order summary after mobile app payment
 - `/vendor/application`, `/vendor/login`, `/vendor/setup` — vendor onboarding and auth
@@ -94,7 +98,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 
 - **Cash on Delivery**, **KBZPay QR**, and **KBZPay PWA** at vendor checkout — these are the active customer payment paths
 - Return landing: `/kpay/return`, `/summary`, `/checkout/success`, `/order-confirmation` (vendor-host or path-based)
-- Post-PWA summary consolidates on **`https://walwal.online/summary`** (Continue Shopping returns to the vendor where checkout started)
+- Post-PWA summary consolidates on the **platform apex `/summary`** (e.g. `https://nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; Continue Shopping returns to the vendor where checkout started)
 - KBZPay webhook + Realtime on `kpay_txn:{orderId}` (+ HTTP polling fallback during checkout)
 - Refund/cancel logic in code; production refund success depends on gateway mTLS/client certificate setup
 - **Stripe/Card/Bank transfer:** helper or legacy code may exist, but these are **not wired as live vendor checkout payment paths** — do not treat as production options
@@ -152,6 +156,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 | Unified KBZPay summary | `/summary` |
 | Super admin | `/admin`, `/admin/:section` |
 | Vendor apply / login | `/vendor/application`, `/vendor/login` |
+| Password reset (OTP) | `/reset-password` — optional `?returnTo=/admin&account=vendor` |
 
 ### Removed / legacy (redirect or 404)
 
@@ -166,8 +171,11 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 Configure in `.env` (see `.env.example`):
 
 ```bash
-# Apex only, no protocol
-BASE_DOMAIN=walwal.online
+# Vendor subdomain suffix (no protocol), e.g. nexa-apex.online or nexa-mm.com
+VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN=nexa-apex.online
+
+# Hostnames that show platform landing at / (comma-separated)
+VITE_PLATFORM_RESERVED_APEX_DOMAINS=nexa-mm.com,nexa-apex.online
 
 # Optional: DNS label → store slug
 VITE_VENDOR_SUBDOMAIN_SLUG_MAP={"gogo":"go-go"}
@@ -227,7 +235,8 @@ npm test
 | `npm run import:supabase-data-only` | KV import only (skip schema) |
 | `npm run import:supabase-sql-only` | SQL read-model tables only (skip schema + KV) |
 | `npm run import:vendor-product` | Import vendor + product data subset |
-| `npm run deploy:functions` | Deploy CloudBase functions via CLI (`tcb`) |
+| `npm run deploy:functions` | Build + deploy CloudBase functions via CLI (`tcb`) |
+| `npm run deploy:functions:zip` | Build `.cloudbase/dist/*.zip` only (console upload) |
 | `npm run deploy:cloudbase` | DB push + functions deploy |
 | `npm run validate:read-model` | Validate KV ↔ SQL read-model counts (requires `EDGE_ADMIN_OPERATION_SECRET`) |
 | `npm run kpay:urls` | Print resolved KBZPay gateway URLs from function env |
@@ -264,16 +273,18 @@ Use URL-encoded passwords for special characters. TencentDB managed instances of
 - `VITE_ADMIN_OPERATION_SECRET` — must match server `EDGE_ADMIN_OPERATION_SECRET`
 - `VITE_CLOUDBASE_THUMB_MAX` — image transform width
 
-**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, `CLOUDBASE_API_PUBLIC_BASE_URL`, etc. Image uploads use **TencentDB KV by default** (`CLOUDBASE_STORAGE_API_BASE_URL` optional). Details: [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md).
+**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, `CLOUDBASE_API_PUBLIC_BASE_URL`, **Tencent SES** (`TENCENT_SECRET_ID`, `TENCENT_SES_FROM_EMAIL`, `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID`), etc. Image uploads use **TencentDB KV by default** (`CLOUDBASE_STORAGE_API_BASE_URL` optional). Details: [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) and [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md).
 
 ## Deployment
 
-Static SPA frontend + CloudBase/Tencent backend services.
+Static SPA frontend (**EdgeOne**) + CloudBase/Tencent backend (functions + TencentDB).
 
-- **Frontend:** any static host with SPA fallback (`index.html` rewrite) — Vercel, Netlify, Cloudflare Pages, Tencent Cloud, etc.
-- **Backend:** deploy CloudBase/Tencent Edge Functions separately after schema changes.
+| Change type | Deploy target |
+|-------------|---------------|
+| Frontend UI (storefront scroll, reset page, cache refresh) | `npm run build` → upload **`dist/`** to EdgeOne |
+| API / auth / email / payments | Upload **`.cloudbase/dist/make-server-16010b6f.zip`** (or `npm run deploy:functions`) |
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md). (Root `DEPLOYMENT_CHECKLIST.md` is legacy — see [docs/LEGACY_DOCS.md](docs/LEGACY_DOCS.md).)
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md). After deploy, follow [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md). (Root `DEPLOYMENT_CHECKLIST.md` is legacy — see [docs/LEGACY_DOCS.md](docs/LEGACY_DOCS.md).)
 
 ## Documentation Index
 
@@ -286,7 +297,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MO
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and env setup |
 | [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) | Read-model deploy validation and monitoring |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |
-| [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, Realtime scale notes |
+| [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, deploy refresh, scroll restore, Realtime scale notes |
 | [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows |
 | [docs/CLIENT_INSTRUCTIONS.md](docs/CLIENT_INSTRUCTIONS.md) | **End-user manual** — how to shop, sell, and manage (presentation-style) |
 | [docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md](docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md) | Short non-technical quick reference |
@@ -297,7 +308,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). After deploy, follow [docs/READ_MO
 
 ## Performance (PageSpeed / LCP)
 
-Target vendor hosts (e.g. `https://gogo.walwal.online`) should enable **CloudBase/Tencent Storage image transformations** so resized product images ship by default.
+Target vendor hosts (e.g. `https://gogo.nexa-apex.online` or a custom domain) should enable **CloudBase/Tencent Storage image transformations** so resized product images ship by default.
 
 | Optimization | Effect |
 |--------------|--------|

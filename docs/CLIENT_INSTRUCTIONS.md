@@ -42,7 +42,7 @@ The main site shows platform information, a **vendor logo carousel** (click to o
 
 **To buy something:**
 
-1. Open a vendor’s store link (e.g. `https://gogo.nexa-mm.com/` or a custom domain), **or**
+1. Open a vendor’s store link (e.g. `https://gogo.nexa-apex.online/` or a custom domain), **or**
 2. Click a vendor logo on the main homepage carousel.
 
 Each store sells **only its own products**.
@@ -55,7 +55,7 @@ Each store sells **only its own products**.
 
 | Method | Example |
 |--------|---------|
-| Vendor subdomain | `https://gogo.nexa-mm.com/` |
+| Vendor subdomain | `https://gogo.nexa-apex.online/` (suffix depends on platform config) |
 | Custom domain | `https://yourstore.com/` |
 | Main site carousel | Click a vendor logo on the homepage |
 
@@ -68,6 +68,7 @@ On the store you can browse products, search, switch **English / Burmese**, cont
 - Products appear with an optional banner at the top.
 - Use **category tabs** to filter by category.
 - Scroll or tap **Load more** when the store has many products.
+- Tap a product to view details; use **Back** to return to the same place in the list (scroll position is restored).
 
 **Product page**
 
@@ -105,7 +106,7 @@ If a category looks empty, refresh the page or switch tabs and return.
 **Sign in or register**
 
 - Open **Profile** or **Account** from the store menu.
-- Use **Forgot password** if needed; check your email for reset instructions.
+- Use **Forgot password** if needed — enter your email, receive a **one-time code (OTP)**, then set a new password. Check spam if the email does not arrive within a minute.
 
 Guest checkout may be available, but signed-in accounts are easier to track later.
 
@@ -133,7 +134,7 @@ Typical statuses: Pending → Processing → Shipped / Fulfilled → Delivered (
 1. Choose **KBZPay** at checkout.
 2. Scan the **QR code** or open the **KBZPay app**.
 3. Complete payment in KBZPay.
-4. You may land on `https://www.nexa-mm.com/summary` — tap **Continue Shopping** to return to the store.
+4. You may land on the platform apex order summary (e.g. `https://nexa-apex.online/summary`) — tap **Continue Shopping** to return to the store.
 
 Keep the browser open until payment finishes. If unsure whether payment went through, check **Profile → Orders** before paying again.
 
@@ -185,10 +186,12 @@ Storefronts support **English** and **Burmese** via the language menu. Admin das
 3. Complete setup and sign in at `https://www.nexa-mm.com/vendor/login`.
 4. Open **vendor admin** to add products and configure your store.
 
+**Forgot password:** On the vendor login page, tap **Forgot Password?** → enter your email → enter the **OTP code** from email → set a new password.
+
 | URL | Purpose |
 |-----|---------|
-| `https://yourstore.nexa-mm.com/` | Customer-facing shop |
-| `https://yourstore.nexa-mm.com/admin` | Your management dashboard |
+| `https://yourstore.{subdomain-base}/` | Customer-facing shop (subdomain suffix from platform config, e.g. `nexa-mm.com` or `nexa-apex.online`) |
+| `https://yourstore.{subdomain-base}/admin` | Your management dashboard |
 
 New stores always come through the application form. There is no manual “Add vendor” button for applicants.
 
@@ -325,9 +328,10 @@ Platform URL: **https://www.nexa-mm.com/**
 | Super admin | `https://www.nexa-mm.com/admin` |
 | Apply to sell | `https://www.nexa-mm.com/vendor/application` |
 | Vendor login | `https://www.nexa-mm.com/vendor/login` |
-| Example shop | `https://gogo.nexa-mm.com/` |
-| Example vendor admin | `https://gogo.nexa-mm.com/admin` |
-| After KBZPay payment | `https://www.nexa-mm.com/summary` |
+| Example shop | `https://gogo.nexa-apex.online/` |
+| Example vendor admin | `https://gogo.nexa-apex.online/admin` |
+| After KBZPay payment | `https://nexa-apex.online/summary` (platform apex; configured via `KPAY_PWA_FRONTEND_RETURN_URL`) |
+| Password reset | `https://www.nexa-mm.com/reset-password` |
 
 ### 5.2 Do’s and don’ts
 
@@ -352,7 +356,7 @@ Platform URL: **https://www.nexa-mm.com/**
 |---------|-------------|
 | Blank page after refresh | Retry the link; use Chrome or Safari |
 | Empty category | Hard refresh; switch category tabs |
-| Cannot log in | Password reset; verify email spelling |
+| Cannot log in | Use **Forgot password** (OTP email); verify email spelling; vendors use link on `/vendor/login` |
 | KBZPay paid, no order | Wait 1–2 minutes; check Profile → Orders; contact store |
 | Cart empty after sign-in | Re-add items (guest cart may not merge) |
 | Email check stuck on application | Refresh; submit only after “Email is available” |

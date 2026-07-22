@@ -34,9 +34,12 @@ import {
 } from "../utils/vendorStorefrontBrandingCache";
 import {
   readSessionCatalogList,
+  readSessionScrollPosition,
   removeSessionCatalogList,
   ssVendorCatalogListKey,
+  ssVendorScrollPositionKey,
   writeSessionCatalogList,
+  writeSessionScrollPosition,
 } from "../utils/persistedSessionCache";
 import { normalizeVendorStorefrontProducts } from "../utils/vendorStorefrontProductStats";
 import { formatOrderNumberDisplay } from "../utils/orderNumber";
@@ -1086,10 +1089,14 @@ export function VendorStoreView({
   const restoreCatalogForBrowseRef = useRef<(() => void) | null>(null);
   /** True while URL is a product detail route — used to restore browse catalog only when leaving PDP. */
   const wasOnVendorProductRouteRef = useRef(false);
+  /** Restore list scroll after browser back / PDP back from a saved browse position. */
+  const pendingBrowseScrollRestoreRef = useRef(false);
+  const browseScrollByCategoryRef = useRef(new Map<string, number>());
 
   const navigateStoreHome = useCallback(() => {
     wasOnVendorProductRouteRef.current = false;
     restoreCatalogForBrowseRef.current?.();
+    pendingBrowseScrollRestoreRef.current = true;
     setSelectedProduct(null);
     navigate(
       buildVendorStoreHomePath({
@@ -1543,6 +1550,52 @@ export function VendorStoreView({
   const lastVendorScrollTopRef = useRef(0);
   /** Last `/product/:slug` segment — used to scroll-reset only when entering/changing product, not when leaving to home. */
   const lastVendorProductSlugForScrollRef = useRef<string | undefined>(undefined);
+
+  const saveVendorBrowseScrollPosition = useCallback(
+    (category?: string) => {
+      if (savedPage || isVendorProductDetailPath) return;
+      const el = vendorScrollRootRef.current;
+      if (!el) return;
+      const key = catalogSliceMemoryKey(category ?? catalogCategoryForFetch);
+      const top = el.scrollTop;
+      browseScrollByCategoryRef.current.set(key, top);
+      writeSessionScrollPosition(ssVendorScrollPositionKey(key), top);
+    },
+    [savedPage, isVendorProductDetailPath, catalogSliceMemoryKey, catalogCategoryForFetch]
+  );
+
+  const restoreVendorBrowseScrollPosition = useCallback(() => {
+    if (savedPage || isVendorProductDetailPath) return;
+    const key = catalogSliceMemoryKey(catalogCategoryForFetch);
+    const top =
+      browseScrollByCategoryRef.current.get(key) ??
+      readSessionScrollPosition(ssVendorScrollPositionKey(key));
+    if (top == null || top <= 0) return;
+    const el = vendorScrollRootRef.current;
+    if (!el) return;
+    const apply = () => {
+      el.scrollTop = top;
+      lastVendorScrollTopRef.current = top;
+      setVendorNavbarSticky(top > 0);
+    };
+    apply();
+    requestAnimationFrame(() => {
+      apply();
+      requestAnimationFrame(apply);
+    });
+  }, [savedPage, isVendorProductDetailPath, catalogSliceMemoryKey, catalogCategoryForFetch]);
+
+  const openVendorProductDetail = useCallback(
+    (product: Product) => {
+      saveVendorBrowseScrollPosition();
+      const segment = buildVendorProductUrlSegment(product);
+      navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
+        state: { vendorProduct: product },
+      });
+    },
+    [navigate, storeBase, saveVendorBrowseScrollPosition]
+  );
+
   const [quantity, setQuantity] = useState(1);
   /** Option name → value; mirrors main marketplace variant picker */
   const [vendorVariantSelections, setVendorVariantSelections] = useState<Record<string, string>>({});
@@ -2645,12 +2698,9 @@ export function VendorStoreView({
       setDebouncedVendorServerQ("");
       setVendorMobileNavOpen(false);
       setVendorMobileSearchOpen(false);
-      const segment = buildVendorProductUrlSegment(product);
-      navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
-        state: { vendorProduct: product },
-      });
+      openVendorProductDetail(product);
     },
-    [navigate, storeBase]
+    [openVendorProductDetail]
   );
 
   const selectAllProductsNav = useCallback(() => {
@@ -4649,6 +4699,7 @@ export function VendorStoreView({
       if (wasOnVendorProductRouteRef.current) {
         wasOnVendorProductRouteRef.current = false;
         restoreVendorBrowseCatalogSliceForRoute();
+        pendingBrowseScrollRestoreRef.current = true;
       }
       setSelectedProduct(null);
       return;
@@ -4716,6 +4767,21 @@ export function VendorStoreView({
     lastVendorScrollTopRef.current = 0;
     setVendorNavbarSticky(false);
   }, [productSlugFromPath, initialProductSlug, savedPage, location.pathname]);
+
+  // Restore browse grid scroll when returning from product detail (browser back or header back).
+  useLayoutEffect(() => {
+    if (savedPage || isVendorProductDetailPath) return;
+    if (!pendingBrowseScrollRestoreRef.current) return;
+    if (products.length === 0) return;
+    pendingBrowseScrollRestoreRef.current = false;
+    restoreVendorBrowseScrollPosition();
+  }, [
+    savedPage,
+    isVendorProductDetailPath,
+    catalogCategoryForFetch,
+    products.length,
+    restoreVendorBrowseScrollPosition,
+  ]);
 
   useEffect(() => {
     if (savedPage) return;
@@ -6722,12 +6788,7 @@ export function VendorStoreView({
                           key={product.id}
                           priority={index < 2}
                           product={productToCardProduct(product)}
-                          onProductClick={() => {
-                            const segment = buildVendorProductUrlSegment(product);
-                            navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
-                              state: { vendorProduct: product },
-                            });
-                          }}
+                          onProductClick={() => openVendorProductDetail(product)}
                           onAddToCart={(e, opts) => {
                             e?.stopPropagation();
                             const ok = handleAddToCart(product, {
@@ -6840,12 +6901,7 @@ export function VendorStoreView({
                       key={product.id}
                       priority={index < 2}
                       product={productToCardProduct(product)}
-                      onProductClick={async () => {
-                        const segment = buildVendorProductUrlSegment(product);
-                        navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
-                          state: { vendorProduct: product },
-                        });
-                      }}
+                      onProductClick={() => openVendorProductDetail(product)}
                       onAddToCart={(e, opts) => {
                         e?.stopPropagation();
                         const ok = handleAddToCart(product, {

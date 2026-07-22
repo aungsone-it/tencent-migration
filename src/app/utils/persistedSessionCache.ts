@@ -15,6 +15,7 @@ export type SessionCatalogListState = {
 
 const SS_STOREFRONT_CATALOG_PREFIX = "migoo-ss-storefront-catalog-";
 const SS_VENDOR_CATALOG_PREFIX = "migoo-ss-vendor-catalog-";
+const SS_VENDOR_SCROLL_PREFIX = "migoo-ss-vendor-scroll-";
 
 export function ssStorefrontCatalogListKey(catalogKey: string): string {
   return `${SS_STOREFRONT_CATALOG_PREFIX}${encodeURIComponent(catalogKey)}-v1`;
@@ -22,6 +23,32 @@ export function ssStorefrontCatalogListKey(catalogKey: string): string {
 
 export function ssVendorCatalogListKey(sliceKey: string): string {
   return `${SS_VENDOR_CATALOG_PREFIX}${encodeURIComponent(sliceKey)}-v1`;
+}
+
+export function ssVendorScrollPositionKey(sliceKey: string): string {
+  return `${SS_VENDOR_SCROLL_PREFIX}${encodeURIComponent(sliceKey)}-v1`;
+}
+
+export function readSessionScrollPosition(key: string): number | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSessionScrollPosition(key: string, scrollTop: number): void {
+  if (typeof sessionStorage === "undefined") return;
+  if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
+  try {
+    sessionStorage.setItem(key, String(Math.round(scrollTop)));
+  } catch (e) {
+    devWarn("[persistedSessionCache] scroll write failed (quota?)", key, e);
+  }
 }
 
 export function readSessionCatalogList(key: string): SessionCatalogListState | null {
@@ -107,6 +134,7 @@ export function initSessionCatalogPersistence(): void {
   if (!isLikelyHardPageReload()) return;
   clearSessionCatalogListsByPrefix(SS_STOREFRONT_CATALOG_PREFIX);
   clearSessionCatalogListsByPrefix(SS_VENDOR_CATALOG_PREFIX);
+  clearSessionCatalogListsByPrefix(SS_VENDOR_SCROLL_PREFIX);
 }
 
 initSessionCatalogPersistence();

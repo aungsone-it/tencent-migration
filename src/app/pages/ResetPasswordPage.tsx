@@ -24,6 +24,7 @@ export function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resetAccountKind, setResetAccountKind] = useState('');
 
   const isVendorRoute = location.pathname.startsWith('/vendor/');
   const storefrontBasePath = storeName
@@ -32,6 +33,7 @@ export function ResetPasswordPage() {
   const returnTo = searchParams.get('returnTo');
   const accountHint = (searchParams.get('account') || '').trim().toLowerCase();
   const isVendorAccount = accountHint === 'vendor';
+  const isStaffAccount = accountHint === 'staff';
   const goBackPath = returnTo || storefrontBasePath;
   const isAdminReturn = Boolean((returnTo || '').includes('/admin')) && !isVendorAccount;
 
@@ -78,6 +80,10 @@ export function ResetPasswordPage() {
         return false;
       }
 
+      if (data.accountKind) {
+        setResetAccountKind(String(data.accountKind));
+      }
+
       setError('');
       toast.success(data.message || 'Password reset code sent to your email!');
       return true;
@@ -122,7 +128,8 @@ export function ResetPasswordPage() {
           body: JSON.stringify({ 
             email: email.trim(), 
             otp: otpCode.trim(), 
-            newPassword 
+            newPassword,
+            ...(accountHint ? { accountHint } : {}),
           })
         }
       );
@@ -137,9 +144,13 @@ export function ResetPasswordPage() {
       }
 
       // Auto-login after successful password reset
-      const accountKind = String(data.accountKind || '').trim();
-      const useStaffLogin = accountKind === 'staff' || (!accountKind && isAdminReturn);
-      const useVendorLogin = accountKind === 'vendor' || isVendorAccount;
+      const accountKind = String(data.accountKind || resetAccountKind || '').trim();
+      let useStaffLogin = accountKind === 'staff';
+      let useVendorLogin = accountKind === 'vendor';
+      if (!accountKind) {
+        useStaffLogin = isStaffAccount || isAdminReturn;
+        useVendorLogin = isVendorAccount;
+      }
 
       try {
         if (useVendorLogin) {

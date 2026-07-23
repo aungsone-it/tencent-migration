@@ -54,6 +54,9 @@ export function Login() {
     if ((parts[0] === 'store' || parts[0] === 'vendor') && parts[1] && parts[1] !== 'reset-password') {
       return `/${parts[0]}/${parts[1]}/reset-password?${returnTo}`;
     }
+    if (location.pathname.startsWith('/admin')) {
+      return `/reset-password?${returnTo}&account=staff`;
+    }
     return `/reset-password?${returnTo}`;
   };
 

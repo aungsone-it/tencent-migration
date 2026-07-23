@@ -29,12 +29,34 @@ type StaffKvUser = Record<string, unknown> & {
   role?: string;
 };
 
+const STAFF_KV_ROLES = new Set([
+  "super-admin",
+  "store-owner",
+  "administrator",
+  "platform-admin",
+  "product-manager",
+  "developer",
+  "data-entry",
+  "warehouse",
+  "vendor-admin",
+]);
+
+function isStaffKvProfile(record: unknown): record is StaffKvUser {
+  if (!record || typeof record !== "object") return false;
+  const id = String((record as StaffKvUser).id || "").trim();
+  if (!id || id.startsWith("vendor_")) return false;
+  const role = String((record as StaffKvUser).role || "").trim().toLowerCase();
+  if (role && STAFF_KV_ROLES.has(role)) return true;
+  const email = String((record as StaffKvUser).email || "").trim();
+  return Boolean(email) && typeof (record as StaffKvUser).password === "string";
+}
+
 async function findStaffUserByEmail(emailLower: string): Promise<StaffKvUser | null> {
   const normalized = String(emailLower || "").trim().toLowerCase();
   if (!normalized) return null;
 
   const direct = await kv.get(`user:${normalized}`);
-  if (direct && typeof direct === "object") return direct as StaffKvUser;
+  if (isStaffKvProfile(direct)) return direct;
 
   const usersList = await kv.get("auth:users-list");
   if (Array.isArray(usersList)) {
@@ -42,8 +64,7 @@ async function findStaffUserByEmail(emailLower: string): Promise<StaffKvUser | n
       if (typeof uid !== "string" || !uid.trim()) continue;
       const profile = await kv.get(`auth:user:${uid}`);
       if (
-        profile &&
-        typeof profile === "object" &&
+        isStaffKvProfile(profile) &&
         String((profile as StaffKvUser).email || "").trim().toLowerCase() === normalized
       ) {
         return profile as StaffKvUser;
@@ -257,6 +278,55 @@ async function findVendorAuthByEmail(emailLower: string): Promise<{ id: string; 
   return { id: String(vendor.id) };
 }
 
+function otpStorageKey(emailLower: string, accountKind: PasswordResetAccountKind): string {
+  return `otp:email:${emailLower}:${accountKind}`;
+}
+
+function legacyOtpStorageKey(emailLower: string): string {
+  return `otp:email:${emailLower}`;
+}
+
+async function clearPasswordResetOtpsForEmail(
+  emailLower: string,
+  exceptKind?: PasswordResetAccountKind,
+): Promise<void> {
+  await kv.del(legacyOtpStorageKey(emailLower));
+  for (const kind of ["staff", "vendor", "customer_kv", "cloudbase"] as PasswordResetAccountKind[]) {
+    if (kind !== exceptKind) {
+      await kv.del(otpStorageKey(emailLower, kind));
+    }
+  }
+}
+
+async function loadStoredPasswordResetOtp(
+  emailLower: string,
+  hint: PasswordResetAccountHint,
+): Promise<{ data: Record<string, unknown> | null; key: string | null }> {
+  if (hint !== "auto") {
+    const scopedKey = otpStorageKey(emailLower, hint);
+    const scoped = await kv.get(scopedKey);
+    if (scoped) return { data: scoped as Record<string, unknown>, key: scopedKey };
+  } else {
+    const matches: Array<{ data: Record<string, unknown>; key: string }> = [];
+    for (const kind of ["staff", "vendor", "customer_kv", "cloudbase"] as PasswordResetAccountKind[]) {
+      const scopedKey = otpStorageKey(emailLower, kind);
+      const scoped = await kv.get(scopedKey);
+      if (scoped) matches.push({ data: scoped as Record<string, unknown>, key: scopedKey });
+    }
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    if (matches.length > 1) {
+      return { data: null, key: null };
+    }
+  }
+
+  const legacyKey = legacyOtpStorageKey(emailLower);
+  const legacy = await kv.get(legacyKey);
+  if (legacy) return { data: legacy as Record<string, unknown>, key: legacyKey };
+  return { data: null, key: null };
+}
+
 async function resolvePasswordResetAccount(
   email: string,
   hint: PasswordResetAccountHint = "auto",
@@ -269,11 +339,35 @@ async function resolvePasswordResetAccount(
   const tryCustomer = hint === "auto" || hint === "customer_kv";
   const tryCloudbase = hint === "auto" || hint === "cloudbase";
 
+  if (hint === "staff") {
+    const staffUser = await findStaffUserByEmail(emailLower);
+    if (staffUser?.id) {
+      return { userId: String(staffUser.id), kind: "staff" };
+    }
+    return null;
+  }
+
   if (hint === "vendor") {
     const vendor = await findVendorAuthByEmail(emailLower);
     if (vendor?.needsSetup) return null;
     if (vendor?.id) return { userId: vendor.id, kind: "vendor" };
     return null;
+  }
+
+  if (hint === "auto") {
+    const staffUser = await findStaffUserByEmail(emailLower);
+    const vendor = await findVendorAuthByEmail(emailLower);
+    const staffAccount =
+      staffUser?.id ? { userId: String(staffUser.id), kind: "staff" as const } : null;
+    const vendorAccount =
+      vendor?.id && !vendor.needsSetup
+        ? { userId: vendor.id, kind: "vendor" as const }
+        : null;
+    if (staffAccount && vendorAccount) {
+      return null;
+    }
+    if (staffAccount) return staffAccount;
+    if (vendorAccount) return vendorAccount;
   }
 
   if (tryStaff) {
@@ -1718,9 +1812,26 @@ authApp.post("/send-email-otp", async (c) => {
 
     if (!account?.userId) {
       console.log(`❌ No user found with email: ${email}`);
+      if (hint === "auto") {
+        const staffUser = await findStaffUserByEmail(normalizedEmail);
+        const vendorLookup = await findVendorAuthByEmail(normalizedEmail);
+        if (staffUser?.id && vendorLookup?.id && !vendorLookup.needsSetup) {
+          return c.json(
+            {
+              error:
+                "This email is linked to both a super-admin/staff account and a vendor shop account. Use Forgot Password from the login page you normally use (platform admin vs vendor admin).",
+              code: "AMBIGUOUS_EMAIL",
+              availableAccounts: ["staff", "vendor"],
+            },
+            409,
+          );
+        }
+      }
       const notFoundMessage =
         hint === "vendor"
           ? "No vendor account found with this email, or the account is not active yet."
+          : hint === "staff"
+            ? "No super-admin or staff account found with this email."
           : "This email is not registered. Use the email from admin setup, or contact your administrator.";
       return c.json({ error: notFoundMessage }, 404);
     }
@@ -1732,8 +1843,10 @@ authApp.post("/send-email-otp", async (c) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Store OTP in KV with expiry
-    await kv.set(`otp:email:${normalizedEmail}`, {
+    await clearPasswordResetOtpsForEmail(normalizedEmail, account.kind);
+
+    const otpKey = otpStorageKey(normalizedEmail, account.kind);
+    await kv.set(otpKey, {
       code: otp,
       expiresAt,
       userId,
@@ -1781,6 +1894,7 @@ authApp.post("/send-email-otp", async (c) => {
         success: true,
         emailSent: true,
         deliveryConfigured: true,
+        accountKind: account.kind,
         message: "Password reset code sent to your email",
       });
     } catch (emailError: any) {
@@ -1803,7 +1917,7 @@ authApp.post("/send-email-otp", async (c) => {
 // ============================================
 authApp.post("/verify-otp-and-reset", async (c) => {
   try {
-    const { email, otp, newPassword } = await c.req.json();
+    const { email, otp, newPassword, accountHint } = await c.req.json();
 
     if (!email || !otp || !newPassword) {
       return c.json({ error: "Email, OTP, and new password are required" }, 400);
@@ -1813,25 +1927,60 @@ authApp.post("/verify-otp-and-reset", async (c) => {
       return c.json({ error: "Password must be at least 8 characters" }, 400);
     }
 
-    console.log(`🔐 Verifying OTP for: ${email}`);
+    const normalizedHint = String(accountHint || "auto").trim().toLowerCase() as PasswordResetAccountHint;
+    const allowedHints = new Set(["auto", "staff", "vendor", "customer_kv", "cloudbase"]);
+    const hint: PasswordResetAccountHint = allowedHints.has(normalizedHint)
+      ? normalizedHint
+      : "auto";
 
-    // Get stored OTP (normalize email to lowercase)
+    console.log(`🔐 Verifying OTP for: ${email} (hint=${hint})`);
+
     const normalizedEmail = email.toLowerCase().trim();
-    const storedOtpData = await kv.get(`otp:email:${normalizedEmail}`);
+    const { data: storedOtpData, key: otpKey } = await loadStoredPasswordResetOtp(normalizedEmail, hint);
 
-    if (!storedOtpData) {
+    if (!storedOtpData || !otpKey) {
       console.log(`❌ No OTP found for: ${normalizedEmail}`);
+      if (hint === "auto") {
+        let scopedCount = 0;
+        for (const kind of ["staff", "vendor", "customer_kv", "cloudbase"] as PasswordResetAccountKind[]) {
+          if (await kv.get(otpStorageKey(normalizedEmail, kind))) scopedCount += 1;
+        }
+        if (scopedCount > 1) {
+          return c.json(
+            {
+              error:
+                "Multiple reset codes exist for this email. Request a new code from the login page you use (super-admin vs vendor).",
+              code: "AMBIGUOUS_EMAIL",
+            },
+            409,
+          );
+        }
+      }
       return c.json({ error: "OTP not found or expired. Please request a new code." }, 404);
     }
 
-    // Check if expired
-    if (Date.now() > storedOtpData.expiresAt) {
+    const storedKind = String(storedOtpData.accountKind || "").trim() as PasswordResetAccountKind;
+    if (
+      hint !== "auto" &&
+      storedKind &&
+      storedKind !== hint
+    ) {
+      return c.json(
+        {
+          error:
+            "This reset code was issued for a different account type. Request a new code from the correct login page (super-admin vs vendor).",
+          code: "ACCOUNT_HINT_MISMATCH",
+        },
+        409,
+      );
+    }
+
+    if (Date.now() > Number(storedOtpData.expiresAt || 0)) {
       console.log(`⏰ OTP expired for: ${normalizedEmail}`);
-      await kv.del(`otp:email:${normalizedEmail}`);
+      await kv.del(otpKey);
       return c.json({ error: "OTP has expired. Please request a new code." }, 400);
     }
 
-    // Verify OTP
     const submittedOtp = String(otp || "").trim();
     if (String(storedOtpData.code || "").trim() !== submittedOtp) {
       console.warn(`❌ Invalid OTP attempt for: ${normalizedEmail}`);
@@ -1840,25 +1989,37 @@ authApp.post("/verify-otp-and-reset", async (c) => {
 
     console.log(`✅ OTP verified for: ${normalizedEmail}`);
 
-    let accountKind = storedOtpData.accountKind as PasswordResetAccountKind | undefined;
+    const storedUserId = String(storedOtpData.userId || "").trim();
+    if (!storedUserId) {
+      return c.json({ error: "Invalid reset session. Please request a new code." }, 400);
+    }
+
+    let accountKind = storedKind as PasswordResetAccountKind | undefined;
     if (!accountKind) {
-      const staffProfile = await kv.get(`auth:user:${storedOtpData.userId}`);
-      if (staffProfile && typeof staffProfile === "object") {
+      const staffProfile = await kv.get(`auth:user:${storedUserId}`);
+      if (isStaffKvProfile(staffProfile)) {
         accountKind = "staff";
       } else {
-        const vendorRec = await kv.get(`vendor:${storedOtpData.userId}`);
+        const vendorRec = await kv.get(`vendor:${storedUserId}`);
         if (vendorRec && typeof vendorRec === "object") {
           accountKind = "vendor";
         } else {
-          const customerRec = await kv.get(`customer_auth:${storedOtpData.userId}`);
+          const customerRec = await kv.get(`customer_auth:${storedUserId}`);
           accountKind = customerRec && typeof customerRec === "object" ? "customer_kv" : "cloudbase";
         }
       }
     }
 
+    const clearOtp = async () => {
+      await kv.del(otpKey);
+      if (otpKey !== legacyOtpStorageKey(normalizedEmail)) {
+        await kv.del(legacyOtpStorageKey(normalizedEmail));
+      }
+    };
+
     if (accountKind === "vendor") {
-      const fullVendor = (await kv.get(`vendor:${storedOtpData.userId}`)) as Record<string, unknown> | null;
-      if (!fullVendor?.id) {
+      const fullVendor = (await kv.get(`vendor:${storedUserId}`)) as Record<string, unknown> | null;
+      if (!fullVendor?.id || String(fullVendor.id) !== storedUserId) {
         return c.json({ error: "Vendor account not found" }, 404);
       }
       const passwordHash = await hashPasswordPlain(newPassword);
@@ -1867,9 +2028,9 @@ authApp.post("/verify-otp-and-reset", async (c) => {
         password: passwordHash,
         updatedAt: new Date().toISOString(),
       };
-      await kv.set(`vendor:${storedOtpData.userId}`, updatedVendor);
-      queueVendorReadModelSync(String(storedOtpData.userId), updatedVendor);
-      await kv.del(`otp:email:${normalizedEmail}`);
+      await kv.set(`vendor:${storedUserId}`, updatedVendor);
+      queueVendorReadModelSync(String(storedUserId), updatedVendor);
+      await clearOtp();
       console.log(`✅ Vendor password updated for: ${normalizedEmail}`);
       return c.json({
         success: true,
@@ -1879,14 +2040,13 @@ authApp.post("/verify-otp-and-reset", async (c) => {
     }
 
     if (accountKind === "staff") {
-      const staffUser =
-        (await findStaffUserByEmail(normalizedEmail)) ||
-        ((await kv.get(`auth:user:${storedOtpData.userId}`)) as StaffKvUser | null);
-      if (!staffUser?.id) {
+      const staffById = (await kv.get(`auth:user:${storedUserId}`)) as StaffKvUser | null;
+      const staffUser = isStaffKvProfile(staffById) ? staffById : await findStaffUserByEmail(normalizedEmail);
+      if (!staffUser?.id || String(staffUser.id) !== storedUserId) {
         return c.json({ error: "Staff account not found" }, 404);
       }
       await setStaffPassword(staffUser, newPassword, false);
-      await kv.del(`otp:email:${normalizedEmail}`);
+      await clearOtp();
       console.log(`✅ KV staff password updated for: ${normalizedEmail}`);
       return c.json({
         success: true,
@@ -1896,12 +2056,12 @@ authApp.post("/verify-otp-and-reset", async (c) => {
     }
 
     if (accountKind === "customer_kv") {
-      const customerRec = (await kv.get(`customer_auth:${storedOtpData.userId}`)) as CustomerAuthRecord | null;
+      const customerRec = (await kv.get(`customer_auth:${storedUserId}`)) as CustomerAuthRecord | null;
       if (!customerRec?.id) {
         return c.json({ error: "Customer account not found" }, 404);
       }
       await setCustomerAuthPassword(customerRec, newPassword);
-      await kv.del(`otp:email:${normalizedEmail}`);
+      await clearOtp();
       console.log(`✅ KV customer password updated for: ${normalizedEmail}`);
       return c.json({
         success: true,
@@ -1910,9 +2070,8 @@ authApp.post("/verify-otp-and-reset", async (c) => {
       });
     }
 
-    // CloudBase Auth account
     const { error } = await supabaseAdmin.auth.admin.updateUserById(
-      storedOtpData.userId,
+      storedUserId,
       { password: newPassword }
     );
 
@@ -1921,8 +2080,7 @@ authApp.post("/verify-otp-and-reset", async (c) => {
       return c.json({ error: "Failed to update password: " + error.message }, 500);
     }
 
-    // Delete used OTP
-    await kv.del(`otp:email:${normalizedEmail}`);
+    await clearOtp();
 
     console.log(`✅ Password updated successfully for: ${normalizedEmail}`);
 

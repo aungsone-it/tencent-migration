@@ -35,6 +35,7 @@ interface Variant {
   barcode?: string;
   inventory: number;
   weight?: string;
+  image?: string;
 }
 
 /** Parse stored/display prices ($, MMK, commas) for validation and save. */
@@ -64,6 +65,7 @@ function normalizeVariantForForm(raw: Record<string, unknown>, idx: number): Var
     barcode: raw.barcode != null ? String(raw.barcode) : undefined,
     inventory: Number(raw.inventory) || 0,
     weight: raw.weight != null ? String(raw.weight) : undefined,
+    image: raw.image != null ? String(raw.image) : undefined,
   };
 }
 
@@ -96,6 +98,7 @@ function mergeVariantsWithInitial(
       weight: v.weight?.trim() ? v.weight : match.weight,
       compareAtPrice:
         v.compareAtPrice?.trim() ? v.compareAtPrice : match.compareAtPrice,
+      image: v.image?.trim() ? v.image : match.image,
     };
   });
 }
@@ -536,6 +539,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         sku: '',
         inventory: 0,
         weight: '',
+        image: undefined,
       };
     });
 

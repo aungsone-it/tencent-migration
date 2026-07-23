@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { chatApi, vendorApplicationsApi } from '../../utils/api';
 import {
-  getCachedAdminOrdersPayload,
+  getCachedAdminPendingOrdersBadgeCount,
   moduleCache,
   CACHE_KEYS,
   syncPendingOrdersBadgeFromAdminCache,
@@ -13,7 +13,6 @@ import {
   ADMIN_VENDOR_APPLICATIONS_UPDATED_STORAGE_KEY,
 } from '../utils/module-cache';
 import { POLLING_INTERVALS_MS } from '../../constants';
-import { normalizeAdminOrderStatusForBadge } from '../utils/normalizeOrderBadgeStatus';
 import { SmartCache } from '../../utils/cache';
 import { badgeCircuitBreaker } from '../../utils/circuit-breaker';
 import { subscribeAdminInbox } from '../utils/chatRealtime';
@@ -44,6 +43,41 @@ export function useBadgeCounts() {
     return INITIAL_BADGE_COUNTS;
   });
   const [loading, setLoading] = useState(false);
+
+  const applyOrdersBadgeCount = useCallback((pendingOrdersCount: number) => {
+    setBadgeCounts((prev) => {
+      if (prev.orders === pendingOrdersCount) return prev;
+      const updated = { ...prev, orders: pendingOrdersCount };
+      SmartCache.set('badge_counts', updated);
+      return updated;
+    });
+  }, []);
+
+  /** Instant sidebar update from patched admin orders cache (no network). */
+  const refreshOrdersBadgeFromCache = useCallback((): boolean => {
+    const pending = syncPendingOrdersBadgeFromAdminCache();
+    if (pending == null) return false;
+    applyOrdersBadgeCount(pending);
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING, pending);
+    return true;
+  }, [applyOrdersBadgeCount]);
+
+  /**
+   * Refresh only pending orders badge (fast path — aggregates API, not full `/orders` list).
+   */
+  const refreshOrdersBadgeOnly = useCallback(async (force = false) => {
+    if (!force) {
+      refreshOrdersBadgeFromCache();
+    }
+    if (!badgeCircuitBreaker.canAttempt()) return;
+    try {
+      const pendingOrdersCount = await getCachedAdminPendingOrdersBadgeCount(force);
+      applyOrdersBadgeCount(pendingOrdersCount);
+      badgeCircuitBreaker.recordSuccess();
+    } catch {
+      /* keep previous count */
+    }
+  }, [applyOrdersBadgeCount, refreshOrdersBadgeFromCache]);
 
   /**
    * Refresh only chat unread total (fast path, no 30s cache gate).
@@ -121,21 +155,14 @@ export function useBadgeCounts() {
     console.log('🔄 Fetching fresh badge counts from server...');
     setLoading(true);
     try {
-      // Pending orders — reuse module cache (same key as Super Admin Orders) to avoid duplicate /orders edge calls
-      let ordersPayload: { orders: any[]; warning?: string };
+      let pendingOrdersCount = 0;
       try {
-        ordersPayload = await getCachedAdminOrdersPayload(force);
+        pendingOrdersCount = await getCachedAdminPendingOrdersBadgeCount(force);
       } catch (ordersError) {
-        console.warn('⚠️ Orders fetch failed, retrying once...', ordersError);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        ordersPayload = await getCachedAdminOrdersPayload(true);
+        console.warn('⚠️ Pending orders badge fetch failed, retrying once...', ordersError);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        pendingOrdersCount = await getCachedAdminPendingOrdersBadgeCount(true);
       }
-
-      const ordersList = ordersPayload.orders ?? [];
-      /** Empty list from a successful payload means zero pending — do not keep a stale sidebar/bell count. */
-      const pendingOrdersCount = ordersList.filter((order: any) =>
-        normalizeAdminOrderStatusForBadge(order.status) === "pending"
-      ).length;
 
       // Get unread chat messages count with silent mode to avoid error toasts
       let unreadChats = 0;
@@ -205,17 +232,13 @@ export function useBadgeCounts() {
         ...prev,
         orders: prev.orders + 1,
       };
-      // Update cache immediately
       SmartCache.set('badge_counts', updated);
       return updated;
     });
     console.log('🔔 Order badge incremented instantly!');
     
-    // Sync with server in background
-    setTimeout(() => {
-      void loadBadgeCounts(true);
-    }, 1000); // Small delay to let the order save to database
-  }, [loadBadgeCounts]);
+    void refreshOrdersBadgeOnly(true);
+  }, [refreshOrdersBadgeOnly]);
 
   /**
    * Decrement orders badge count
@@ -344,24 +367,22 @@ export function useBadgeCounts() {
     const queueOrdersRefresh = (ev: Event) => {
       const detail = (ev as CustomEvent<{ reason?: string; pendingOrders?: number }>).detail;
       const reason = detail?.reason;
-      if (reason === "remove-admin-orders") {
-        const pending =
-          typeof detail?.pendingOrders === "number"
-            ? detail.pendingOrders
-            : syncPendingOrdersBadgeFromAdminCache();
-        if (pending != null) {
-          setBadgeCounts((prev) => {
-            const updated = { ...prev, orders: pending };
-            SmartCache.set("badge_counts", updated);
-            return updated;
-          });
-        }
+
+      if (typeof detail?.pendingOrders === "number") {
+        applyOrdersBadgeCount(detail.pendingOrders);
+        moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING, detail.pendingOrders);
+      } else {
+        refreshOrdersBadgeFromCache();
+      }
+
+      if (reason === "remove-admin-orders" && typeof detail?.pendingOrders === "number") {
         return;
       }
+
       if (ordersTimer) clearTimeout(ordersTimer);
       ordersTimer = setTimeout(() => {
-        void loadBadgeCounts(true);
-      }, 180);
+        void refreshOrdersBadgeOnly(true);
+      }, reason === "realtime-order-pulse" ? 60 : 0);
     };
 
     const queueVendorAppsRefresh = () => {
@@ -380,7 +401,18 @@ export function useBadgeCounts() {
       window.removeEventListener("adminOrdersUpdated", queueOrdersRefresh as EventListener);
       window.removeEventListener("vendorDataUpdated", queueVendorAppsRefresh as EventListener);
     };
-  }, [loadBadgeCounts, refreshVendorApplicationsBadgeOnly]);
+  }, [loadBadgeCounts, refreshVendorApplicationsBadgeOnly, applyOrdersBadgeCount, refreshOrdersBadgeFromCache, refreshOrdersBadgeOnly]);
+
+  /** Safety-net poll when Realtime pulse is unavailable (cross-device / migration not applied yet). */
+  useEffect(() => {
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void refreshOrdersBadgeOnly(false);
+    };
+    void tick();
+    const id = window.setInterval(tick, POLLING_INTERVALS_MS.ADMIN_ORDERS_BADGE_POLL);
+    return () => clearInterval(id);
+  }, [refreshOrdersBadgeOnly]);
 
   /** Vendor applications — fast refresh on Realtime pulse / cross-tab signals. */
   useEffect(() => {
@@ -439,6 +471,7 @@ export function useBadgeCounts() {
     loadBadgeCounts,
     refreshChatBadgeOnly,
     refreshVendorApplicationsBadgeOnly,
+    refreshOrdersBadgeOnly,
     incrementOrdersBadge,
     decrementOrdersBadge,
     resetBadgeCounts,

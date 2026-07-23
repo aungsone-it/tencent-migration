@@ -1062,6 +1062,33 @@ export async function fetchAdminOrdersPayload(): Promise<{ orders: any[]; warnin
   return { orders: data.orders || [], warning: data.warning };
 }
 
+/** Lightweight badge fetch — paginated `/orders` with aggregates, not the full list payload. */
+export async function fetchAdminPendingOrdersBadgeCount(): Promise<number> {
+  const page = await fetchAdminOrdersPage({
+    page: 1,
+    pageSize: 1,
+    status: "all",
+    sort: "newest",
+    bustCache: true,
+  });
+  return Number(page.aggregates?.statusBreakdown?.pending ?? 0);
+}
+
+export async function getCachedAdminPendingOrdersBadgeCount(forceRefresh = false): Promise<number> {
+  if (!forceRefresh) {
+    const fromFullCache = syncPendingOrdersBadgeFromAdminCache();
+    if (fromFullCache != null) {
+      moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING, fromFullCache);
+      return fromFullCache;
+    }
+  }
+  return moduleCache.get(
+    CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING,
+    () => fetchAdminPendingOrdersBadgeCount(),
+    forceRefresh
+  );
+}
+
 export const ADMIN_ORDERS_PAGE_CACHE_PREFIX = "admin-orders-page-";
 
 export type AdminOrdersPageParams = {
@@ -1891,6 +1918,8 @@ export const CACHE_KEYS = {
   ADMIN_PRODUCTS: 'admin-products',
   /** Full `/orders` JSON: `{ orders, warning? }` — bumped key when shape changed */
   ADMIN_ORDERS: 'admin-orders-v2-payload',
+  /** Pending-order count for super-admin sidebar / bell badge (lightweight fetch). */
+  ADMIN_ORDERS_BADGE_PENDING: 'admin-orders-badge-pending-v1',
   /** Super Admin merged categories (admin/all-categories) */
   ADMIN_ALL_CATEGORIES: 'admin-all-categories-v1',
   /** Super Admin /customers list */
@@ -2614,8 +2643,12 @@ export function patchAdminOrdersCacheStatuses(
   }
 
   SmartCache.delete("badge_counts");
+  const pending = syncPendingOrdersBadgeFromAdminCache();
+  if (pending != null) {
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING, pending);
+  }
   if (typeof window !== "undefined") {
-    notifyAdminOrdersUpdated("patch-admin-orders-status");
+    notifyAdminOrdersUpdated("patch-admin-orders-status", { pendingOrders: pending ?? undefined });
   }
 }
 
@@ -2810,13 +2843,18 @@ export function insertRecoveredOrderIntoAdminCaches(order: Record<string, unknow
   }
 
   SmartCache.delete("badge_counts");
+  const pending = syncPendingOrdersBadgeFromAdminCache();
+  if (pending != null) {
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING, pending);
+  }
   if (typeof window !== "undefined") {
-    notifyAdminOrdersUpdated("pwa-order-recovered");
+    notifyAdminOrdersUpdated("pwa-order-recovered", { pendingOrders: pending ?? undefined });
   }
 }
 
 export function invalidateAdminOrdersCache(): void {
   moduleCache.invalidate(CACHE_KEYS.ADMIN_ORDERS);
+  moduleCache.invalidate(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING);
   moduleCache.invalidatePrefix(ADMIN_ORDERS_PAGE_CACHE_PREFIX);
   moduleCache.invalidate(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS);
   /** Vendor portals peek `vendor-orders-*`; clear so Finances/Dashboard refetch matches super-admin mutations. */

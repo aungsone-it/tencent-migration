@@ -65,6 +65,8 @@ export const POLLING_INTERVALS_MS = {
   ADMIN_VENDOR_APPLICATIONS_BADGE_POLL: 15 * 1000,
   /** Admin chat sidebar / bell badge — fast poll when Chat panel is not mounted. */
   ADMIN_CHAT_BADGE_POLL: 15 * 1000,
+  /** Super-admin Orders sidebar badge — safety net when Realtime pulse lags. */
+  ADMIN_ORDERS_BADGE_POLL: 15 * 1000,
   TOP_NAV_NOTIFICATIONS: 15 * 60 * 1000,
   VENDOR_PORTAL_NOTIFICATIONS: 15 * 60 * 1000,
   /** Rare safety net only — admin + floating chat use Realtime broadcast for live deltas. */

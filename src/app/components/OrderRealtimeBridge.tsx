@@ -10,7 +10,7 @@ import { notifyCustomerRealtimeLocal, type CustomerRealtimePayload } from "../ut
 const PULSE_TABLE = "app_order_pulse";
 const VENDOR_APP_PULSE_TABLE = "app_vendor_application_pulse";
 const KV_DOMAIN_PULSE_TABLE = "app_kv_domain_pulse";
-const DEBOUNCE_MS = 400;
+const DEBOUNCE_MS = 150;
 const VENDOR_APP_PULSE_DEBOUNCE_MS = 80;
 
 /**

@@ -10,7 +10,7 @@ import { VendorAdminCategoryForm } from "./VendorAdminCategoryForm";
 import { cacheManager } from "../../utils/cacheManager";
 import { toast } from "sonner";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
-import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories } from "../../utils/module-cache";
+import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories, broadcastVendorCategoryAssignmentChanged } from "../../utils/module-cache";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
 import { useLanguage } from "../../contexts/LanguageContext";
 
@@ -41,6 +41,7 @@ interface CategoryInfo {
 interface VendorAdminCategoriesProps {
   vendorId: string;
   vendorName: string;
+  vendorStoreSlug?: string;
   /** When false, load failures are logged only (avoids toasts while this tab is hidden / preloaded). */
   reportLoadErrors?: boolean;
   isActive?: boolean;
@@ -49,6 +50,7 @@ interface VendorAdminCategoriesProps {
 export function VendorAdminCategories({
   vendorId,
   vendorName,
+  vendorStoreSlug,
   reportLoadErrors = true,
   isActive = true,
 }: VendorAdminCategoriesProps) {
@@ -274,6 +276,7 @@ export function VendorAdminCategories({
         throw new Error(data.error || "Failed to delete category");
       }
       toast.success("Category deleted successfully");
+      broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName, vendorStoreSlug]);
       loadCategories(true);
     } catch (error: any) {
       console.error("Failed to delete category:", error);
@@ -286,6 +289,7 @@ export function VendorAdminCategories({
       <VendorAdminCategoryForm
         vendorId={vendorId}
         vendorName={vendorName}
+        vendorStoreSlug={vendorStoreSlug}
         editingCategory={editingCategory}
         onBack={() => {
           setIsFormOpen(false);

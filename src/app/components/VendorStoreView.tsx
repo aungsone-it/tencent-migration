@@ -1275,6 +1275,8 @@ export function VendorStoreView({
   const [savedWishlistLoadingMore, setSavedWishlistLoadingMore] = useState(false);
   /** KV vendor id after slug resolution — matches wishlist rows where URL segment is `vendor-vendor_…`. */
   const [canonicalVendorId, setCanonicalVendorId] = useState<string | null>(vendorHomeSnapshot.canonicalVendorId);
+  const canonicalVendorIdRef = useRef<string | null>(vendorHomeSnapshot.canonicalVendorId);
+  canonicalVendorIdRef.current = canonicalVendorId;
   /** Skip one filter/search refetch on mount (loadVendorData already loads page 1). */
   const vendorCatalogFilterMountSkipRef = useRef(true);
   /** Latest catalog for merging into saved list without re-subscribing the wishlist hydration effect to `products`. */
@@ -4250,13 +4252,30 @@ export function VendorStoreView({
 
     const matchesMutationKeys = (msgKeys: unknown): boolean => {
       if (!Array.isArray(msgKeys)) return false;
-      const storefront = String(vendorId).trim();
+      const candidates = new Set<string>();
+      const addCandidate = (value: string) => {
+        const raw = String(value || "").trim();
+        if (!raw) return;
+        candidates.add(raw);
+        candidates.add(raw.toLowerCase());
+        try {
+          const decoded = decodeURIComponent(raw);
+          candidates.add(decoded);
+          candidates.add(decoded.toLowerCase());
+        } catch {
+          /* ignore */
+        }
+      };
+      addCandidate(String(vendorId));
+      addCandidate(String(canonicalVendorIdRef.current || ""));
+
       for (const raw of msgKeys) {
         const k = String(raw ?? "").trim();
         if (!k) continue;
-        if (k === storefront) return true;
+        if (candidates.has(k) || candidates.has(k.toLowerCase())) return true;
         try {
-          if (decodeURIComponent(k) === decodeURIComponent(storefront)) return true;
+          const decoded = decodeURIComponent(k);
+          if (candidates.has(decoded) || candidates.has(decoded.toLowerCase())) return true;
         } catch {
           /* ignore */
         }
@@ -4287,7 +4306,7 @@ export function VendorStoreView({
           }
           void refetchVendorCatalogPage1(true);
         })();
-      }, 320);
+      }, 120);
     };
 
     const onStorage = (e: StorageEvent) => {
@@ -4316,6 +4335,7 @@ export function VendorStoreView({
 
     window.addEventListener("storage", onStorage);
     window.addEventListener(VENDOR_CATALOG_MUTATION_EVENT, onWindowMutation as EventListener);
+    window.addEventListener("categoryDataUpdated", scheduleRefetch);
 
     let bc: BroadcastChannel | null = null;
     try {
@@ -4336,6 +4356,7 @@ export function VendorStoreView({
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(VENDOR_CATALOG_MUTATION_EVENT, onWindowMutation as EventListener);
+      window.removeEventListener("categoryDataUpdated", scheduleRefetch);
       window.clearTimeout(debounce);
       bc?.close();
     };

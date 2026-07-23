@@ -48,6 +48,7 @@ interface Category {
 interface VendorAdminCategoryFormProps {
   vendorId: string;
   vendorName: string;
+  vendorStoreSlug?: string;
   editingCategory?: Category | null;
   onBack: () => void;
   onSave: (category?: Category) => void;
@@ -68,6 +69,7 @@ function isStorefrontVisibleProduct(product: Product): boolean {
 export function VendorAdminCategoryForm({
   vendorId,
   vendorName,
+  vendorStoreSlug,
   editingCategory,
   onBack,
   onSave,
@@ -255,7 +257,7 @@ export function VendorAdminCategoryForm({
         const data = await response.json().catch(() => ({}));
         savedCategory = data.category;
         rememberVendorCreatedCategory(vendorId, savedCategory || { id: editingCategory.id, name: categoryName.trim() });
-        broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName]);
+        broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName, vendorStoreSlug]);
 
         console.log("✅ Category updated successfully");
       } else {
@@ -280,7 +282,7 @@ export function VendorAdminCategoryForm({
         const data = await response.json().catch(() => ({}));
         savedCategory = data.category;
         rememberVendorCreatedCategory(vendorId, savedCategory || { name: categoryName.trim() });
-        broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName]);
+        broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName, vendorStoreSlug]);
 
         console.log("✅ Category created successfully");
       }
@@ -498,10 +500,20 @@ export function VendorAdminCategoryForm({
                       <div
                         key={product.id}
                         className="p-3 hover:bg-slate-50 transition-colors cursor-pointer"
+                        onClick={() => toggleProductSelection(product.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleProductSelection(product.id);
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-3">
                           <Checkbox
                             checked={selectedProducts.includes(product.id)}
+                            onClick={(e) => e.stopPropagation()}
                             onCheckedChange={() => toggleProductSelection(product.id)}
                           />
                           <img

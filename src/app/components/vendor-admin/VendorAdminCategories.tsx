@@ -4,7 +4,6 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Checkbox } from "../ui/checkbox";
 import { Skeleton } from "../ui/skeleton";
 import { VendorAdminCategoryForm } from "./VendorAdminCategoryForm";
 import { cacheManager } from "../../utils/cacheManager";
@@ -59,7 +58,6 @@ export function VendorAdminCategories({
   const [loading, setLoading] = useState(true);
   const [listRefreshing, setListRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CategoryInfo | null>(null);
   const [listPage, setListPage] = useState(1);
@@ -203,27 +201,6 @@ export function VendorAdminCategories({
     return filteredCategories.slice(start, start + listPageSize);
   }, [filteredCategories, listPage, listPageSize]);
 
-  const pageCategoryNames = pagedCategories.map((c) => c.name);
-
-  const toggleSelectAll = () => {
-    if (
-      pageCategoryNames.length > 0 &&
-      pageCategoryNames.every((name) => selectedCategories.includes(name))
-    ) {
-      setSelectedCategories((prev) => prev.filter((n) => !pageCategoryNames.includes(n)));
-    } else {
-      setSelectedCategories((prev) => Array.from(new Set([...prev, ...pageCategoryNames])));
-    }
-  };
-
-  const toggleSelectCategory = (categoryName: string) => {
-    setSelectedCategories(prev =>
-      prev.includes(categoryName)
-        ? prev.filter(name => name !== categoryName)
-        : [...prev, categoryName]
-    );
-  };
-
   const handleCreateCategory = () => {
     setEditingCategory(null);
     setIsFormOpen(true);
@@ -313,7 +290,6 @@ export function VendorAdminCategories({
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 bg-white">
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-4" /></th>
                   <th className="py-3 px-4"><Skeleton className="h-4 w-24" /></th>
                   <th className="py-3 px-4"><Skeleton className="h-4 w-24" /></th>
                   <th className="py-3 px-4"><Skeleton className="h-4 w-32" /></th>
@@ -325,7 +301,6 @@ export function VendorAdminCategories({
               <tbody className="bg-white">
                 {[...Array(5)].map((_, i) => (
                   <tr key={i} className="border-b border-slate-100">
-                    <td className="py-3 px-4"><Skeleton className="h-4 w-4" /></td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <Skeleton className="h-10 w-10 rounded-lg" />
@@ -428,15 +403,6 @@ export function VendorAdminCategories({
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 bg-white">
-                  <th className="text-left py-3 px-4 w-12">
-                    <Checkbox
-                      checked={
-                        pageCategoryNames.length > 0 &&
-                        pageCategoryNames.every((name) => selectedCategories.includes(name))
-                      }
-                      onCheckedChange={toggleSelectAll}
-                    />
-                  </th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("categories.category")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.vendor")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("categories.description")}</th>
@@ -447,13 +413,7 @@ export function VendorAdminCategories({
               </thead>
               <tbody className="bg-white">
                 {pagedCategories.map((category) => (
-                  <tr key={category.name} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="py-3 px-4">
-                      <Checkbox
-                        checked={selectedCategories.includes(category.name)}
-                        onCheckedChange={() => toggleSelectCategory(category.name)}
-                      />
-                    </td>
+                  <tr key={category.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -481,9 +441,15 @@ export function VendorAdminCategories({
                       </div>
                     </td>
                     <td className="py-3 px-4">
-                      <Badge variant="secondary" className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100">
-                        {t("categories.active")}
-                      </Badge>
+                      {category.status === "hide" ? (
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-100">
+                          {t("categories.hidden")}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100">
+                          {t("categories.active")}
+                        </Badge>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">

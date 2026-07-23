@@ -14004,11 +14004,14 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
   }
 });
 
-async function sanitizeVendorCategoryProductIds(vendorId: string, productIds: unknown): Promise<string[]> {
+async function sanitizeVendorCategoryProductIds(
+  vendorId: string,
+  productIds: unknown,
+): Promise<{ allowedIds: string[]; rejectedIds: string[] }> {
   const requestedIds = Array.isArray(productIds)
     ? [...new Set(productIds.map((id: unknown) => String(id || "").trim()).filter(Boolean))]
     : [];
-  if (requestedIds.length === 0) return [];
+  if (requestedIds.length === 0) return { allowedIds: [], rejectedIds: [] };
 
   const [vendorData, storefrontSettings] = await Promise.all([
     kv.get(`vendor:${vendorId}`),
@@ -14033,7 +14036,26 @@ async function sanitizeVendorCategoryProductIds(vendorId: string, productIds: un
   );
 
   const allowedSet = new Set(allowedIds);
-  return requestedIds.filter((id) => allowedSet.has(id));
+  const orderedAllowed = requestedIds.filter((id) => allowedSet.has(id));
+  const rejectedIds = requestedIds.filter((id) => !allowedSet.has(id));
+  return { allowedIds: orderedAllowed, rejectedIds };
+}
+
+async function vendorCategoryNameConflict(
+  vendorId: string,
+  name: string,
+  excludeCategoryId = "",
+): Promise<boolean> {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (!normalized) return false;
+  const allCategories = await withTimeout(kv.getByPrefix(`category:${vendorId}:`), 15000);
+  const rows = Array.isArray(allCategories) ? allCategories : [];
+  return rows.some((cat: any) => {
+    if (!cat || (cat.source !== "vendor" && cat.createdByVendor !== true)) return false;
+    const id = String(cat.id || "").trim();
+    if (excludeCategoryId && id === excludeCategoryId) return false;
+    return String(cat.name || "").trim().toLowerCase() === normalized;
+  });
 }
 
 function assertVendorCategoryOwnership(categoryId: string, vendorId: string, category: any) {
@@ -14128,7 +14150,11 @@ app.post("/make-server-16010b6f/vendor/categories", async (c) => {
     if (!categoryName) {
       return c.json({ error: "Category name is required" }, 400);
     }
-    const scopedProductIds = await sanitizeVendorCategoryProductIds(actualVendorId, productIds);
+    if (await vendorCategoryNameConflict(actualVendorId, categoryName)) {
+      return c.json({ error: "A category with this name already exists for your store." }, 409);
+    }
+    const { allowedIds: scopedProductIds, rejectedIds: rejectedProductIds } =
+      await sanitizeVendorCategoryProductIds(actualVendorId, productIds);
     
     console.log(`📁 Creating category for vendor ${actualVendorId}: ${categoryName}`);
     
@@ -14153,7 +14179,7 @@ app.post("/make-server-16010b6f/vendor/categories", async (c) => {
     await kv.set(categoryId, category);
     
     console.log(`✅ Category created: ${categoryId}`);
-    return c.json({ success: true, category });
+    return c.json({ success: true, category, rejectedProductIds });
 
   } catch (error: any) {
     console.error("❌ Failed to create category:", error);
@@ -14178,16 +14204,21 @@ app.put("/make-server-16010b6f/vendor/categories/:categoryId", async (c) => {
     if (ownershipError) {
       return c.json({ error: ownershipError }, 403);
     }
-    const nextProductIds =
-      productIds !== undefined
-        ? await sanitizeVendorCategoryProductIds(actualVendorId, productIds)
-        : (existingCategory.productIds || []);
-    
     const nextName = String(name || "").trim() || existingCategory.name;
+    if (await vendorCategoryNameConflict(actualVendorId, nextName, categoryId)) {
+      return c.json({ error: "A category with this name already exists for your store." }, 409);
+    }
     const nameChanged = nextName !== String(existingCategory.name || "").trim();
     const names = nameChanged
       ? await buildCategoryLocaleNames(nextName)
       : existingCategory.names || (await buildCategoryLocaleNames(nextName));
+    let nextProductIds = existingCategory.productIds || [];
+    let rejectedProductIds: string[] = [];
+    if (productIds !== undefined) {
+      const sanitized = await sanitizeVendorCategoryProductIds(actualVendorId, productIds);
+      nextProductIds = sanitized.allowedIds;
+      rejectedProductIds = sanitized.rejectedIds;
+    }
     const updatedCategory = {
       ...existingCategory,
       name: nextName,
@@ -14206,7 +14237,7 @@ app.put("/make-server-16010b6f/vendor/categories/:categoryId", async (c) => {
     await kv.set(categoryId, updatedCategory);
     
     console.log(`✅ Category updated: ${categoryId}`);
-    return c.json({ success: true, category: updatedCategory });
+    return c.json({ success: true, category: updatedCategory, rejectedProductIds });
 
   } catch (error: any) {
     console.error("❌ Failed to update category:", error);

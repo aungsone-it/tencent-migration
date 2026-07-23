@@ -1231,6 +1231,8 @@ export function VendorStoreView({
   const buildVendorCategoryProductIdMap = useCallback((categories: any[]) => {
     const map = new Map<string, Set<string>>();
     for (const category of filterVendorCreatedCategories(categories || [], vendorId)) {
+      const st = String(category?.status ?? "active").toLowerCase();
+      if (st === "hide" || st === "inactive" || st === "off" || st === "off-shelf") continue;
       const name = String(category?.name || "").trim().toLowerCase();
       if (!name || !Array.isArray(category?.productIds)) continue;
       const ids = category.productIds
@@ -1413,7 +1415,7 @@ export function VendorStoreView({
       if (!name) return;
       if (name.toLowerCase() === VENDOR_STORE_UNCATEGORIZED_SLUG) return;
       const st = String(row?.status ?? "active").toLowerCase();
-      if (st === "inactive" || st === "off" || st === "off-shelf") return;
+      if (st === "hide" || st === "inactive" || st === "off" || st === "off-shelf") return;
       const k = name.toLowerCase();
       if (byLower.has(k)) return;
       const rid = row.id != null && String(row.id).trim() ? String(row.id).trim() : "";

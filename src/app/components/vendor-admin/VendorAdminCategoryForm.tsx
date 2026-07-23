@@ -66,6 +66,11 @@ function isStorefrontVisibleProduct(product: Product): boolean {
   return String(product.status || "active").trim().toLowerCase() === "active";
 }
 
+function isCategoryVisibleOnStorefront(status: unknown): boolean {
+  const st = String(status ?? "active").trim().toLowerCase();
+  return st !== "hide" && st !== "inactive" && st !== "off" && st !== "off-shelf";
+}
+
 export function VendorAdminCategoryForm({
   vendorId,
   vendorName,
@@ -235,10 +240,10 @@ export function VendorAdminCategoryForm({
       };
 
       let savedCategory: Category | undefined;
+      let rejectedProductIds: string[] = [];
       if (editingCategory) {
-        // Update existing category
         const response = await fetch(
-          `${cloudbaseApiBaseUrl}/vendor/categories/${editingCategory.id}`,
+          `${cloudbaseApiBaseUrl}/vendor/categories/${encodeURIComponent(editingCategory.id)}`,
           {
             method: "PUT",
             headers: {
@@ -251,17 +256,19 @@ export function VendorAdminCategoryForm({
           }
         );
 
-        if (!response.ok) {
-          throw new Error("Failed to update category");
-        }
         const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(String(data.error || "Failed to update category"));
+        }
         savedCategory = data.category;
+        rejectedProductIds = Array.isArray(data.rejectedProductIds)
+          ? data.rejectedProductIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+          : [];
         rememberVendorCreatedCategory(vendorId, savedCategory || { id: editingCategory.id, name: categoryName.trim() });
         broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName, vendorStoreSlug]);
 
         console.log("✅ Category updated successfully");
       } else {
-        // Create new category
         const response = await fetch(
           `${cloudbaseApiBaseUrl}/vendor/categories`,
           {
@@ -276,18 +283,33 @@ export function VendorAdminCategoryForm({
           }
         );
 
-        if (!response.ok) {
-          throw new Error("Failed to create category");
-        }
         const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(String(data.error || "Failed to create category"));
+        }
         savedCategory = data.category;
+        rejectedProductIds = Array.isArray(data.rejectedProductIds)
+          ? data.rejectedProductIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+          : [];
         rememberVendorCreatedCategory(vendorId, savedCategory || { name: categoryName.trim() });
         broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName, vendorStoreSlug]);
 
         console.log("✅ Category created successfully");
       }
 
-      console.log(`✅ Saved vendor category assignments for ${selectedProducts.length} products`);
+      const savedProductIds = Array.isArray(savedCategory?.productIds)
+        ? savedCategory!.productIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : selectedProducts;
+      const savedProductRows = products.filter((product) => savedProductIds.includes(product.id));
+      const savedVisibleProducts = savedProductRows.filter(isStorefrontVisibleProduct);
+
+      if (rejectedProductIds.length > 0) {
+        toast.warning(
+          `${rejectedProductIds.length} product(s) could not be assigned and were skipped. Refresh the product list and try again.`
+        );
+      }
+
+      console.log(`✅ Saved vendor category assignments for ${savedProductIds.length} products`);
 
       toast.success(editingCategory ? "Category updated successfully!" : "Category created successfully!");
       onSave(
@@ -301,15 +323,17 @@ export function VendorAdminCategoryForm({
             status,
             createdAt: editingCategory?.createdAt || new Date().toISOString(),
           }),
-          productIds: selectedProducts,
-          products: selectedVisibleProducts,
-          productCount: selectedVisibleProducts.length,
-          activeProducts: selectedVisibleProducts.length,
+          productIds: savedProductIds,
+          products: savedVisibleProducts,
+          productCount: isCategoryVisibleOnStorefront(status)
+            ? savedVisibleProducts.length
+            : 0,
+          activeProducts: savedVisibleProducts.length,
         } as Category
       );
     } catch (error) {
       console.error("Failed to save category:", error);
-      toast.error("Failed to save category");
+      toast.error(error instanceof Error ? error.message : "Failed to save category");
     } finally {
       setIsSaving(false);
     }

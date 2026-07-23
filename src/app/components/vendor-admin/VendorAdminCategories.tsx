@@ -229,8 +229,12 @@ export function VendorAdminCategories({
   };
 
   const handleDeleteCategory = async (category: CategoryInfo) => {
-    if (category.productIds.length > 0) {
-      toast.error("Move or remove products from this category before deleting it.");
+    const assignedCount = category.productIds.length;
+    const confirmMessage =
+      assignedCount > 0
+        ? `Delete "${category.name}"? ${assignedCount} product(s) will be removed from this category but will stay in your catalog.`
+        : `Delete "${category.name}"? This cannot be undone.`;
+    if (!window.confirm(confirmMessage)) {
       return;
     }
 
@@ -248,13 +252,18 @@ export function VendorAdminCategories({
           body: JSON.stringify({ vendorId }),
         }
       );
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
         throw new Error(data.error || "Failed to delete category");
       }
-      toast.success("Category deleted successfully");
+      const cleared = Number(data.unassignedProductCount ?? assignedCount) || 0;
+      toast.success(
+        cleared > 0
+          ? `Category deleted. ${cleared} product(s) removed from this category.`
+          : "Category deleted successfully"
+      );
       broadcastVendorCategoryAssignmentChanged(vendorId, [vendorName, vendorStoreSlug]);
-      loadCategories(true);
+      setCategories((prev) => prev.filter((cat) => cat.id !== category.id));
     } catch (error: any) {
       console.error("Failed to delete category:", error);
       toast.error(error.message || "Failed to delete category");

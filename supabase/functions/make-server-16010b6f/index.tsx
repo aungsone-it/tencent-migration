@@ -3406,7 +3406,7 @@ function collectProductSkusForUniqueness(product: any): string[] {
 async function checkProductSkusUniqueness(
   product: any,
   excludeProductId?: string
-): Promise<{ isUnique: boolean; sku?: string; existingProduct?: any; duplicateWithinProduct?: boolean }> {
+): Promise<{ isUnique: boolean; sku?: string; existingProduct?: any; duplicateWithinProduct?: boolean; checkFailed?: boolean }> {
   const skus = collectProductSkusForUniqueness(product);
   const seen = new Set<string>();
   for (const sku of skus) {
@@ -3434,7 +3434,7 @@ async function checkProductSkusUniqueness(
     }
   } catch (error) {
     console.error("❌ Error checking product SKU uniqueness:", error);
-    return { isUnique: true };
+    return { isUnique: false, checkFailed: true };
   }
 
   return { isUnique: true };
@@ -4213,6 +4213,9 @@ app.post("/make-server-16010b6f/products", async (c) => {
     // Check all submitted SKUs: main products use `sku`; variant products use every variant SKU.
     const skuCheck = await checkProductSkusUniqueness(productData);
     if (!skuCheck.isUnique) {
+      if (skuCheck.checkFailed) {
+        return c.json({ error: "Could not verify SKU uniqueness. Please try again." }, 503);
+      }
       return c.json({ 
         error: "SKU already exists",
         details: skuCheck.duplicateWithinProduct
@@ -4400,6 +4403,9 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
     if (!isVendorOnlyUpdate) {
       const skuCheck = await checkProductSkusUniqueness(updatedProduct, id);
       if (!skuCheck.isUnique) {
+        if (skuCheck.checkFailed) {
+          return c.json({ error: "Could not verify SKU uniqueness. Please try again." }, 503);
+        }
         return c.json({ 
           error: "SKU already exists",
           details: skuCheck.duplicateWithinProduct
@@ -14262,21 +14268,18 @@ app.delete("/make-server-16010b6f/vendor/categories/:categoryId", async (c) => {
     if (ownershipError) {
       return c.json({ error: ownershipError }, 403);
     }
-    
-    const assignedProductCount = Array.isArray(category.productIds)
+
+    const unassignedProductCount = Array.isArray(category.productIds)
       ? category.productIds.filter((id: unknown) => String(id || "").trim()).length
       : 0;
-    
-    if (assignedProductCount > 0) {
-      return c.json({ 
-        error: `Cannot delete category with ${assignedProductCount} assigned products. Please move or remove products first.` 
-      }, 400);
-    }
-    
+
     await kv.del(categoryId);
-    
-    console.log(`✅ Category deleted: ${categoryId}`);
-    return c.json({ success: true });
+
+    console.log(
+      `✅ Category deleted: ${categoryId}` +
+        (unassignedProductCount > 0 ? ` (${unassignedProductCount} product assignment(s) cleared)` : ""),
+    );
+    return c.json({ success: true, unassignedProductCount });
 
   } catch (error: any) {
     console.error("❌ Failed to delete category:", error);

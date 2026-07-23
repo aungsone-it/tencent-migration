@@ -15,10 +15,6 @@ import { compressImageToDataURL, compressImageToFile } from "../../utils/imageCo
 import { RichTextEditor } from "./RichTextEditor";
 import { productsApi } from "../../utils/api";
 import { apiCache } from "../utils/cache";
-import {
-  invalidateAdminAllProductsCache,
-  invalidateProductByIdCache,
-} from "../utils/module-cache";
 import { CategorySelect } from "./CategorySelect";
 import { useLanguage } from "../contexts/LanguageContext";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
@@ -104,6 +100,28 @@ function mergeVariantsWithInitial(
   });
 }
 
+function deriveVariantOptionsFromVariants(
+  variantRows: Array<{ option1?: string; option2?: string; option3?: string }>,
+): { name: string; values: string[] }[] {
+  const optionValues: string[][] = [[], [], []];
+  for (const row of variantRows) {
+    const values = [row.option1, row.option2, row.option3];
+    values.forEach((value, index) => {
+      const trimmed = String(value || "").trim();
+      if (!trimmed) return;
+      if (!optionValues[index].includes(trimmed)) {
+        optionValues[index].push(trimmed);
+      }
+    });
+  }
+  return optionValues
+    .map((values, index) => ({
+      name: `Option ${index + 1}`,
+      values,
+    }))
+    .filter((option) => option.values.length > 0);
+}
+
 function findDuplicateVariantSkus(variantRows: Variant[]): Map<string, string> {
   const seen = new Map<string, string>();
   const duplicates = new Map<string, string>();
@@ -144,8 +162,8 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     return [{ label: "", value: "" }];
   });
   const [price, setPrice] = useState(() => formatPriceForForm(initialData?.price) || "");
-  const [compareAtPrice, setCompareAtPrice] = useState(initialData?.compareAtPrice?.replace("$", "") || "");
-  const [costPerItem, setCostPerItem] = useState(initialData?.costPerItem?.replace("$", "") || "");
+  const [compareAtPrice, setCompareAtPrice] = useState(() => formatPriceForForm(initialData?.compareAtPrice) || "");
+  const [costPerItem, setCostPerItem] = useState(() => formatPriceForForm(initialData?.costPerItem) || "");
   const [commissionRate, setCommissionRate] = useState(initialData?.commissionRate?.toString() || ""); // 🔥 Commission rate
   const [sku, setSku] = useState(initialData?.sku || "");
   const [barcode, setBarcode] = useState(initialData?.barcode || "");
@@ -218,7 +236,13 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
           setVariantOptions(initialData.variantOptions);
           console.log("✅ Set variantOptions state");
         } else {
-          console.log("⚠️ No variantOptions found, will not auto-generate");
+          const derivedOptions = deriveVariantOptionsFromVariants(initialData.variants);
+          if (derivedOptions.length > 0) {
+            console.log("📝 Derived variant options from variants:", derivedOptions);
+            setVariantOptions(derivedOptions);
+          } else {
+            console.log("⚠️ No variantOptions found, will not auto-generate");
+          }
         }
       } else if (initialData.hasVariants) {
         // Has variants flag but no variants data - enable the section
@@ -441,7 +465,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     
     if (!hasVariants || variantOptions.length === 0) {
       console.log("⏸️ Skipping variant generation - hasVariants:", hasVariants, "variantOptions:", variantOptions.length);
-      setVariants([]);
+      if (!(mode === "edit" && variants.length > 0)) {
+        setVariants([]);
+      }
       return;
     }
 
@@ -450,7 +476,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     
     if (validOptions.length === 0) {
       console.log("⏸️ No valid options, clearing variants");
-      setVariants([]);
+      if (!(mode === "edit" && variants.length > 0)) {
+        setVariants([]);
+      }
       return;
     }
     
@@ -514,32 +542,27 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     setVariants(newVariants);
   }, [hasVariants, variantOptions, isInitializing, mode]); // ⚠️ Don't include 'variants' to avoid infinite loop
 
-  const handleProductStatusChange = async (newStatus: string) => {
-    const previousStatus = status;
+  const handleProductStatusChange = (newStatus: string) => {
     setStatus(newStatus);
-
-    if (mode !== "edit" || !initialData?.id || isReadOnly || newStatus === previousStatus) {
-      return;
-    }
-
-    try {
-      await productsApi.update(initialData.id, { status: newStatus });
-      invalidateProductByIdCache(initialData.id);
-      invalidateAdminAllProductsCache();
-      toast.success(
-        newStatus === "off-shelf" ? "Product moved off shelf" : "Product is now active"
-      );
-    } catch (error) {
-      console.error("Failed to update product status:", error);
-      setStatus(previousStatus);
-      toast.error("Failed to update product status");
-    }
   };
 
   const handleSubmit = async () => {
     // Validation: Check required fields based on whether variants are enabled
     if (!title) {
       toast.error("Please fill in the product title");
+      return;
+    }
+
+    if (isCheckingSku) {
+      toast.error("Please wait for SKU validation to finish");
+      return;
+    }
+    if (skuError) {
+      toast.error("Fix the SKU error before saving");
+      return;
+    }
+    if (Object.values(variantSkuErrors).some(Boolean)) {
+      toast.error("Fix variant SKU errors before saving");
       return;
     }
 
@@ -1560,7 +1583,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
               <CardContent>
                 <Select
                   value={status}
-                  onValueChange={(value) => void handleProductStatusChange(value)}
+                  onValueChange={handleProductStatusChange}
                   disabled={isReadOnly}
                 >
                   <SelectTrigger>

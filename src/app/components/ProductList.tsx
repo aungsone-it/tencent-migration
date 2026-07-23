@@ -766,7 +766,6 @@ export function ProductList({
   );
 
   const handleSaveProduct = async (data: any) => {
-    setCurrentView("list");
     try {
       const response = await productsApi.create({
         ...data,
@@ -794,6 +793,7 @@ export function ProductList({
       applyOptimisticProductAdd(created);
       toast.success("✅ Product added!", { duration: 2000 });
       onProductsChanged?.();
+      setCurrentView("list");
     } catch (error) {
       console.error("❌ Failed to create product:", error);
       if (error instanceof Error && error.message.includes("SKU already exists")) {
@@ -802,6 +802,7 @@ export function ProductList({
         const errorMsg = error instanceof Error ? error.message : "Failed to save product to server";
         toast.error(`❌ Error: ${errorMsg}. Check console for details.`, { duration: 5000 });
       }
+      throw error;
     }
   };
 
@@ -853,8 +854,9 @@ export function ProductList({
       if (error instanceof Error && error.message.includes("SKU already exists")) {
         toast.error(`❌ SKU Validation Error: ${error.message}`, { duration: 5000 });
       } else {
-        toast.error("Failed to update product");
+        toast.error(error instanceof Error ? error.message : "Failed to update product");
       }
+      throw error;
     }
   };
 

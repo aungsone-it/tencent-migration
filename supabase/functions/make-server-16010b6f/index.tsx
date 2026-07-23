@@ -29,6 +29,11 @@ import {
   getKPayResolvedEndpointUrls,
 } from "./kpay_routes.tsx";
 import {
+  getVendorCommissionWallet,
+  saveVendorKpayAccount,
+  postVendorCommissionWithdraw,
+} from "./vendor_commission_withdraw.tsx";
+import {
   deletePwaCheckoutDraft,
   resolveMerchantOrderIdFromOrder,
 } from "./pwa_finalize.ts";
@@ -1309,6 +1314,12 @@ app.get("/make-server-16010b6f/kpay/pwa/orphaned-drafts", getOrphanedPwaDraftsRo
 app.get("/make-server-16010b6f/kpay/pwa/draft-status/:merchantOrderId", getPwaDraftStatusRoute);
 app.post("/make-server-16010b6f/kpay/pwa/reconcile", postPwaReconcileRoute);
 app.get("/make-server-16010b6f/kpay/resolved-urls", getKPayResolvedUrlsRoute);
+
+// Vendor commission → KBZPay wallet (Enterprise Payment / businesspay)
+app.get("/make-server-16010b6f/vendor/commission-wallet/:vendorId", getVendorCommissionWallet);
+app.put("/make-server-16010b6f/vendor/kpay-account/:vendorId", saveVendorKpayAccount);
+app.post("/make-server-16010b6f/vendor/kpay-account/:vendorId", saveVendorKpayAccount);
+app.post("/make-server-16010b6f/vendor/commission-withdraw/:vendorId", postVendorCommissionWithdraw);
 
 // Retry wrapper for database operations with exponential backoff
 async function withRetry<T>(

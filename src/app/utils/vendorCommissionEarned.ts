@@ -25,6 +25,21 @@ export const VENDOR_COMMISSION_ACCRUE_STATUSES = new Set([
   "fulfilled",
 ]);
 
+/** Orders eligible for KBZPay commission withdrawal (ready-to-ship onward). */
+export const VENDOR_WITHDRAWABLE_STATUSES = new Set([
+  "ready-to-ship",
+  "fulfilled",
+  "shipped",
+  "delivered",
+]);
+
+export function isVendorOrderWithdrawable(order: any): boolean {
+  if (order == null || typeof order !== "object") return false;
+  const st = normalizeOrderStatusKey(String(order.status ?? ""));
+  if (st === "cancelled") return false;
+  return VENDOR_WITHDRAWABLE_STATUSES.has(st);
+}
+
 export function buildVendorCatalogKeys(products: any[]): VendorCatalogKeys {
   const ids = new Set<string>();
   const skus = new Set<string>();
@@ -137,4 +152,31 @@ export function computeVendorCommissionEarned(
   }
 
   return Math.round(commission * 100) / 100;
+}
+
+/** Vendor net earnings after platform commission (withdrawable balance basis). */
+export function computeVendorPayoutEarned(
+  orders: any[],
+  products: any[],
+  vendorId: string,
+  defaultCommissionPercent: number
+): number {
+  const catalog = buildVendorCatalogKeys(products);
+  let payout = 0;
+
+  for (const order of orders) {
+    if (order == null || typeof order !== "object") continue;
+    if (!isVendorOrderWithdrawable(order)) continue;
+
+    const lineItems = Array.isArray(order.items) ? order.items : [];
+    for (const item of lineItems) {
+      if (!lineItemBelongsToVendor(item, vendorId, catalog)) continue;
+      const gross = orderLineGross(item);
+      const net = orderLineNetAfterDiscount(gross, order);
+      const pct = lineCommissionPercent(item, products, defaultCommissionPercent);
+      payout += Math.max(0, net - (net * pct) / 100);
+    }
+  }
+
+  return Math.round(payout * 100) / 100;
 }

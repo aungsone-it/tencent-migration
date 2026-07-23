@@ -138,7 +138,14 @@ function kbzBizErrorFromBody(body: AnyRecord): { code?: string; msg?: string; re
   if (!body || typeof body !== "object") return {};
   const data = providerData(body);
   const rawCode = data.code ?? data.err_code ?? data.error_code;
-  const rawMsg = data.msg ?? data.message ?? data.error_msg ?? data.err_msg ?? data.sub_msg;
+  const rawMsg =
+    data.msg ??
+    data.message ??
+    data.error_msg ??
+    data.err_msg ??
+    data.sub_msg ??
+    body.error ??
+    body.message;
   const rawResult = data.result ?? data.return_code ?? data.returnCode;
   const out: { code?: string; msg?: string; result?: string } = {};
   if (rawCode !== undefined && rawCode !== null && String(rawCode).trim() !== "") {
@@ -151,6 +158,11 @@ function kbzBizErrorFromBody(body: AnyRecord): { code?: string; msg?: string; re
     out.result = String(rawResult).trim();
   }
   return out;
+}
+
+function providerErrorMessage(body: AnyRecord, fallback: string): string {
+  const biz = kbzBizErrorFromBody(body);
+  return text(biz.msg) || text(body.error) || text(body.message) || fallback;
 }
 
 // KBZ often returns HTTP 200 even when the gateway result is FAIL.
@@ -1028,6 +1040,43 @@ function resolveVpsRefundUrl(baseUrl: string): string {
   return candidates.find((u) => u.includes("refund.php")) || candidates[0] || "";
 }
 
+/** VPS PHP relay for kbz.payment.businesspay — same pattern as refund.php (simple JSON + Bearer secret). */
+function resolveVpsBusinessPayUrl(baseUrl: string): string {
+  const explicit =
+    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL")) ||
+    text(resolveEnv("KPAY_BUSINESS_PAY_URL"));
+  if (explicit && (explicit.includes(".php") || resolveEnv("KPAY_USE_VPS_BUSINESS_PAY") === "1")) {
+    return explicit;
+  }
+
+  const refundUrl = resolveVpsRefundUrl(baseUrl);
+  if (refundUrl.includes("refund.php")) {
+    return refundUrl.replace(/refund\.php/i, "businesspay.php");
+  }
+
+  if (text(baseUrl)) {
+    for (const path of ["/api/businesspay.php", "/payment/gateway/businesspay.php"]) {
+      try {
+        return new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return explicit || "";
+}
+
+function shouldUseVpsBusinessPayProxy(): boolean {
+  if (!text(resolveEnv("KBZ_VPS_API_SECRET"))) return false;
+  if (text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"))) return true;
+  if (resolveEnv("KPAY_USE_VPS_BUSINESS_PAY") === "1") return true;
+  const configured = text(resolveEnv("KPAY_BUSINESS_PAY_URL"));
+  if (configured.includes("businesspay.php")) return true;
+  // Refunds already use the VPS relay on this host — business pay should too.
+  return shouldUseVpsRefundProxy();
+}
+
 /** What the edge function will call right now (no secret values). */
 export function getKPayResolvedEndpointUrls() {
   const cfg = kpayConfig();
@@ -1044,10 +1093,18 @@ export function getKPayResolvedEndpointUrls() {
   const refundDirect =
     text(resolveEnv("KBZ_VPS_REFUND_URL")) || text(resolveEnv("KPAY_REFUND_URL"));
   const refundPath = text(resolveEnv("KPAY_PATH_REFUND", "KPAY_REFUND_PATH"));
+  const businessPayDirect =
+    text(resolveEnv("KPAY_BUSINESS_PAY_URL")) ||
+    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"));
+  const businessPayFromBase = resolveBusinessPayEndpoints(base)[0] || "";
+  const vpsBusinessPay = resolveVpsBusinessPayUrl(base);
   return {
     proxyBase: base,
     qrCreate: join(cfg.createPath),
     orderQuery: join(cfg.queryPath),
+    businessPay: vpsBusinessPay || businessPayDirect || businessPayFromBase,
+    businessPayMock: resolveEnv("KPAY_BUSINESS_PAY_MOCK") === "1",
+    vpsBusinessPayEnabled: shouldUseVpsBusinessPayProxy(),
     refund: resolveVpsRefundUrl(base),
     refundConfiguredVia: refundDirect
       ? text(resolveEnv("KBZ_VPS_REFUND_URL"))
@@ -2570,6 +2627,421 @@ export async function getKPayStatus(c: Context) {
     console.error("getKPayStatus error", error);
     return c.json({ error: "Failed to fetch KBZPay status", message: String(error?.message || error) }, 500);
   }
+}
+
+function businessPayEndpointCandidates(baseUrl: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (url: string) => {
+    const u = text(url);
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    out.push(u);
+  };
+
+  const direct =
+    text(resolveEnv("KPAY_BUSINESS_PAY_URL")) ||
+    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"));
+  if (direct) add(direct);
+
+  const configuredPath = text(resolveEnv("KPAY_PATH_BUSINESS_PAY", "KPAY_BUSINESS_PAY_PATH"));
+  if (configuredPath) {
+    if (/^https?:\/\//i.test(configuredPath)) add(configuredPath);
+    else if (text(baseUrl)) {
+      try {
+        add(new URL(configuredPath, baseUrl).toString());
+      } catch {
+        // ignore malformed path
+      }
+    }
+  }
+
+  const isProd = text(resolveEnv("KPAY_ENV")).toLowerCase() === "prod";
+  add(
+    isProd
+      ? "https://api.kbzpay.com:8008/payment/gateway/businesspay"
+      : "https://api-uat.kbzpay.com:18008/payment/gateway/uat/businesspay",
+  );
+
+  if (text(baseUrl)) {
+    for (const p of ["/payment/gateway/uat/businesspay", "/api/businesspay.php"]) {
+      try {
+        add(new URL(p, baseUrl).toString());
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return out;
+}
+
+/** KBZ Enterprise Payment — kbz.payment.businesspay (vendor commission payout to KBZPay wallet). */
+function businessPayPayloadPair(params: {
+  appId: string;
+  merchCode: string;
+  merchantOrderId: string;
+  amount: string;
+  currency: string;
+  title?: string;
+  note?: string;
+  payeePhone: string;
+  payeeName?: string;
+}): PayloadPair {
+  const nonce = crypto.randomUUID().replaceAll("-", "").slice(0, 32);
+  const ts = String(Math.floor(Date.now() / 1000));
+  const payeeInfo: AnyRecord = {
+    identifier_value: params.payeePhone,
+    identifier_type: "01",
+    identity_type: "1000",
+  };
+  if (text(params.payeeName)) {
+    payeeInfo.name = params.payeeName;
+  }
+
+  const bizContent: AnyRecord = {
+    appid: params.appId,
+    merch_code: params.merchCode,
+    merch_order_id: params.merchantOrderId,
+    trade_type: "BUSINESS_PAY",
+    total_amount: params.amount,
+    trans_currency: params.currency,
+    payee_info: payeeInfo,
+  };
+  if (text(params.title)) bizContent.title = params.title;
+  if (text(params.note)) bizContent.note = params.note;
+
+  const signCollection: AnyRecord = {
+    appid: params.appId,
+    merch_code: params.merchCode,
+    merch_order_id: params.merchantOrderId,
+    method: "kbz.payment.businesspay",
+    nonce_str: nonce,
+    timestamp: ts,
+    total_amount: params.amount,
+    trade_type: "BUSINESS_PAY",
+    trans_currency: params.currency,
+    identifier_value: params.payeePhone,
+    identifier_type: "01",
+    identity_type: "1000",
+    version: "1.0",
+  };
+  if (text(params.title)) signCollection.title = params.title;
+  if (text(params.note)) signCollection.note = params.note;
+  if (text(params.payeeName)) signCollection.name = params.payeeName;
+
+  const requestBody: AnyRecord = {
+    timestamp: ts,
+    method: "kbz.payment.businesspay",
+    nonce_str: nonce,
+    sign_type: "SHA256",
+    version: "1.0",
+    biz_content: bizContent,
+  };
+
+  return { signCollection, requestBody, nonce, timestamp: ts };
+}
+
+function businessPayIndicatesSuccess(body: AnyRecord): boolean {
+  if (providerIndicatesSuccess(body)) {
+    const nested = providerData(body);
+    const wrapped = asRecord(body.Response);
+    const tradeStatus = text(
+      nested.trade_status ||
+        nested.tradeStatus ||
+        wrapped.trade_status ||
+        wrapped.tradeStatus,
+    ).toUpperCase();
+    if (!tradeStatus || tradeStatus === "PAY_SUCCESS") return true;
+    return ["PAY_SUCCESS", "SUCCESS"].includes(tradeStatus);
+  }
+  const nested = providerData(body);
+  const wrapped = asRecord(body.Response);
+  const result = text(nested.result || wrapped.result).toUpperCase();
+  if (result === "PENDING") return false;
+  const tradeStatus = text(nested.trade_status || wrapped.trade_status).toUpperCase();
+  return tradeStatus === "PAY_SUCCESS";
+}
+
+function businessPayIsPending(body: AnyRecord): boolean {
+  const nested = providerData(body);
+  const wrapped = asRecord(body.Response);
+  const result = text(nested.result || wrapped.result).toUpperCase();
+  return result === "PENDING";
+}
+
+export type KPayBusinessPayResult = {
+  ok: boolean;
+  success: boolean;
+  pending: boolean;
+  merchantOrderId: string;
+  endpointUsed?: string;
+  paymentOrderId?: string;
+  mmOrderId?: string;
+  tradeStatus?: string;
+  providerCode?: string;
+  providerMessage?: string;
+  rawResponse?: AnyRecord;
+  networkError?: string;
+};
+
+function businessPayUsesDirectKbzHost(url: string): boolean {
+  return /api(-uat)?\.kbzpay\.com/i.test(text(url));
+}
+
+function resolveBusinessPayEndpoints(baseUrl: string): string[] {
+  const directConfigured =
+    text(resolveEnv("KPAY_BUSINESS_PAY_URL")) ||
+    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"));
+  const all = businessPayEndpointCandidates(baseUrl);
+  if (directConfigured) {
+    return all.slice(0, 2);
+  }
+  const viaProxy = all.filter((url) => !businessPayUsesDirectKbzHost(url));
+  return viaProxy.slice(0, 2);
+}
+
+async function businessPayViaVpsProxy(params: {
+  merchantOrderId: string;
+  amountMmk: number;
+  payeePhone: string;
+  payeeName?: string;
+  title?: string;
+  note?: string;
+}): Promise<KPayBusinessPayResult> {
+  const cfg = kpayConfig();
+  const vpsUrl = resolveVpsBusinessPayUrl(cfg.baseUrl);
+  const secret = resolveEnv("KBZ_VPS_API_SECRET");
+  if (!vpsUrl || !secret) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      providerMessage:
+        "VPS business pay is not configured (KBZ_VPS_BUSINESS_PAY_URL or refund.php sibling + KBZ_VPS_API_SECRET).",
+    };
+  }
+
+  const amount = normalizeAmountMMK(params.amountMmk);
+  const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 15_000), 45_000);
+  const headers = buildRefundProviderHeaders(cfg);
+  const payload = {
+    merch_order_id: params.merchantOrderId,
+    merchantOrderId: params.merchantOrderId,
+    total_amount: amount,
+    trans_currency: "MMK",
+    trade_type: "BUSINESS_PAY",
+    identifier_value: params.payeePhone,
+    identifier_type: "01",
+    identity_type: "1000",
+    payee_phone: params.payeePhone,
+    payee_name: text(params.payeeName) || undefined,
+    title: params.title || "Vendor commission payout",
+    note: params.note || `Payout ${params.merchantOrderId}`,
+  };
+
+  const response = await postJson(vpsUrl, payload, timeoutMs, headers);
+  const kbzPayload = asRecord(response.body.kbz || response.body);
+  const nested = providerData(kbzPayload);
+  const paymentOrderId = text(
+    nested.payment_order_id ||
+      nested.paymentOrderId ||
+      kbzPayload.payment_order_id ||
+      kbzPayload.paymentOrderId,
+  );
+  const mmOrderId = text(nested.mm_order_id || nested.mmOrderId || kbzPayload.mm_order_id || kbzPayload.mmOrderId);
+  const tradeStatus = text(nested.trade_status || nested.tradeStatus || kbzPayload.trade_status || kbzPayload.tradeStatus);
+  const biz = kbzBizErrorFromBody(kbzPayload);
+
+  if (
+    response.body.ok === true ||
+    response.body.success === true ||
+    businessPayIndicatesSuccess(kbzPayload) ||
+    businessPayIsPending(kbzPayload)
+  ) {
+    const pending = businessPayIsPending(kbzPayload);
+    return {
+      ok: true,
+      success: !pending && (response.body.ok === true || businessPayIndicatesSuccess(kbzPayload)),
+      pending,
+      merchantOrderId: params.merchantOrderId,
+      endpointUsed: vpsUrl,
+      paymentOrderId,
+      mmOrderId,
+      tradeStatus,
+      providerCode: biz.code,
+      providerMessage: biz.msg,
+      rawResponse: response.body,
+    };
+  }
+
+  return {
+    ok: false,
+    success: false,
+    pending: false,
+    merchantOrderId: params.merchantOrderId,
+    endpointUsed: vpsUrl,
+    providerMessage: providerErrorMessage(response.body, "KBZPay business pay request failed"),
+    networkError: response.networkError,
+    rawResponse: response.body,
+  };
+}
+
+/** Transfer MMK to a vendor KBZPay wallet via kbz.payment.businesspay. */
+export async function invokeKPayBusinessPay(params: {
+  merchantOrderId: string;
+  amountMmk: number;
+  payeePhone: string;
+  payeeName?: string;
+  title?: string;
+  note?: string;
+}): Promise<KPayBusinessPayResult> {
+  if (resolveEnv("KPAY_BUSINESS_PAY_MOCK") === "1") {
+    return {
+      ok: true,
+      success: true,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      endpointUsed: "mock",
+      paymentOrderId: `MOCK-${params.merchantOrderId}`,
+      tradeStatus: "PAY_SUCCESS",
+      providerMessage: "Mock payout (KPAY_BUSINESS_PAY_MOCK=1)",
+    };
+  }
+
+  const cfg = kpayConfig();
+  if (!cfg.appId || !cfg.merchCode || !cfg.signKey) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      providerMessage: "KBZPay credentials are not configured (KPAY_APPID / KPAY_MERCH_CODE / KPAY_SIGN_KEY).",
+    };
+  }
+
+  if (shouldUseVpsBusinessPayProxy()) {
+    return businessPayViaVpsProxy(params);
+  }
+
+  const endpoints = resolveBusinessPayEndpoints(cfg.baseUrl);
+  if (endpoints.length === 0) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      providerMessage:
+        "Vendor payout proxy is not configured. Set KPAY_BUSINESS_PAY_URL (or KBZ_VPS_BUSINESS_PAY_URL / KPAY_PROXY_BASE_URL + /api/businesspay.php) on the CloudBase function. Direct KBZ API requires mTLS and cannot be called from CloudBase.",
+    };
+  }
+
+  const amount = normalizeAmountMMK(params.amountMmk);
+  const pair = businessPayPayloadPair({
+    appId: cfg.appId,
+    merchCode: cfg.merchCode,
+    merchantOrderId: params.merchantOrderId,
+    amount,
+    currency: "MMK",
+    title: params.title || "Vendor commission payout",
+    note: params.note || `Payout ${params.merchantOrderId}`,
+    payeePhone: params.payeePhone,
+    payeeName: params.payeeName,
+  });
+
+  const headers = buildProviderHeaders(cfg);
+  const timeoutMs = Math.min(cfg.timeoutMs, 6000);
+  let lastNetworkError = "";
+  let lastBody: AnyRecord = {};
+  let lastEndpoint = "";
+
+  for (const endpoint of endpoints) {
+    lastEndpoint = endpoint;
+    const provider = await signedProviderRequest(
+      endpoint,
+      pair,
+      cfg.signKey,
+      timeoutMs,
+      cfg.wrapRequest,
+      headers,
+    );
+    lastBody = provider.body;
+    if (provider.networkError) {
+      lastNetworkError = provider.networkError;
+      continue;
+    }
+    const nested = providerData(provider.body);
+    const wrapped = asRecord(provider.body.Response);
+    const paymentOrderId = text(
+      nested.payment_order_id ||
+        nested.paymentOrderId ||
+        wrapped.payment_order_id ||
+        wrapped.paymentOrderId,
+    );
+    const mmOrderId = text(nested.mm_order_id || nested.mmOrderId || wrapped.mm_order_id || wrapped.mmOrderId);
+    const tradeStatus = text(nested.trade_status || nested.tradeStatus || wrapped.trade_status || wrapped.tradeStatus);
+    const biz = kbzBizErrorFromBody(provider.body);
+
+    if (businessPayIndicatesSuccess(provider.body)) {
+      return {
+        ok: true,
+        success: true,
+        pending: false,
+        merchantOrderId: params.merchantOrderId,
+        endpointUsed: endpoint,
+        paymentOrderId,
+        mmOrderId,
+        tradeStatus,
+        providerCode: biz.code,
+        providerMessage: biz.msg,
+        rawResponse: provider.body,
+      };
+    }
+
+    if (businessPayIsPending(provider.body)) {
+      return {
+        ok: true,
+        success: false,
+        pending: true,
+        merchantOrderId: params.merchantOrderId,
+        endpointUsed: endpoint,
+        paymentOrderId,
+        mmOrderId,
+        tradeStatus,
+        providerCode: biz.code,
+        providerMessage: biz.msg,
+        rawResponse: provider.body,
+      };
+    }
+
+    if (provider.ok) {
+      return {
+        ok: false,
+        success: false,
+        pending: false,
+        merchantOrderId: params.merchantOrderId,
+        endpointUsed: endpoint,
+        paymentOrderId,
+        mmOrderId,
+        tradeStatus,
+        providerCode: biz.code,
+        providerMessage: biz.msg || providerErrorMessage(provider.body, "KBZPay business pay was rejected"),
+        rawResponse: provider.body,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    success: false,
+    pending: false,
+    merchantOrderId: params.merchantOrderId,
+    endpointUsed: lastEndpoint,
+    providerMessage: providerErrorMessage(lastBody, lastNetworkError || "KBZPay business pay request failed"),
+    networkError: lastNetworkError || undefined,
+    rawResponse: lastBody,
+  };
 }
 
 export async function handleKPayWebhook(c: Context) {

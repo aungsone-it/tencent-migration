@@ -199,6 +199,8 @@ import {
   VENDOR_STORE_UNCATEGORIZED_SLUG,
   isVendorUncategorizedSlug,
   isVendorUncategorizedFilter,
+  isVendorCategoryTabActive,
+  normalizeCategoryRouteSlug,
   vendorCatalogFilterFromRouteSlug,
   vendorCategoryPathSegment,
 } from "../utils/vendorStoreCategory";
@@ -488,26 +490,6 @@ function safeDecodePathSegment(slug: string): string {
   } catch {
     return slug;
   }
-}
-
-function slugifyCategoryName(name: string): string {
-  return String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function isVendorCategoryTabActive(
-  tab: "all" | "uncategorized" | { name: string },
-  routeSlug: string
-): boolean {
-  const norm = routeSlug.trim().toLowerCase();
-  if (tab === "all") return !norm;
-  if (tab === "uncategorized") return isVendorUncategorizedSlug(norm);
-  return slugifyCategoryName(tab.name) === norm;
 }
 
 const VENDOR_DEFAULT_STORE_PHONE = "+95 9 XXX XXX XXX";
@@ -1151,9 +1133,9 @@ export function VendorStoreView({
   ]);
 
   const categoryPathForName = useCallback(
-    (categoryName: string) => {
+    (categoryName: string, categoryId?: string) => {
       const base = storeBase || "";
-      const seg = vendorCategoryPathSegment(categoryName);
+      const seg = vendorCategoryPathSegment(categoryName, categoryId);
       if (!seg) return base || "/";
       return `${base}/${encodeURIComponent(seg)}`;
     },
@@ -1164,7 +1146,7 @@ export function VendorStoreView({
   const normalizedCategorySlugFromRoute = useMemo(() => {
     const raw = String(categorySlug || "").trim();
     if (!raw) return "";
-    return slugifyCategoryName(safeDecodePathSegment(raw));
+    return normalizeCategoryRouteSlug(raw);
   }, [categorySlug]);
 
   const initialCatalogCategoryFromRoute = useMemo(() => {
@@ -1940,7 +1922,7 @@ export function VendorStoreView({
         return;
       }
       setSelectedCategory(tab.name);
-      navigate(categoryPathForName(tab.name), { replace: true });
+      navigate(categoryPathForName(tab.name, tab.categoryId), { replace: true });
     },
     [navigate, categoryPathForName, uncategorizedTabPath]
   );
@@ -2814,10 +2796,10 @@ export function VendorStoreView({
   }, [navigate, categoryPathForName, closeVendorMobileNav]);
 
   const selectVendorCategoryNav = useCallback(
-    (categoryName: string) => {
+    (categoryName: string, categoryId?: string) => {
       setSelectedProduct(null);
       setSelectedCategory(categoryName);
-      navigate(categoryPathForName(categoryName));
+      navigate(categoryPathForName(categoryName, categoryId));
       closeVendorMobileNav();
     },
     [navigate, categoryPathForName, closeVendorMobileNav]
@@ -2991,7 +2973,7 @@ export function VendorStoreView({
                         ? "bg-slate-100 font-semibold text-slate-900"
                         : ""
                     }`}
-                    onClick={() => selectVendorCategoryNav(category.name)}
+                    onClick={() => selectVendorCategoryNav(category.name, category.id)}
                   >
                     {localizedCategoryName(category, language)}
                   </Button>

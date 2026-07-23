@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { isVendorUncategorizedSlug } from "../utils/vendorStoreCategory";
+import { isVendorCategoryTabActive } from "../utils/vendorStoreCategory";
 import { useLanguage } from "../contexts/LanguageContext";
 import { localizedCategoryName, type CategoryLocaleNames } from "../utils/localizedCategoryName";
 
@@ -24,26 +24,6 @@ function vendorSubnavTabClass(active: boolean): string {
       ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/90"
       : "text-slate-600 hover:bg-white/80 hover:text-slate-900"
   }`;
-}
-
-function slugifyCategoryName(name: string): string {
-  return String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function isVendorCategoryTabActive(
-  tab: "all" | "uncategorized" | { name: string },
-  routeSlug: string
-): boolean {
-  const norm = routeSlug.trim().toLowerCase();
-  if (tab === "all") return !norm;
-  if (tab === "uncategorized") return isVendorUncategorizedSlug(norm);
-  return slugifyCategoryName(tab.name) === norm;
 }
 
 export function vendorSubnavTabKey(tab: VendorSubnavTab): string {
@@ -64,7 +44,7 @@ function vendorSubnavTabLabel(
 function isVendorSubnavTabActive(tab: VendorSubnavTab, routeSlug: string): boolean {
   if (tab.id === "all") return isVendorCategoryTabActive("all", routeSlug);
   if (tab.id === "uncategorized") return isVendorCategoryTabActive("uncategorized", routeSlug);
-  return isVendorCategoryTabActive({ name: tab.name }, routeSlug);
+  return isVendorCategoryTabActive({ id: tab.categoryId, name: tab.name }, routeSlug);
 }
 
 function widthForTabCount(tabWidths: number[], count: number, gap: number, moreWidth: number, withMore: boolean): number {

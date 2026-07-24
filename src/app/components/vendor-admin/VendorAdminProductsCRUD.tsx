@@ -8,10 +8,7 @@ import {
 } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { pathnameUnderAdmin } from "../../utils/vendorSubdomainHooks";
-import {
-  useVendorAdminRouteParams,
-  useVendorHostCleanAdmin,
-} from "../../utils/vendorAdminRouteParams";
+import { useVendorAdminRouteParams, useVendorHostCleanAdmin } from "../../utils/vendorAdminRouteParams";
 import { 
   Plus, 
   Search, 
@@ -40,6 +37,8 @@ import {
   ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
   invalidateAdminAllProductsCache,
   ADMIN_PRODUCTS_LIST_CHANGED_EVENT,
+  fetchVendorCategories,
+  getCachedAdminAllProducts,
 } from "../../utils/module-cache";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import {
@@ -66,6 +65,10 @@ import {
 } from "../../utils/vendorAssignPickerSession";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
 import { useLanguage } from "../../contexts/LanguageContext";
+import {
+  buildVendorProductCategoryLabels,
+  resolveVendorProductCategoryLabel,
+} from "../../utils/vendorProductCategoryLabels";
 
 /**
  * True when the in-memory assignable list can render this page/window without hitting the API.
@@ -114,6 +117,19 @@ interface Product {
   continueSellingOutOfStock?: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/** Platform catalog rows often carry `category` (Watch, Home, …) before vendor API merges it. */
+function enrichVendorProductsWithPlatformCategories(products: Product[]): Product[] {
+  const catalog = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+  if (!catalog?.length) return products;
+  const byId = new Map(catalog.map((row) => [String(row?.id || "").trim(), row]));
+  return products.map((product) => {
+    if (String(product.category || "").trim()) return product;
+    const hit = byId.get(product.id);
+    const platformCategory = String(hit?.category || "").trim();
+    return platformCategory ? { ...product, category: platformCategory } : product;
+  });
 }
 
 interface VendorAdminProductsCRUDProps {
@@ -169,6 +185,9 @@ export function VendorAdminProductsCRUD({
   const [assignPickerPageSize, setAssignPickerPageSize] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
   const [vendorListPage, setVendorListPage] = useState(1);
   const [vendorListPageSize, setVendorListPageSize] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
+  const [vendorCategoryByProductId, setVendorCategoryByProductId] = useState<Map<string, string>>(
+    () => new Map(),
+  );
   const [assignPickerUseFullCache, setAssignPickerUseFullCache] = useState(false);
   const [assignPickerServerTotal, setAssignPickerServerTotal] = useState(0);
   const [assignPickerServerHasMore, setAssignPickerServerHasMore] = useState(false);
@@ -180,6 +199,19 @@ export function VendorAdminProductsCRUD({
 
   useEffect(() => {
     loadProducts(false);
+  }, [vendorId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getCachedAdminAllProducts(false)
+      .then(() => {
+        if (cancelled) return;
+        setProducts((prev) => enrichVendorProductsWithPlatformCategories(prev));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [vendorId]);
 
   // Realtime bridge: central product pulse invalidates vendor product pools without a broad KV subscription here.
@@ -212,13 +244,43 @@ export function VendorAdminProductsCRUD({
     [onHeaderSearchQueryChange]
   );
 
+  const loadVendorCategoryLabels = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        const categories = await moduleCache.get(
+          CACHE_KEYS.vendorCategories(vendorId),
+          () => fetchVendorCategories(vendorId),
+          forceRefresh,
+        );
+        setVendorCategoryByProductId(buildVendorProductCategoryLabels(categories));
+      } catch (error) {
+        console.warn("Failed to load vendor category labels:", error);
+        setVendorCategoryByProductId(new Map());
+      }
+    },
+    [vendorId],
+  );
+
+  const resolveProductCategoryLabel = useCallback(
+    (product: Product) =>
+      resolveVendorProductCategoryLabel(
+        product.id,
+        product.category,
+        vendorCategoryByProductId,
+        t("products.uncategorized"),
+      ),
+    [vendorCategoryByProductId, t],
+  );
+
   const loadProducts = async (forceRefresh = false) => {
+    void loadVendorCategoryLabels(forceRefresh);
+
     if (!forceRefresh) {
       const cached = moduleCache.peek<{ products?: Product[] }>(
         CACHE_KEYS.vendorProductsAdmin(vendorId)
       );
       if (cached != null && Array.isArray(cached.products)) {
-        setProducts(cached.products);
+        setProducts(enrichVendorProductsWithPlatformCategories(cached.products));
         setLoading(false);
         return;
       }
@@ -230,7 +292,7 @@ export function VendorAdminProductsCRUD({
     }
     try {
       const data = await getCachedVendorProductsAdmin(vendorId, forceRefresh);
-      setProducts(data.products || []);
+      setProducts(enrichVendorProductsWithPlatformCategories(data.products || []));
     } catch (error) {
       console.error("Error loading products:", error);
       toast.error("Failed to load products");
@@ -1000,23 +1062,23 @@ export function VendorAdminProductsCRUD({
                     <td className="py-3 px-4">
                       <span className="text-sm text-slate-700">{product.inventory}</span>
                     </td>
-                    <td className="py-3 px-4 text-sm text-slate-700">{product.category || t("products.uncategorized")}</td>
+                    <td className="py-3 px-4 text-sm text-slate-700">{resolveProductCategoryLabel(product)}</td>
                     <td className="py-3 px-4 text-sm font-semibold text-slate-900">
                       {Math.round(product.price).toLocaleString()} MMK
                     </td>
                     <td className="py-3 px-4">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className="h-8 w-8 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                         onClick={() => {
                           if (onVendorHostCleanAdmin) {
                             navigate(`/admin/products/${product.id}/view`);
                           } else if (adminPrefix && routeStoreName) {
-                          navigate(
-                              `/${adminPrefix}/${routeStoreName}/admin/products/${product.id}/view`
+                            navigate(
+                              `/${adminPrefix}/${routeStoreName}/admin/products/${product.id}/view`,
                             );
-                        }
+                          }
                         }}
                         title={t("products.viewDetails")}
                       >

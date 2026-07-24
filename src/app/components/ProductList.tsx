@@ -5,7 +5,6 @@ import {
   Trash2,
   CalendarDays,
   MoreVertical,
-  Eye,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -1013,25 +1012,6 @@ export function ProductList({
     }
   };
 
-  // Load full product details when viewing (GET /products/:id — same source as storefront cache)
-  const handleViewProduct = async (productId: string) => {
-    try {
-      const response = await getCachedProductById(productId);
-      const raw = (response as { product?: Record<string, unknown> })?.product ?? (response as Record<string, unknown>);
-      if (raw && typeof raw === "object" && raw.id) {
-        setSelectedProduct(
-          normalizeProductForAdminDetailView(raw as Record<string, unknown>, vendorsMap) as Product
-        );
-        setCurrentView("storefront");
-      } else {
-        toast.error("Failed to load product details");
-      }
-    } catch (error) {
-      console.error("Failed to load product details:", error);
-      toast.error("Failed to load product details");
-    }
-  };
-
   /** Search narrows the loaded page; status tabs filter client-side only (no refetch). */
   const productsMatchingSearch = useMemo(
     () => products.filter((product) => productMatchesAdminLiveSearch(product, searchQuery)),
@@ -1465,10 +1445,6 @@ export function ProductList({
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleViewProduct(product.id)}>
-                                  <Eye className="w-4 h-4 mr-2" />
-                                  View Details
-                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => { 
                                   handleEditProduct(product.id); 
                                 }}>

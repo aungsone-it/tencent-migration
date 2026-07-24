@@ -12896,6 +12896,28 @@ app.get("/make-server-16010b6f/vendor/products/:vendorId", async (c) => {
 });
 
 // Get ALL vendor products (for admin panel - includes all statuses)
+async function buildVendorProductCategoryNameMap(vendorId: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const rows = await withTimeout(kv.getByPrefix(`category:${vendorId}:`), 15000);
+    const categories = Array.isArray(rows) ? rows : [];
+    for (const cat of categories) {
+      const name = String(cat?.name || "").trim();
+      if (!name) continue;
+      const productIds = Array.isArray(cat?.productIds) ? cat.productIds : [];
+      for (const rawId of productIds) {
+        const productId = String(rawId || "").trim();
+        if (!productId) continue;
+        const existing = map.get(productId);
+        map.set(productId, existing ? `${existing}, ${name}` : name);
+      }
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to load vendor category map for ${vendorId}:`, error);
+  }
+  return map;
+}
+
 app.get("/make-server-16010b6f/vendor/products-admin/:vendorId", async (c) => {
   try {
     const vendorId = c.req.param("vendorId");
@@ -12908,11 +12930,14 @@ app.get("/make-server-16010b6f/vendor/products-admin/:vendorId", async (c) => {
     console.log(`🏢 Vendor current name: "${vendorBusinessName}"`);
     
     // Get all products from KV store with correct prefix and retry logic
-    const allProducts = await withRetry(
-      () => withTimeout(kv.getByPrefix("product:"), 30000),
-      5,
-      1500
-    );
+    const [allProducts, categoryByProductId] = await Promise.all([
+      withRetry(
+        () => withTimeout(kv.getByPrefix("product:"), 30000),
+        5,
+        1500
+      ),
+      buildVendorProductCategoryNameMap(vendorId),
+    ]);
     
     console.log(`📦 Total products in database: ${allProducts.length}`);
     console.log(`📋 All products vendor fields:`, allProducts.map((p: any) => ({ 
@@ -12957,8 +12982,10 @@ app.get("/make-server-16010b6f/vendor/products-admin/:vendorId", async (c) => {
         costPerItem: p.costPerItem ? parseFloat(String(p.costPerItem).replace(/[$,]/g, '')) : undefined,
         description: p.description || "",
         images: p.images || [],
-        // Vendor admin categorization is managed by vendor-owned categories, not product.category.
-        category: "",
+        category:
+          categoryByProductId.get(String(p.id || "").trim()) ||
+          String(p.category || "").trim() ||
+          "",
         inventory: p.inventory || 0,
         status: p.status || "Active",
         hasVariants: p.hasVariants || false,

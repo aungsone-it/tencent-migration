@@ -20,6 +20,7 @@ type FbqFn = {
   queue?: unknown[];
   loaded?: boolean;
   version?: string;
+  __migooBlocksPageView?: boolean;
 };
 
 type MetaPixelRuntimeState = {
@@ -93,12 +94,35 @@ function claimPersistentMetaEvent(key: string): boolean | null {
   }
 }
 
+function blockMetaPageViewCalls(): void {
+  if (typeof window === "undefined") return;
+  const current = window.fbq;
+  if (!current || current.__migooBlocksPageView) return;
+
+  const guarded = function (...args: unknown[]) {
+    if (args[0] === "track" && args[1] === "PageView") return;
+    if (guarded.callMethod) {
+      guarded.callMethod(...args);
+      return;
+    }
+    current(...args);
+  } as FbqFn;
+  guarded.callMethod = current.callMethod;
+  guarded.queue = current.queue;
+  guarded.loaded = current.loaded;
+  guarded.version = current.version;
+  guarded.__migooBlocksPageView = true;
+  window.fbq = guarded;
+  window._fbq = guarded;
+}
+
 function loadFbeventsScript(): void {
   if (typeof window === "undefined" || scriptRequested) return;
   scriptRequested = true;
 
   if (!window.fbq) {
     const n = function (this: FbqFn, ...args: unknown[]) {
+      if (args[0] === "track" && args[1] === "PageView") return;
       if (n.callMethod) {
         n.callMethod(...args);
       } else {
@@ -108,6 +132,7 @@ function loadFbeventsScript(): void {
     n.queue = [];
     n.loaded = true;
     n.version = "2.0";
+    n.__migooBlocksPageView = true;
     window.fbq = n;
     window._fbq = n;
     const script = document.createElement("script");
@@ -115,6 +140,7 @@ function loadFbeventsScript(): void {
     script.src = "https://connect.facebook.net/en_US/fbevents.js";
     document.head.appendChild(script);
   }
+  blockMetaPageViewCalls();
 }
 
 /** Load pixel script and call `fbq('init', id)`. Returns false when id is invalid. */

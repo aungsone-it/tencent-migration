@@ -45,6 +45,21 @@ describe("metaPixel", () => {
     ]);
   });
 
+  it("blocks PageView at the global fbq boundary", async () => {
+    const fbq = vi.fn();
+    vi.stubGlobal("window", { fbq });
+    const { initMetaPixel } = await import("./metaPixel");
+
+    initMetaPixel("123456789");
+    fbq.mockClear();
+    window.fbq?.("track", "PageView");
+    window.fbq?.("trackCustom", "AllowedEvent");
+
+    expect(fbq.mock.calls).toEqual([
+      ["trackCustom", "AllowedEvent"],
+    ]);
+  });
+
   it("fires ViewContent once per product for the same browser visitor", async () => {
     const fbq = vi.fn();
     const localValues = new Map<string, string>();

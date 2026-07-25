@@ -78,7 +78,10 @@ import {
   applyMetaPixelIdFromPayload,
   initMetaPixel,
   trackMetaAddToCart,
+  trackMetaBuyNow,
+  trackMetaCategoryFilter,
   trackMetaPageView,
+  trackMetaSearch,
   trackMetaViewContent,
 } from "../utils/metaPixel";
 import { ProductCard, type ProductCardProduct } from "./ProductCard";
@@ -1708,6 +1711,35 @@ export function VendorStoreView({
     initMetaPixel(metaPixelId);
     trackMetaPageView(location.pathname);
   }, [metaPixelId, location.pathname]);
+
+  useEffect(() => {
+    if (!metaPixelId || isVendorProductDetailPath || savedPage) return;
+    trackMetaSearch(debouncedVendorServerQ);
+  }, [metaPixelId, debouncedVendorServerQ, isVendorProductDetailPath, savedPage]);
+
+  useEffect(() => {
+    if (
+      !metaPixelId ||
+      isVendorProductDetailPath ||
+      savedPage ||
+      isVendorCheckoutOrSummaryPath(location.pathname, storeBase) ||
+      catalogCategoryForFetch === "all"
+    ) {
+      return;
+    }
+    trackMetaCategoryFilter(
+      isVendorUncategorizedFilter(catalogCategoryForFetch)
+        ? "Uncategorized"
+        : catalogCategoryForFetch
+    );
+  }, [
+    metaPixelId,
+    catalogCategoryForFetch,
+    isVendorProductDetailPath,
+    location.pathname,
+    savedPage,
+    storeBase,
+  ]);
 
   useEffect(() => {
     if (!metaPixelId || !selectedProduct) return;
@@ -5024,6 +5056,15 @@ export function VendorStoreView({
         }
         setQuantity(1);
         setCartOpen(false);
+        if (metaPixelId) {
+          trackMetaBuyNow({
+            id: String(product.id),
+            sku,
+            name: String(product.name || sku),
+            price: Number(price) || 0,
+            quantity: qty,
+          });
+        }
         navigate(checkoutPath);
         return true;
       }

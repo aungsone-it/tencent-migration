@@ -190,7 +190,7 @@ export function ProductVariantQuickAddModal({
               disabled={!resolved || outOfStock || !canBuy}
               onClick={() => handleAdd(false)}
             >
-              {outOfStock ? "Out of stock" : "Add to cart"}
+              {outOfStock ? "လက်ကျန်မရှိပါ" : "လှည်းထဲထည့်ရန်"}
             </Button>
             <Button
               type="button"
@@ -198,7 +198,7 @@ export function ProductVariantQuickAddModal({
               disabled={!resolved || outOfStock || !canBuy}
               onClick={() => handleAdd(true)}
             >
-              {outOfStock ? "Out of stock" : "Buy it now"}
+              {outOfStock ? "လက်ကျန်မရှိပါ" : "ယခုပဲဝယ်ရန်"}
             </Button>
           </div>
         </div>

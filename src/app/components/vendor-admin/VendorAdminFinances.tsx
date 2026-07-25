@@ -451,9 +451,12 @@ export function VendorAdminFinances({
       setWithdrawOpen(false);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Withdrawal failed";
-      if (/failed to fetch|fetch failed|networkerror|load failed/i.test(msg)) {
+      const isBrowserNetworkFailure =
+        error instanceof TypeError &&
+        /failed to fetch|networkerror|load failed/i.test(msg);
+      if (isBrowserNetworkFailure) {
         toast.error(
-          "Could not reach the payout server. Redeploy make-server-16010b6f with the latest code, then try again.",
+          "Could not reach the payout server. Check your connection, then try again.",
         );
       } else {
         toast.error(msg);

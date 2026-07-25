@@ -160,8 +160,29 @@ function kbzBizErrorFromBody(body: AnyRecord): { code?: string; msg?: string; re
   return out;
 }
 
-function providerErrorMessage(body: AnyRecord, fallback: string): string {
+function providerErrorMessage(body: AnyRecord, fallback: string, endpointUsed?: string): string {
   const biz = kbzBizErrorFromBody(body);
+  const raw = text(body._raw);
+  if (raw && /<title>404 Not Found/i.test(raw)) {
+    const relay = resolveVpsBusinessPayRelayUrl(kpayConfig().baseUrl);
+    return relay
+      ? `KBZPay business pay relay returned 404 — deploy businesspay.php on the VPS at ${relay} (copy the refund.php pattern).`
+      : "KBZPay business pay endpoint returned 404 — confirm KPAY_BUSINESS_PAY_URL on CloudBase matches the VPS route.";
+  }
+  if (raw && /No required SSL certificate was sent/i.test(raw)) {
+    const via = endpointUsed ? ` (${endpointUsed})` : "";
+    const relay = resolveVpsBusinessPayRelayUrl(kpayConfig().baseUrl);
+    if (isWalwalBusinessPayGateway(endpointUsed || "")) {
+      return `walwal /payment/gateway/businesspay requires a client certificate — CloudBase cannot call it. Use the PHP relay instead: ${relay || "https://kbz-api.walwal.shop/.../api/businesspay.php (ask VPS admin to deploy it next to refund.php)"}.`;
+    }
+    return `KBZPay business pay requires mTLS${via}. Use the VPS PHP relay (businesspay.php + KBZ_VPS_API_SECRET), not the signed gateway path.`;
+  }
+  if (
+    text(body.error).toLowerCase().includes("merchantorderid missing") ||
+    text(biz.msg).toLowerCase().includes("merchantorderid missing")
+  ) {
+    return "KBZPay business pay gateway expects simple JSON (merchantOrderId + Bearer secret), not signed gateway format. Ensure KBZ_VPS_API_SECRET is set — the server will auto-use VPS JSON transport on walwal.shop.";
+  }
   return text(biz.msg) || text(body.error) || text(body.message) || fallback;
 }
 
@@ -260,13 +281,13 @@ async function postJson(
   payload: AnyRecord,
   timeoutMs: number,
   extraHeaders: Record<string, string> = {},
+  allowRedirectRetry = true,
 ): Promise<{ ok: boolean; status: number; body: AnyRecord; networkError?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("kpay-timeout"), timeoutMs);
   try {
-    // `redirect: "manual"` so an HTTP→HTTPS 301 (or any other 30x) doesn't silently
-    // strip our POST body. KBZ's relay used to do this and we'd see misleading
-    // "internal system error!" responses. Surface it as an explicit error instead.
+    // `redirect: "manual"` so fetch doesn't follow 30x with GET and drop the POST body.
+    // We retry once to the Location header ourselves when nginx adds a trailing slash.
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -279,6 +300,20 @@ async function postJson(
     });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location") || "";
+      if (
+        allowRedirectRetry &&
+        location &&
+        [301, 302, 307, 308].includes(response.status)
+      ) {
+        try {
+          const retryUrl = new URL(location, url).toString();
+          if (retryUrl !== url) {
+            return postJson(retryUrl, payload, timeoutMs, extraHeaders, false);
+          }
+        } catch {
+          // fall through to explicit redirect error
+        }
+      }
       return {
         ok: false,
         status: response.status,
@@ -1040,13 +1075,90 @@ function resolveVpsRefundUrl(baseUrl: string): string {
   return candidates.find((u) => u.includes("refund.php")) || candidates[0] || "";
 }
 
-/** VPS PHP relay for kbz.payment.businesspay — same pattern as refund.php (simple JSON + Bearer secret). */
-function resolveVpsBusinessPayUrl(baseUrl: string): string {
-  const explicit =
+/** Raw env value for kbz.payment.businesspay (may be absolute URL or path-only). */
+function resolveExplicitBusinessPayUrl(): string {
+  return (
+    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL")) ||
+    text(resolveEnv("KPAY_BUSINESS_PAY_URL"))
+  );
+}
+
+function joinUrlWithBase(baseUrl: string, pathOrUrl: string): string {
+  const raw = text(pathOrUrl);
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const base = text(baseUrl);
+  if (!base) return "";
+  try {
+    const normalizedPath = raw.startsWith("/") ? raw.slice(1) : raw;
+    return new URL(normalizedPath, base.endsWith("/") ? base : `${base}/`).toString();
+  } catch {
+    return "";
+  }
+}
+
+/** walwal nginx 301s `/businesspay` → `/businesspay/` — normalize up front. */
+function normalizeBusinessPayGatewayUrl(url: string): string {
+  const u = text(url);
+  if (!u) return "";
+  if (/\/payment\/gateway\/businesspay$/i.test(u)) {
+    return `${u}/`;
+  }
+  return u;
+}
+
+/** Fully resolved business pay endpoint (joins path-only values with KPAY_PROXY_BASE_URL). */
+function resolveBusinessPayEndpointUrl(baseUrl: string): string {
+  const raw = resolveExplicitBusinessPayUrl();
+  if (!raw) return "";
+  const resolved = /^https?:\/\//i.test(raw) ? raw : joinUrlWithBase(baseUrl, raw);
+  return normalizeBusinessPayGatewayUrl(resolved);
+}
+
+function businessPayUsesVpsSimpleJson(url: string): boolean {
+  if (!text(url)) return false;
+  if (url.includes(".php")) return true;
+  return resolveEnv("KPAY_USE_VPS_BUSINESS_PAY") === "1";
+}
+
+/** walwal businesspay gateway validates simple JSON (merchantOrderId) then relays with mTLS — not signed PGW wire format. */
+function isWalwalBusinessPayGateway(url: string): boolean {
+  const u = text(url);
+  return /walwal\.shop/i.test(u) && /\/payment\/gateway\/businesspay/i.test(u);
+}
+
+function businessPayPrefersVpsSimpleJson(url: string): boolean {
+  if (!text(url)) return false;
+  if (businessPayUsesVpsSimpleJson(url)) return true;
+  return isWalwalBusinessPayGateway(url) && Boolean(text(resolveEnv("KBZ_VPS_API_SECRET")));
+}
+
+function businessPayNeedsVpsJsonRetry(body: AnyRecord, message: string): boolean {
+  const haystack = [
+    text(body.error),
+    text(body.message),
+    text(body.msg),
+    text(body._raw),
+    message,
+  ]
+    .join(" ")
+    .toLowerCase();
+  return (
+    haystack.includes("merchantorderid missing") ||
+    haystack.includes("merch_order_id") ||
+    haystack.includes("no required ssl certificate")
+  );
+}
+
+/** PHP relay (Bearer + simple JSON) — same pattern as refund.php. Never the /payment/gateway/businesspay nginx mTLS path. */
+function resolveVpsBusinessPayRelayUrl(baseUrl: string): string {
+  const explicitPhp =
     text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL")) ||
     text(resolveEnv("KPAY_BUSINESS_PAY_URL"));
-  if (explicit && (explicit.includes(".php") || resolveEnv("KPAY_USE_VPS_BUSINESS_PAY") === "1")) {
-    return explicit;
+  if (explicitPhp && explicitPhp.includes(".php")) {
+    return /^https?:\/\//i.test(explicitPhp)
+      ? explicitPhp
+      : joinUrlWithBase(baseUrl, explicitPhp);
   }
 
   const refundUrl = resolveVpsRefundUrl(baseUrl);
@@ -1055,7 +1167,7 @@ function resolveVpsBusinessPayUrl(baseUrl: string): string {
   }
 
   if (text(baseUrl)) {
-    for (const path of ["/api/businesspay.php", "/payment/gateway/businesspay.php"]) {
+    for (const path of ["/kpay_refund_147258369/api/businesspay.php", "/api/businesspay.php"]) {
       try {
         return new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
       } catch {
@@ -1064,17 +1176,28 @@ function resolveVpsBusinessPayUrl(baseUrl: string): string {
     }
   }
 
+  return "";
+}
+
+function resolveVpsBusinessPayUrl(baseUrl: string): string {
+  const relay = resolveVpsBusinessPayRelayUrl(baseUrl);
+  if (relay) return relay;
+
+  const explicit = resolveBusinessPayEndpointUrl(baseUrl);
+  if (explicit && businessPayUsesVpsSimpleJson(explicit) && explicit.includes(".php")) {
+    return explicit;
+  }
+
   return explicit || "";
 }
 
 function shouldUseVpsBusinessPayProxy(): boolean {
   if (!text(resolveEnv("KBZ_VPS_API_SECRET"))) return false;
-  if (text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"))) return true;
+  const explicit = resolveBusinessPayEndpointUrl(kpayConfig().baseUrl);
+  if (explicit && businessPayPrefersVpsSimpleJson(explicit)) return true;
   if (resolveEnv("KPAY_USE_VPS_BUSINESS_PAY") === "1") return true;
-  const configured = text(resolveEnv("KPAY_BUSINESS_PAY_URL"));
-  if (configured.includes("businesspay.php")) return true;
-  // Refunds already use the VPS relay on this host — business pay should too.
-  return shouldUseVpsRefundProxy();
+  const refundUrl = resolveVpsRefundUrl(kpayConfig().baseUrl);
+  return refundUrl.includes("refund.php");
 }
 
 /** What the edge function will call right now (no secret values). */
@@ -1093,17 +1216,33 @@ export function getKPayResolvedEndpointUrls() {
   const refundDirect =
     text(resolveEnv("KBZ_VPS_REFUND_URL")) || text(resolveEnv("KPAY_REFUND_URL"));
   const refundPath = text(resolveEnv("KPAY_PATH_REFUND", "KPAY_REFUND_PATH"));
-  const businessPayDirect =
-    text(resolveEnv("KPAY_BUSINESS_PAY_URL")) ||
-    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"));
+  const businessPayDirect = resolveBusinessPayEndpointUrl(base);
+  const businessPayRaw = resolveExplicitBusinessPayUrl();
   const businessPayFromBase = resolveBusinessPayEndpoints(base)[0] || "";
-  const vpsBusinessPay = resolveVpsBusinessPayUrl(base);
+  const businessPayGateway = businessPayDirect || undefined;
+  const businessPayRelay = resolveVpsBusinessPayRelayUrl(base);
+  const useVpsJson =
+    Boolean(businessPayRelay && text(resolveEnv("KBZ_VPS_API_SECRET"))) ||
+    businessPayPrefersVpsSimpleJson(businessPayDirect);
+  const businessPayResolved = useVpsJson
+    ? businessPayRelay || resolveVpsBusinessPayUrl(base) || businessPayFromBase
+    : businessPayDirect || businessPayFromBase;
   return {
     proxyBase: base,
     qrCreate: join(cfg.createPath),
     orderQuery: join(cfg.queryPath),
-    businessPay: vpsBusinessPay || businessPayDirect || businessPayFromBase,
+    businessPay: businessPayResolved,
+    businessPayGateway,
+    businessPayRelay: businessPayRelay || undefined,
+    businessPayRaw: businessPayRaw || undefined,
+    businessPayConfigError:
+      businessPayRaw && !businessPayDirect
+        ? "KPAY_BUSINESS_PAY_URL is relative but KPAY_PROXY_BASE_URL is missing — use a full walwal.shop URL."
+        : useVpsJson && !businessPayRelay
+          ? "Set KBZ_VPS_REFUND_URL (refund.php) so businesspay.php can be derived, or set KPAY_BUSINESS_PAY_URL to the .php relay path."
+          : undefined,
     businessPayMock: resolveEnv("KPAY_BUSINESS_PAY_MOCK") === "1",
+    businessPayTransport: useVpsJson ? "vps-json" : "signed-gateway",
     vpsBusinessPayEnabled: shouldUseVpsBusinessPayProxy(),
     refund: resolveVpsRefundUrl(base),
     refundConfiguredVia: refundDirect
@@ -2639,9 +2778,7 @@ function businessPayEndpointCandidates(baseUrl: string): string[] {
     out.push(u);
   };
 
-  const direct =
-    text(resolveEnv("KPAY_BUSINESS_PAY_URL")) ||
-    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"));
+  const direct = resolveBusinessPayEndpointUrl(baseUrl);
   if (direct) add(direct);
 
   const configuredPath = text(resolveEnv("KPAY_PATH_BUSINESS_PAY", "KPAY_BUSINESS_PAY_PATH"));
@@ -2657,16 +2794,14 @@ function businessPayEndpointCandidates(baseUrl: string): string[] {
   }
 
   const isProd = text(resolveEnv("KPAY_ENV")).toLowerCase() === "prod";
-  add(
-    isProd
-      ? "https://api.kbzpay.com:8008/payment/gateway/businesspay"
-      : "https://api-uat.kbzpay.com:18008/payment/gateway/uat/businesspay",
-  );
-
+  // CloudBase cannot call KBZ direct (mTLS). Only list VPS/proxy URLs here.
   if (text(baseUrl)) {
-    for (const p of ["/payment/gateway/uat/businesspay", "/api/businesspay.php"]) {
+    const proxyPaths = isProd
+      ? ["/payment/gateway/businesspay", "/api/businesspay.php"]
+      : ["/payment/gateway/uat/businesspay", "/api/businesspay.php"];
+    for (const p of proxyPaths) {
       try {
-        add(new URL(p, baseUrl).toString());
+        add(normalizeBusinessPayGatewayUrl(new URL(p, baseUrl).toString()));
       } catch {
         // ignore
       }
@@ -2790,14 +2925,19 @@ function businessPayUsesDirectKbzHost(url: string): boolean {
 }
 
 function resolveBusinessPayEndpoints(baseUrl: string): string[] {
-  const directConfigured =
-    text(resolveEnv("KPAY_BUSINESS_PAY_URL")) ||
-    text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL"));
-  const all = businessPayEndpointCandidates(baseUrl);
-  if (directConfigured) {
-    return all.slice(0, 2);
+  const rawExplicit = resolveExplicitBusinessPayUrl();
+  const explicit = resolveBusinessPayEndpointUrl(baseUrl);
+  if (explicit) {
+    // Honor KPAY_BUSINESS_PAY_URL exactly — never fall back to direct api.kbzpay.com (needs mTLS).
+    return [explicit];
   }
-  const viaProxy = all.filter((url) => !businessPayUsesDirectKbzHost(url));
+  if (rawExplicit) {
+    // Env is set but could not be resolved (path-only without KPAY_PROXY_BASE_URL).
+    return [];
+  }
+  const viaProxy = businessPayEndpointCandidates(baseUrl).filter(
+    (url) => !businessPayUsesDirectKbzHost(url),
+  );
   return viaProxy.slice(0, 2);
 }
 
@@ -2808,9 +2948,9 @@ async function businessPayViaVpsProxy(params: {
   payeeName?: string;
   title?: string;
   note?: string;
-}): Promise<KPayBusinessPayResult> {
+}, urlOverride?: string): Promise<KPayBusinessPayResult> {
   const cfg = kpayConfig();
-  const vpsUrl = resolveVpsBusinessPayUrl(cfg.baseUrl);
+  const vpsUrl = text(urlOverride) || resolveVpsBusinessPayUrl(cfg.baseUrl);
   const secret = resolveEnv("KBZ_VPS_API_SECRET");
   if (!vpsUrl || !secret) {
     return {
@@ -2882,7 +3022,7 @@ async function businessPayViaVpsProxy(params: {
     pending: false,
     merchantOrderId: params.merchantOrderId,
     endpointUsed: vpsUrl,
-    providerMessage: providerErrorMessage(response.body, "KBZPay business pay request failed"),
+    providerMessage: providerErrorMessage(response.body, "KBZPay business pay request failed", vpsUrl),
     networkError: response.networkError,
     rawResponse: response.body,
   };
@@ -2921,11 +3061,41 @@ export async function invokeKPayBusinessPay(params: {
     };
   }
 
-  if (shouldUseVpsBusinessPayProxy()) {
-    return businessPayViaVpsProxy(params);
+  const explicitUrl = resolveBusinessPayEndpointUrl(cfg.baseUrl);
+  const rawExplicit = resolveExplicitBusinessPayUrl();
+  if (rawExplicit && !explicitUrl) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      providerMessage:
+        "KPAY_BUSINESS_PAY_URL is a relative path but KPAY_PROXY_BASE_URL is not set. Either set KPAY_PROXY_BASE_URL=https://kbz-api.walwal.shop/ or use the full URL: https://kbz-api.walwal.shop/payment/gateway/businesspay/",
+    };
   }
 
-  const endpoints = resolveBusinessPayEndpoints(cfg.baseUrl);
+  const relayUrl = resolveVpsBusinessPayRelayUrl(cfg.baseUrl);
+  const vpsSecret = text(resolveEnv("KBZ_VPS_API_SECRET"));
+  if (vpsSecret && relayUrl) {
+    return businessPayViaVpsProxy(params, relayUrl);
+  }
+  if (vpsSecret && (explicitUrl && isWalwalBusinessPayGateway(explicitUrl))) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      providerMessage:
+        `Vendor payout needs businesspay.php on the VPS (same folder as refund.php). Expected: ${relayUrl || "…/api/businesspay.php"}. Ask the VPS admin to deploy it — /payment/gateway/businesspay/ requires mTLS and cannot be called from CloudBase.`,
+    };
+  }
+  if (explicitUrl && businessPayPrefersVpsSimpleJson(explicitUrl)) {
+    return businessPayViaVpsProxy(params, explicitUrl);
+  }
+
+  const endpoints = resolveBusinessPayEndpoints(cfg.baseUrl).filter(
+    (url) => !businessPayUsesDirectKbzHost(url),
+  );
   if (endpoints.length === 0) {
     return {
       ok: false,
@@ -2933,7 +3103,7 @@ export async function invokeKPayBusinessPay(params: {
       pending: false,
       merchantOrderId: params.merchantOrderId,
       providerMessage:
-        "Vendor payout proxy is not configured. Set KPAY_BUSINESS_PAY_URL (or KBZ_VPS_BUSINESS_PAY_URL / KPAY_PROXY_BASE_URL + /api/businesspay.php) on the CloudBase function. Direct KBZ API requires mTLS and cannot be called from CloudBase.",
+        "Vendor payout proxy is not configured. Set KPAY_BUSINESS_PAY_URL=https://kbz-api.walwal.shop/payment/gateway/businesspay/ on the CloudBase function (make-server-16010b6f) and redeploy.",
     };
   }
 
@@ -2951,7 +3121,7 @@ export async function invokeKPayBusinessPay(params: {
   });
 
   const headers = buildProviderHeaders(cfg);
-  const timeoutMs = Math.min(cfg.timeoutMs, 6000);
+  const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 12_000), 45_000);
   let lastNetworkError = "";
   let lastBody: AnyRecord = {};
   let lastEndpoint = "";
@@ -2968,7 +3138,10 @@ export async function invokeKPayBusinessPay(params: {
     );
     lastBody = provider.body;
     if (provider.networkError) {
-      lastNetworkError = provider.networkError;
+      lastNetworkError =
+        provider.networkError === "fetch failed"
+          ? `KBZPay business pay unreachable at ${endpoint}`
+          : provider.networkError;
       continue;
     }
     const nested = providerData(provider.body);
@@ -3026,9 +3199,30 @@ export async function invokeKPayBusinessPay(params: {
         mmOrderId,
         tradeStatus,
         providerCode: biz.code,
-        providerMessage: biz.msg || providerErrorMessage(provider.body, "KBZPay business pay was rejected"),
+        providerMessage: biz.msg || providerErrorMessage(provider.body, "KBZPay business pay was rejected", endpoint),
         rawResponse: provider.body,
       };
+    }
+  }
+
+  const failMessage = providerErrorMessage(
+    lastBody,
+    lastNetworkError || "KBZPay business pay request failed",
+    lastEndpoint,
+  );
+  if (
+    businessPayNeedsVpsJsonRetry(lastBody, failMessage) &&
+    text(resolveEnv("KBZ_VPS_API_SECRET"))
+  ) {
+    const vpsRetry = await businessPayViaVpsProxy(
+      params,
+      resolveVpsBusinessPayRelayUrl(cfg.baseUrl) || resolveVpsBusinessPayUrl(cfg.baseUrl),
+    );
+    if (vpsRetry.success || vpsRetry.pending || vpsRetry.ok) {
+      return vpsRetry;
+    }
+    if (vpsRetry.providerMessage && vpsRetry.providerMessage !== failMessage) {
+      return vpsRetry;
     }
   }
 
@@ -3038,7 +3232,7 @@ export async function invokeKPayBusinessPay(params: {
     pending: false,
     merchantOrderId: params.merchantOrderId,
     endpointUsed: lastEndpoint,
-    providerMessage: providerErrorMessage(lastBody, lastNetworkError || "KBZPay business pay request failed"),
+    providerMessage: failMessage,
     networkError: lastNetworkError || undefined,
     rawResponse: lastBody,
   };

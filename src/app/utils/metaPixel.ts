@@ -2,7 +2,6 @@ import { fetchVendorProducts } from "./module-cache";
 
 const PIXEL_ID_RE = /^\d{5,20}$/;
 const PURCHASE_DEDUPE_PREFIX = "meta-pixel-purchase:";
-const PAGE_VIEW_DEDUPE_PREFIX = "meta-pixel-page-view:";
 const VIEW_CONTENT_DEDUPE_PREFIX = "meta-pixel-view-content:";
 /** In-memory guard for rapid React re-renders / effect re-runs. */
 const META_EVENT_DEDUPE_MS = 5000;
@@ -26,7 +25,6 @@ type FbqFn = {
 type MetaPixelRuntimeState = {
   activePixelId: string | null;
   recentEvents: Map<string, number>;
-  pageViewTrackedPixels: Set<string>;
   hardenedPixelIds: Set<string>;
 };
 
@@ -41,7 +39,6 @@ let scriptRequested = false;
 const serverMetaPixelState: MetaPixelRuntimeState = {
   activePixelId: null,
   recentEvents: new Map(),
-  pageViewTrackedPixels: new Set(),
   hardenedPixelIds: new Set(),
 };
 
@@ -51,7 +48,6 @@ function getMetaPixelState(): MetaPixelRuntimeState {
     window.__migooMetaPixelState = {
       activePixelId: null,
       recentEvents: new Map(),
-      pageViewTrackedPixels: new Set(),
       hardenedPixelIds: new Set(),
     };
   }
@@ -130,7 +126,7 @@ export function initMetaPixel(pixelId: string): boolean {
   const state = getMetaPixelState();
   if (state.activePixelId !== id) {
     applyMetaPixelHardening(id);
-    // Disable Meta's automatic PageView on init — PageView is tracked explicitly.
+    // Keep Meta's automatic discovery and PageView behavior disabled.
     window.fbq?.("init", id, {}, { autoConfig: false });
     state.activePixelId = id;
   }
@@ -139,26 +135,6 @@ export function initMetaPixel(pixelId: string): boolean {
 
 export function getActiveMetaPixelId(): string | null {
   return getMetaPixelState().activePixelId;
-}
-
-export function trackMetaPageView(pathname?: string): void {
-  const state = getMetaPixelState();
-  const pixelId = state.activePixelId;
-  if (!pixelId || state.pageViewTrackedPixels.has(pixelId)) return;
-
-  const persistentKey = `${PAGE_VIEW_DEDUPE_PREFIX}${pixelId}`;
-  if (claimPersistentMetaEvent(persistentKey) === false) {
-    state.pageViewTrackedPixels.add(pixelId);
-    return;
-  }
-
-  state.pageViewTrackedPixels.add(pixelId);
-  const pagePath = String(pathname || "").trim();
-  if (pagePath) {
-    window.fbq?.("track", "PageView", { page_path: pagePath });
-    return;
-  }
-  window.fbq?.("track", "PageView");
 }
 
 export function trackMetaViewContent(product: {

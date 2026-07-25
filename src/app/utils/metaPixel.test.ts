@@ -45,47 +45,6 @@ describe("metaPixel", () => {
     ]);
   });
 
-  it("fires PageView only once for the active pixel", async () => {
-    const fbq = vi.fn();
-    vi.stubGlobal("window", { fbq });
-    const { initMetaPixel, trackMetaPageView } = await import("./metaPixel");
-
-    initMetaPixel("123456789");
-    fbq.mockClear();
-    trackMetaPageView("/store");
-    trackMetaPageView("/store/product/example");
-
-    expect(fbq).toHaveBeenCalledTimes(1);
-    expect(fbq).toHaveBeenCalledWith("track", "PageView", {
-      page_path: "/store",
-    });
-  });
-
-  it("does not repeat PageView for the same browser visitor", async () => {
-    const fbq = vi.fn();
-    const localValues = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => localValues.get(key) ?? null,
-      setItem: (key: string, value: string) => localValues.set(key, value),
-    });
-    vi.stubGlobal("window", { fbq });
-
-    const firstPage = await import("./metaPixel");
-    firstPage.initMetaPixel("123456789");
-    firstPage.trackMetaPageView("/store");
-
-    vi.resetModules();
-    vi.stubGlobal("window", { fbq });
-    const refreshedPage = await import("./metaPixel");
-    refreshedPage.initMetaPixel("123456789");
-    refreshedPage.trackMetaPageView("/store/product/example");
-
-    const pageViews = fbq.mock.calls.filter(
-      (call) => call[0] === "track" && call[1] === "PageView"
-    );
-    expect(pageViews).toHaveLength(1);
-  });
-
   it("fires ViewContent once per product for the same browser visitor", async () => {
     const fbq = vi.fn();
     const localValues = new Map<string, string>();

@@ -81,7 +81,6 @@ import {
   trackMetaBuyNow,
   trackMetaCategoryFilter,
   trackMetaInitiateCheckout,
-  trackMetaPageView,
   trackMetaSearch,
   trackMetaViewContent,
 } from "../utils/metaPixel";
@@ -1710,8 +1709,7 @@ export function VendorStoreView({
   useEffect(() => {
     if (!metaPixelId) return;
     initMetaPixel(metaPixelId);
-    trackMetaPageView(location.pathname);
-  }, [metaPixelId, location.pathname]);
+  }, [metaPixelId]);
 
   useEffect(() => {
     if (!metaPixelId || isVendorProductDetailPath || savedPage) return;

@@ -61,12 +61,12 @@ describe("metaPixel", () => {
     });
   });
 
-  it("does not repeat PageView after a hard refresh in the same tab", async () => {
+  it("does not repeat PageView for the same browser visitor", async () => {
     const fbq = vi.fn();
-    const sessionValues = new Map<string, string>();
-    vi.stubGlobal("sessionStorage", {
-      getItem: (key: string) => sessionValues.get(key) ?? null,
-      setItem: (key: string, value: string) => sessionValues.set(key, value),
+    const localValues = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => localValues.get(key) ?? null,
+      setItem: (key: string, value: string) => localValues.set(key, value),
     });
     vi.stubGlobal("window", { fbq });
 
@@ -84,6 +84,32 @@ describe("metaPixel", () => {
       (call) => call[0] === "track" && call[1] === "PageView"
     );
     expect(pageViews).toHaveLength(1);
+  });
+
+  it("fires ViewContent once per product for the same browser visitor", async () => {
+    const fbq = vi.fn();
+    const localValues = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => localValues.get(key) ?? null,
+      setItem: (key: string, value: string) => localValues.set(key, value),
+    });
+    vi.stubGlobal("window", { fbq });
+
+    const firstPage = await import("./metaPixel");
+    firstPage.initMetaPixel("123456789");
+    firstPage.trackMetaViewContent({ id: "p1", name: "Shoe" });
+    firstPage.trackMetaViewContent({ id: "p2", name: "Bag" });
+
+    vi.resetModules();
+    vi.stubGlobal("window", { fbq });
+    const refreshedPage = await import("./metaPixel");
+    refreshedPage.initMetaPixel("123456789");
+    refreshedPage.trackMetaViewContent({ id: "p1", name: "Shoe" });
+
+    const viewContentCalls = fbq.mock.calls.filter(
+      (call) => call[0] === "track" && call[1] === "ViewContent"
+    );
+    expect(viewContentCalls).toHaveLength(2);
   });
 
   it("emits only the requested semantic commerce events", async () => {

@@ -3,6 +3,7 @@ import { fetchVendorProducts } from "./module-cache";
 const PIXEL_ID_RE = /^\d{5,20}$/;
 const PURCHASE_DEDUPE_PREFIX = "meta-pixel-purchase:";
 const PAGE_VIEW_DEDUPE_PREFIX = "meta-pixel-page-view:";
+const VIEW_CONTENT_DEDUPE_PREFIX = "meta-pixel-view-content:";
 /** In-memory guard for rapid React re-renders / effect re-runs. */
 const META_EVENT_DEDUPE_MS = 5000;
 
@@ -85,6 +86,17 @@ function shouldFireMetaEvent(eventKey: string): boolean {
   return true;
 }
 
+function claimPersistentMetaEvent(key: string): boolean | null {
+  if (typeof window === "undefined") return false;
+  try {
+    if (localStorage.getItem(key)) return false;
+    localStorage.setItem(key, "1");
+    return true;
+  } catch {
+    return null;
+  }
+}
+
 function loadFbeventsScript(): void {
   if (typeof window === "undefined" || scriptRequested) return;
   scriptRequested = true;
@@ -134,15 +146,10 @@ export function trackMetaPageView(pathname?: string): void {
   const pixelId = state.activePixelId;
   if (!pixelId || state.pageViewTrackedPixels.has(pixelId)) return;
 
-  const sessionKey = `${PAGE_VIEW_DEDUPE_PREFIX}${pixelId}`;
-  try {
-    if (sessionStorage.getItem(sessionKey)) {
-      state.pageViewTrackedPixels.add(pixelId);
-      return;
-    }
-    sessionStorage.setItem(sessionKey, "1");
-  } catch {
-    /* private mode — in-memory guard still prevents SPA duplicates */
+  const persistentKey = `${PAGE_VIEW_DEDUPE_PREFIX}${pixelId}`;
+  if (claimPersistentMetaEvent(persistentKey) === false) {
+    state.pageViewTrackedPixels.add(pixelId);
+    return;
   }
 
   state.pageViewTrackedPixels.add(pixelId);
@@ -160,11 +167,16 @@ export function trackMetaViewContent(product: {
   price?: number;
   currency?: string;
 }): void {
-  if (!getMetaPixelState().activePixelId) return;
+  const pixelId = getMetaPixelState().activePixelId;
+  if (!pixelId) return;
+  const productId = String(product.id || "").trim();
+  if (!productId) return;
   const key = `ViewContent:${product.id}`;
-  if (!shouldFireMetaEvent(key)) return;
+  const persistentKey = `${VIEW_CONTENT_DEDUPE_PREFIX}${pixelId}:${encodeURIComponent(productId)}`;
+  const claimed = claimPersistentMetaEvent(persistentKey);
+  if (claimed === false || (claimed === null && !shouldFireMetaEvent(key))) return;
   window.fbq?.("track", "ViewContent", {
-    content_ids: [product.id],
+    content_ids: [productId],
     content_name: product.name,
     content_type: "product",
     value: product.price,

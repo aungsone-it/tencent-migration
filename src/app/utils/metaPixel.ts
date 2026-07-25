@@ -11,6 +11,7 @@ declare global {
     fbq?: FbqFn;
     _fbq?: FbqFn;
     __migooMetaPixelState?: MetaPixelRuntimeState;
+    __migooMetaTransportGuardInstalled?: boolean;
   }
 }
 
@@ -116,9 +117,71 @@ function blockMetaPageViewCalls(): void {
   window._fbq = guarded;
 }
 
+function isMetaPageViewRequest(value: unknown): boolean {
+  const raw = String(value ?? "");
+  if (!/(?:^|\/\/)(?:www\.)?facebook\.com\/tr(?:\/|\?|$)/i.test(raw)) {
+    return false;
+  }
+  try {
+    return new URL(raw, window.location.href).searchParams.get("ev") === "PageView";
+  } catch {
+    return /(?:[?&]|%26)ev(?:=|%3D)PageView(?:&|%26|$)/i.test(raw);
+  }
+}
+
+function installMetaTransportGuard(): void {
+  if (
+    typeof window === "undefined" ||
+    window.__migooMetaTransportGuardInstalled
+  ) {
+    return;
+  }
+  window.__migooMetaTransportGuardInstalled = true;
+
+  if (typeof window.fetch === "function") {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" || input instanceof URL
+        ? input
+        : input.url;
+      if (isMetaPageViewRequest(url)) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return originalFetch(input, init);
+    }) as typeof window.fetch;
+  }
+
+  if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+    const originalSendBeacon = navigator.sendBeacon.bind(navigator);
+    navigator.sendBeacon = ((url: string | URL, data?: BodyInit | null) => {
+      if (isMetaPageViewRequest(url)) return true;
+      return originalSendBeacon(url, data);
+    }) as typeof navigator.sendBeacon;
+  }
+
+  if (typeof HTMLImageElement !== "undefined") {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "src"
+    );
+    if (descriptor?.get && descriptor.set) {
+      Object.defineProperty(HTMLImageElement.prototype, "src", {
+        configurable: descriptor.configurable,
+        enumerable: descriptor.enumerable,
+        get: descriptor.get,
+        set(value: string) {
+          if (isMetaPageViewRequest(value)) return;
+          descriptor.set?.call(this, value);
+        },
+      });
+    }
+  }
+}
+
 function loadFbeventsScript(): void {
   if (typeof window === "undefined" || scriptRequested) return;
   scriptRequested = true;
+  installMetaTransportGuard();
 
   if (!window.fbq) {
     const n = function (this: FbqFn, ...args: unknown[]) {

@@ -80,6 +80,7 @@ import {
   trackMetaAddToCart,
   trackMetaBuyNow,
   trackMetaCategoryFilter,
+  trackMetaInitiateCheckout,
   trackMetaPageView,
   trackMetaSearch,
   trackMetaViewContent,
@@ -1765,7 +1766,28 @@ export function VendorStoreView({
 
   const wasCheckoutRouteRef = useRef(false);
 
-  const { addToCart, totalItems } = useCart();
+  const {
+    addToCart,
+    totalItems,
+    items: cartItems,
+    totalPrice: cartTotalPrice,
+  } = useCart();
+
+  const startCartCheckout = useCallback(() => {
+    setCartOpen(false);
+    if (metaPixelId) {
+      const lines = cartItems
+        .map((item) => ({
+          id: String(item.productId || item.id || "").trim(),
+          quantity: Math.max(1, Number(item.quantity) || 1),
+        }))
+        .filter((item) => item.id);
+      if (lines.length > 0) {
+        trackMetaInitiateCheckout(lines, cartTotalPrice);
+      }
+    }
+    navigate(checkoutPath);
+  }, [cartItems, cartTotalPrice, checkoutPath, metaPixelId, navigate]);
 
   // 🔐 User Authentication State
   const [user, setUser] = useState<any>(null);
@@ -5947,10 +5969,7 @@ export function VendorStoreView({
         <CartDrawer 
           isOpen={cartOpen} 
           onClose={() => setCartOpen(false)} 
-          onCheckout={() => {
-            setCartOpen(false);
-            navigate(checkoutPath);
-          }}
+          onCheckout={startCartCheckout}
           user={user}
           onShowAuthModal={() => {
             setShowAuthModal(true);
@@ -6704,10 +6723,7 @@ export function VendorStoreView({
       <CartDrawer 
         isOpen={cartOpen} 
         onClose={() => setCartOpen(false)} 
-        onCheckout={() => {
-          setCartOpen(false);
-          navigate(checkoutPath);
-        }}
+        onCheckout={startCartCheckout}
         user={user}
         onShowAuthModal={() => {
           setShowAuthModal(true);

@@ -32,7 +32,6 @@ import { useCart } from "./CartContext";
 import { useAuth } from "../contexts/AuthContext";
 import {
   ensureMetaPixelForVendor,
-  trackMetaInitiateCheckout,
   trackMetaPurchaseOnce,
 } from "../utils/metaPixel";
 import { supabase } from "../contexts/AuthContext";
@@ -1404,40 +1403,6 @@ export function Checkout({
     if (paymentMethod !== "COD") return;
     if (!codPaymentAvailable) setPaymentMethod("None");
   }, [paymentMethod, codPaymentAvailable]);
-
-  const checkoutPixelTrackKey = useMemo(() => {
-    const lines = metaPixelLineItems(checkoutItems);
-    if (lines.length === 0) return "";
-    return `${checkoutStoragePath}:${lines.map((i) => `${i.id}x${i.quantity}`).join(",")}:${Math.round(finalTotal)}`;
-  }, [checkoutItems, checkoutStoragePath, finalTotal]);
-
-  const initiateCheckoutTrackedRef = useRef("");
-
-  useEffect(() => {
-    if (step !== "checkout" || !checkoutPixelTrackKey) return;
-    if (initiateCheckoutTrackedRef.current === checkoutPixelTrackKey) return;
-    let cancelled = false;
-    void (async () => {
-      const id = await ensureMetaPixelForVendor(vendorId || storeName || "", metaPixelId);
-      if (cancelled || !id) return;
-      trackMetaInitiateCheckout(
-        metaPixelLineItems(checkoutItems),
-        finalTotal,
-      );
-      initiateCheckoutTrackedRef.current = checkoutPixelTrackKey;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    vendorId,
-    storeName,
-    metaPixelId,
-    step,
-    checkoutPixelTrackKey,
-    checkoutItems,
-    finalTotal,
-  ]);
 
   useEffect(() => {
     if (step !== "success" || !orderNumber) return;

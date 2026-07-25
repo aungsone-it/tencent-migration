@@ -28,6 +28,23 @@ describe("metaPixel", () => {
     ]);
   });
 
+  it("keeps initialization dedupe state across module reloads", async () => {
+    const fbq = vi.fn();
+    const browserWindow: Record<string, unknown> = { fbq };
+    vi.stubGlobal("window", browserWindow);
+
+    const firstModule = await import("./metaPixel");
+    firstModule.initMetaPixel("123456789");
+    vi.resetModules();
+    const reloadedModule = await import("./metaPixel");
+    reloadedModule.initMetaPixel("123456789");
+
+    expect(fbq.mock.calls).toEqual([
+      ["set", "autoConfig", false, "123456789"],
+      ["init", "123456789", {}, { autoConfig: false }],
+    ]);
+  });
+
   it("fires PageView only once for the active pixel", async () => {
     const fbq = vi.fn();
     vi.stubGlobal("window", { fbq });

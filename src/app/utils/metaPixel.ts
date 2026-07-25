@@ -2,6 +2,7 @@ import { fetchVendorProducts } from "./module-cache";
 
 const PIXEL_ID_RE = /^\d{5,20}$/;
 const PURCHASE_DEDUPE_PREFIX = "meta-pixel-purchase:";
+const PAGE_VIEW_DEDUPE_PREFIX = "meta-pixel-page-view:";
 /** In-memory guard for rapid React re-renders / effect re-runs. */
 const META_EVENT_DEDUPE_MS = 5000;
 
@@ -130,13 +131,21 @@ export function getActiveMetaPixelId(): string | null {
 
 export function trackMetaPageView(pathname?: string): void {
   const state = getMetaPixelState();
-  if (
-    !state.activePixelId ||
-    state.pageViewTrackedPixels.has(state.activePixelId)
-  ) {
-    return;
+  const pixelId = state.activePixelId;
+  if (!pixelId || state.pageViewTrackedPixels.has(pixelId)) return;
+
+  const sessionKey = `${PAGE_VIEW_DEDUPE_PREFIX}${pixelId}`;
+  try {
+    if (sessionStorage.getItem(sessionKey)) {
+      state.pageViewTrackedPixels.add(pixelId);
+      return;
+    }
+    sessionStorage.setItem(sessionKey, "1");
+  } catch {
+    /* private mode — in-memory guard still prevents SPA duplicates */
   }
-  state.pageViewTrackedPixels.add(state.activePixelId);
+
+  state.pageViewTrackedPixels.add(pixelId);
   const pagePath = String(pathname || "").trim();
   if (pagePath) {
     window.fbq?.("track", "PageView", { page_path: pagePath });

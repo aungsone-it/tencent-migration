@@ -76,7 +76,7 @@ function buildDeployBootstrapScript(buildId: string): string {
   var BUILD_ID = ${JSON.stringify(buildId)};
   var VERSION_KEY = "migoo-deploy-version";
   var RELOAD_GUARD = "migoo-deploy-reload-guard";
-  var CACHE_PREFIXES = ["migoo-ls-", "migoo_cache_", "migoo-notifications", "migoo-checkout", "migoo-shipping-addresses-", "vendor_storefront_", "vendorAuth"];
+  var CACHE_PREFIXES = ["migoo-ls-", "migoo_cache_", "migoo-notifications", "migoo-checkout", "migoo-shipping-addresses-", "vendor_storefront_"];
   function purgeCaches() {
     try {
       var keys = [];
@@ -84,7 +84,7 @@ function buildDeployBootstrapScript(buildId: string): string {
         var key = localStorage.key(i);
         if (!key) continue;
         if (key.indexOf("nexa-cloudbase") === 0) continue;
-        if (key === "migoo-user" || key === "migoo-staff-actor-id") continue;
+        if (key === "migoo-user" || key === "migoo-staff-actor-id" || key === "vendorAuth") continue;
         if (key.indexOf("migoo-") === 0) keys.push(key);
         for (var p = 0; p < CACHE_PREFIXES.length; p++) {
           if (key.indexOf(CACHE_PREFIXES[p]) === 0) keys.push(key);

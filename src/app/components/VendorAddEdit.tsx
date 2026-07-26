@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { Switch } from "./ui/switch";
 
 interface VendorAddEditProps {
   onBack: () => void;
@@ -37,6 +38,7 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
     website: vendorData?.website || "",
     status: vendorData?.status || "pending",
     logo: vendorData?.logo || vendorData?.avatar || null,
+    freeShippingEnabled: vendorData?.freeShippingEnabled === true,
   });
 
   // 🔥 Update form when editingVendor changes
@@ -53,6 +55,7 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
         website: data?.website || "",
         status: data?.status || "pending",
         logo: data?.logo || data?.avatar || null,
+        freeShippingEnabled: data?.freeShippingEnabled === true,
       });
     }
   }, [editingVendor, initialData]);
@@ -208,6 +211,25 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
                     <SelectItem value="banned">Banned</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="space-y-1 pr-2">
+                  <Label htmlFor="freeShippingEnabled" className="text-sm font-medium text-slate-900">
+                    Free shipping feature access
+                  </Label>
+                  <p className="text-xs text-slate-500">
+                    Allow this vendor to mark selected store products as free shipping. Checkout
+                    shipping fees become 0 MMK when the cart contains only those products.
+                  </p>
+                </div>
+                <Switch
+                  id="freeShippingEnabled"
+                  checked={formData.freeShippingEnabled}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, freeShippingEnabled: checked })
+                  }
+                />
               </div>
             </div>
           </Card>

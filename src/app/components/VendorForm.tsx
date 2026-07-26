@@ -1,4 +1,6 @@
 import { Card } from "./ui/card";
+import { Switch } from "./ui/switch";
+import { Label } from "./ui/label";
 import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { API_BASE_URL } from '../../utils/api-client';
 
@@ -17,6 +19,9 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
   const [description, setDescription] = useState(editingVendor?.description || "");
   const [commission, setCommission] = useState(editingVendor?.commission || 15);
   const [status, setStatus] = useState(editingVendor?.status || "pending");
+  const [freeShippingEnabled, setFreeShippingEnabled] = useState(
+    editingVendor?.freeShippingEnabled === true
+  );
   
   // Business Information
   const [businessAddress, setBusinessAddress] = useState(editingVendor?.businessAddress || "");
@@ -199,6 +204,7 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
       description,
       commission: Number(commission),
       status,
+      freeShippingEnabled,
       businessAddress,
       taxId,
       website,
@@ -617,6 +623,23 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
                     <p className="text-xs text-slate-500 mt-1">
                       Percentage of sales revenue that goes to the platform
                     </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="space-y-1 pr-2">
+                      <Label htmlFor="freeShippingEnabled" className="text-sm font-medium text-slate-900">
+                        Free shipping feature access
+                      </Label>
+                      <p className="text-xs text-slate-500">
+                        Allow this vendor to mark selected store products as free shipping. Checkout
+                        shipping fees become 0 MMK when the cart contains only those products.
+                      </p>
+                    </div>
+                    <Switch
+                      id="freeShippingEnabled"
+                      checked={freeShippingEnabled}
+                      onCheckedChange={setFreeShippingEnabled}
+                    />
                   </div>
                 </div>
               </Card>

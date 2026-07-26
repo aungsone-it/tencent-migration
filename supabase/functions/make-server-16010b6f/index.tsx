@@ -3042,6 +3042,7 @@ async function buildVendorAuthProfileUser(vendorRaw: Record<string, unknown>) {
     businessName: String(rest.businessName || rest.name || ""),
     role: "vendor-admin",
     status: rest.status === "active" ? "active" : "inactive",
+    freeShippingEnabled: rest.freeShippingEnabled === true,
     location: String(rest.location || ""),
     addressLine1: String(rest.addressLine1 || ""),
     addressLine2: String(rest.addressLine2 || ""),
@@ -3578,7 +3579,26 @@ function normalizeProductSpecifications(raw: unknown): { label: string; value: s
   return rows;
 }
 
-function mapVendorStorefrontProductRow(p: any) {
+function vendorHasFreeShippingAccess(vendor: any): boolean {
+  return vendor?.freeShippingEnabled === true;
+}
+
+function resolveProductFreeShippingForVendor(
+  product: any,
+  vendorId: string | null | undefined,
+  vendorFreeShippingEnabled?: boolean
+): boolean {
+  if (!vendorFreeShippingEnabled || !vendorId) return false;
+  const map = product?.vendorFreeShipping;
+  if (!map || typeof map !== "object") return false;
+  return map[String(vendorId).trim()] === true;
+}
+
+function mapVendorStorefrontProductRow(
+  p: any,
+  vendorId?: string,
+  vendorFreeShippingEnabled?: boolean
+) {
   return {
     id: p.id,
     name: p.name || p.title,
@@ -3601,6 +3621,7 @@ function mapVendorStorefrontProductRow(p: any) {
     variants: p.variants || [],
     variantOptions: p.variantOptions || [],
     commissionRate: p.commissionRate || 0,
+    freeShipping: resolveProductFreeShippingForVendor(p, vendorId, vendorFreeShippingEnabled),
   };
 }
 
@@ -4380,6 +4401,30 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
       nextSelectedVendors = Array.isArray(bodySelectedVendors) ? bodySelectedVendors : existingSel;
     }
 
+    let nextVendorFreeShipping =
+      existingProduct.vendorFreeShipping && typeof existingProduct.vendorFreeShipping === "object"
+        ? { ...existingProduct.vendorFreeShipping }
+        : {};
+    if (restPatch.vendorFreeShipping !== undefined) {
+      const patchMap = restPatch.vendorFreeShipping;
+      if (patchMap && typeof patchMap === "object") {
+        for (const [vid, enabled] of Object.entries(patchMap)) {
+          const vendorKey = String(vid || "").trim();
+          if (!vendorKey) continue;
+          if (enabled === true) {
+            const vendorRecord = await withTimeout(kv.get(`vendor:${vendorKey}`), 3000).catch(() => null);
+            if (!vendorHasFreeShippingAccess(vendorRecord)) {
+              return c.json({ error: "Vendor does not have free shipping access" }, 403);
+            }
+            nextVendorFreeShipping[vendorKey] = true;
+          } else {
+            delete nextVendorFreeShipping[vendorKey];
+          }
+        }
+      }
+      delete restPatch.vendorFreeShipping;
+    }
+
     const updatedProduct = {
       ...existingProduct,
       ...restPatch,
@@ -4390,6 +4435,7 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
       description: safeDescription, // ✅ Safe Unicode description
       commissionRate: restPatch.commissionRate !== undefined ? parseFloat(restPatch.commissionRate) : (existingProduct.commissionRate || 0), // 🔥 Product-level commission rate (%)
       selectedVendors: nextSelectedVendors,
+      vendorFreeShipping: nextVendorFreeShipping,
       updatedAt: new Date().toISOString(),
     };
     
@@ -6082,6 +6128,38 @@ app.post("/make-server-16010b6f/orders", async (c) => {
       }
       
       console.log(`✅ Stock validation passed for all items`);
+
+      const claimedShipping =
+        Number(body.shippingFee ?? body.shippingCost ?? body.shipping ?? 0) || 0;
+      const vendorIdForShipping = String(body.vendorId || body.vendor || "").trim();
+      if (claimedShipping === 0 && vendorIdForShipping) {
+        const vendorRecord = await withTimeout(kv.get(`vendor:${vendorIdForShipping}`), 5000).catch(() => null);
+        const vendorAccess = vendorHasFreeShippingAccess(vendorRecord);
+        let allItemsFree = vendorAccess;
+        if (allItemsFree) {
+          for (const item of body.items) {
+            const resolved = resolveProductForLineItem(item, allProductsForValidation);
+            if (!resolved) {
+              allItemsFree = false;
+              break;
+            }
+            if (!resolveProductFreeShippingForVendor(resolved.product, vendorIdForShipping, true)) {
+              allItemsFree = false;
+              break;
+            }
+          }
+        }
+        if (!allItemsFree) {
+          return c.json(
+            {
+              success: false,
+              error: "Invalid shipping fee",
+              message: "Shipping fee is required unless all items qualify for free shipping",
+            },
+            400
+          );
+        }
+      }
     }
     
     // Parse numeric fields to ensure proper storage
@@ -12777,7 +12855,10 @@ app.get("/make-server-16010b6f/vendor/products/:vendorId", async (c) => {
         });
 
     if (rpcData && Array.isArray(rpcData.products)) {
-      const vendorProducts = (rpcData.products as any[]).map(mapVendorStorefrontProductRow);
+      const vendorFreeShippingEnabled = vendorHasFreeShippingAccess(vendorData);
+      const vendorProducts = (rpcData.products as any[]).map((p) =>
+        mapVendorStorefrontProductRow(p, actualVendorId, vendorFreeShippingEnabled)
+      );
       return c.json({
         products: vendorProducts,
         storeName,
@@ -12826,7 +12907,10 @@ app.get("/make-server-16010b6f/vendor/products/:vendorId", async (c) => {
 
     if (resolveSlug) {
       vendorList = vendorList.filter((p: any) => slugMatchesProduct(p, resolveSlug)).slice(0, 1);
-      const vendorProducts = vendorList.map(mapVendorStorefrontProductRow);
+      const vendorFreeShippingEnabled = vendorHasFreeShippingAccess(vendorData);
+      const vendorProducts = vendorList.map((p) =>
+        mapVendorStorefrontProductRow(p, actualVendorId, vendorFreeShippingEnabled)
+      );
       return c.json({
         products: vendorProducts,
         storeName,
@@ -12868,7 +12952,10 @@ app.get("/make-server-16010b6f/vendor/products/:vendorId", async (c) => {
     });
     const totalLegacy = vendorList.length;
     const slice = vendorList.slice((page - 1) * pageSize, page * pageSize);
-    const vendorProducts = slice.map(mapVendorStorefrontProductRow);
+    const vendorFreeShippingEnabled = vendorHasFreeShippingAccess(vendorData);
+    const vendorProducts = slice.map((p) =>
+      mapVendorStorefrontProductRow(p, actualVendorId, vendorFreeShippingEnabled)
+    );
     const storeSlug =
       String(storefrontSettings?.storeSlug || "").trim() ||
       String(vendorSettings?.storeSlug || "").trim() ||
@@ -12927,6 +13014,7 @@ app.get("/make-server-16010b6f/vendor/products-admin/:vendorId", async (c) => {
     // 🔥 Get vendor data to match by current name too (in case products have old name)
     const vendorData = await withTimeout(kv.get(`vendor:${vendorId}`), 5000);
     const vendorBusinessName = vendorData?.name || vendorData?.businessName || null;
+    const vendorFreeShippingEnabled = vendorHasFreeShippingAccess(vendorData);
     console.log(`🏢 Vendor current name: "${vendorBusinessName}"`);
     
     // Get all products from KV store with correct prefix and retry logic
@@ -13000,6 +13088,7 @@ app.get("/make-server-16010b6f/vendor/products-admin/:vendorId", async (c) => {
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
         commissionRate: p.commissionRate || 0, // 🔥 Include commission rate
+        freeShipping: resolveProductFreeShippingForVendor(p, vendorId, vendorFreeShippingEnabled),
       }));
 
     console.log(`✅ Found ${vendorProducts.length} products (all statuses) for vendor ${vendorId}`);

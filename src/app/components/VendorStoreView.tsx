@@ -238,6 +238,8 @@ interface Product {
   variantOptions?: any[];
   /** Same shape as marketplace `Product.options` — used when `variantOptions` is absent */
   options?: { name: string; values: string[] }[];
+  /** When true for every cart line, checkout shipping fee is 0 MMK. */
+  freeShipping?: boolean;
 }
 
 interface VendorStoreViewProps {
@@ -5047,6 +5049,10 @@ export function VendorStoreView({
       const commissionPatch = Number.isFinite(snapRate)
         ? { commissionRate: snapRate }
         : {};
+      const freeShippingPatch =
+        (product as { freeShipping?: boolean }).freeShipping === true
+          ? { freeShipping: true }
+          : {};
 
       if (overrides?.buyNow) {
         // Buy Now bypasses the cart — checkout reads a one-shot localStorage override only.
@@ -5064,6 +5070,8 @@ export function VendorStoreView({
                 image: image || "",
                 quantity: Number(qty) || 1,
                 productId: product.id,
+                vendorId,
+                ...freeShippingPatch,
               },
             ],
             total: (Number(price) || 0) * (Number(qty) || 1),
@@ -5100,6 +5108,7 @@ export function VendorStoreView({
           inventory,
           vendorId: vendorId,
           ...commissionPatch,
+          ...freeShippingPatch,
         },
         qty
       );

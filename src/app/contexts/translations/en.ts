@@ -947,6 +947,13 @@ export const enTranslations: Record<string, string> = {
     'products.removeFromStoreTitle': 'Remove from store?',
     'products.removeFromStoreConfirm': 'This will unassign {count} product(s) from your store. They will no longer appear on your storefront.',
     'products.removingFromStore': 'Removing...',
+    'products.freeShipping': 'Free shipping',
+    'products.freeShippingOn': 'On',
+    'products.freeShippingOff': 'Off',
+    'products.freeShippingAccessRequired': 'Free shipping is not enabled for your store. Contact platform admin.',
+    'products.freeShippingEnabledForProduct': 'Free shipping enabled for this product',
+    'products.freeShippingDisabledForProduct': 'Free shipping disabled for this product',
+    'products.freeShippingUpdateFailed': 'Failed to update free shipping',
     
     // Add Product
     'addProduct.back': 'Back',

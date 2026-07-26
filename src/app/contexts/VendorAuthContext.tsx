@@ -70,32 +70,56 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
   const revalidateVendorSession = useCallback(async (
     candidate: VendorUser
   ): Promise<"valid" | "invalid" | "unknown"> => {
-    try {
-      if (!candidate?.vendorId || !candidate?.email) return "invalid";
-      const response = await fetch(
-        `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(candidate.vendorId)}`,
-        { headers: { ...getCloudBaseRequestHeaders(),
- ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
-      );
-      if (!response.ok) {
-        return response.status === 401 || response.status === 403 || response.status === 404
-          ? "invalid"
-          : "unknown";
+    if (!candidate?.vendorId || !candidate?.email) return "invalid";
+
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
       }
-      const data = (await response.json()) as { user?: { id?: string; email?: string } };
-      const resolvedId = String(data.user?.id || "").trim();
-      const resolvedEmail = String(data.user?.email || "").trim().toLowerCase();
-      return (
-        resolvedId.length > 0 &&
-        resolvedId === candidate.vendorId &&
-        resolvedEmail.length > 0 &&
-        resolvedEmail === candidate.email.toLowerCase()
-      )
-        ? "valid"
-        : "invalid";
-    } catch {
-      return "unknown";
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(candidate.vendorId)}`,
+          { headers: { ...getCloudBaseRequestHeaders(),
+ ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
+        );
+
+        if (response.ok) {
+          const data = (await response.json()) as { user?: { id?: string; email?: string } };
+          const resolvedId = String(data.user?.id || "").trim();
+          const resolvedEmail = String(data.user?.email || "").trim().toLowerCase();
+          return (
+            resolvedId.length > 0 &&
+            resolvedId === candidate.vendorId &&
+            resolvedEmail.length > 0 &&
+            resolvedEmail === candidate.email.toLowerCase()
+          )
+            ? "valid"
+            : "invalid";
+        }
+
+        if (response.status === 401 || response.status === 403) {
+          return "invalid";
+        }
+
+        // 404/5xx during function cold start after deploy — retry before clearing session.
+        if (attempt < maxAttempts - 1 && (response.status === 404 || response.status >= 500)) {
+          continue;
+        }
+
+        if (response.status === 404) {
+          return "invalid";
+        }
+
+        return "unknown";
+      } catch {
+        if (attempt < maxAttempts - 1) continue;
+        return "unknown";
+      }
     }
+
+    return "unknown";
   }, []);
 
   // Check for existing session on mount

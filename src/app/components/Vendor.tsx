@@ -33,6 +33,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Truck,
 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
 import { Button } from "./ui/button";
@@ -91,6 +92,7 @@ interface Vendor {
   businessType?: string;
   description?: string;
   website?: string;
+  freeShippingEnabled?: boolean;
 }
 
 /** Shape expected by `VendorApplicationReview` (mirrors `VendorApplications` mapping). */
@@ -481,6 +483,16 @@ export function Vendor({
     );
   };
 
+  const getFreeShippingBadge = (vendor: Vendor) => {
+    if (vendor.freeShippingEnabled !== true) return null;
+    return (
+      <Badge className="bg-blue-100 text-blue-700 border-blue-200 border gap-1">
+        <Truck className="w-3 h-3" />
+        Free shipping enabled
+      </Badge>
+    );
+  };
+
   const handleAddVendor = async () => {
     if (!formData.name || !formData.email) {
       alert("Please fill in vendor name and email");
@@ -544,6 +556,13 @@ export function Vendor({
     setIsEditDialogOpen(true);
   };
 
+  const closeEditAndOpenVendorProfile = useCallback((vendor: Vendor) => {
+    setShowAddForm(false);
+    setIsEditDialogOpen(false);
+    setEditingVendor(null);
+    setViewingVendor(vendor);
+  }, []);
+
   const handleUpdateVendor = async (updatedData: any) => {
     if (!editingVendor) {
       console.error("No vendor selected for editing");
@@ -592,10 +611,27 @@ export function Vendor({
         })
       );
 
-      setIsEditDialogOpen(false);
-      setEditingVendor(null);
+      const mergedVendor: Vendor = {
+        ...editingVendor,
+        ...(result.vendor && typeof result.vendor === "object" ? result.vendor : {}),
+        ...updatedData,
+        id: editingVendor.id,
+        productsCount: editingVendor.productsCount,
+        totalRevenue: editingVendor.totalRevenue,
+        avatar:
+          (typeof updatedData.logo === "string" && updatedData.logo) ||
+          result.vendor?.logo ||
+          result.vendor?.avatar ||
+          editingVendor.avatar,
+        logo:
+          (typeof updatedData.logo === "string" && updatedData.logo) ||
+          result.vendor?.logo ||
+          editingVendor.logo,
+      };
 
-      alert(`✅ Vendor "${result.vendor.name}" updated successfully!`);
+      closeEditAndOpenVendorProfile(mergedVendor);
+
+      alert(`✅ Vendor "${mergedVendor.name || result.vendor?.name}" updated successfully!`);
 
       await loadVendors(true);
     } catch (error: any) {
@@ -1039,13 +1075,12 @@ export function Vendor({
   }
 
   // 🔥 If viewing a vendor profile, show the profile component
-  if (viewingVendor) {
+  if (viewingVendor && !isEditDialogOpen && !showAddForm) {
     return (
       <VendorProfile
         vendor={viewingVendor}
         onBack={() => setViewingVendor(null)}
         onEdit={(vendor) => {
-          setViewingVendor(null);
           handleEditVendor(vendor);
         }}
         onPreviewVendorStore={onPreviewVendorStore}
@@ -1054,11 +1089,15 @@ export function Vendor({
     );
   }
 
-  // 🔥 NEW: If adding/editing vendor, show the full-screen form
+  // 🔥 If adding/editing vendor, show the full-screen form
   if (showAddForm || isEditDialogOpen) {
     return (
       <VendorAddEdit
         onBack={() => {
+          if (editingVendor) {
+            closeEditAndOpenVendorProfile(editingVendor);
+            return;
+          }
           setShowAddForm(false);
           setIsEditDialogOpen(false);
           setEditingVendor(null);
@@ -1476,7 +1515,12 @@ export function Vendor({
                             <span className="text-sm font-medium text-slate-900">{safeNumber(vendor.productsCount)}</span>
                           </div>
                         </td>
-                        <td className="p-4">{getStatusBadge(vendor)}</td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {getStatusBadge(vendor)}
+                            {getFreeShippingBadge(vendor)}
+                          </div>
+                        </td>
                         <td className="p-4">
                           <span className="text-sm text-slate-600">{vendorDisplayJoined(vendor)}</span>
                         </td>

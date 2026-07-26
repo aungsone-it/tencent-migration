@@ -75,11 +75,14 @@ interface Product {
   trackQuantity?: boolean;
   continueSellingOutOfStock?: boolean;
   commissionRate?: number; // 🔥 Product commission rate (stored as number in backend)
+  freeShipping?: boolean;
 }
 
 interface VendorAdminAddProductProps {
   vendorId: string;
   vendorName: string;
+  /** Super admin must enable this before vendor can mark products as free shipping. */
+  vendorFreeShippingAccess?: boolean;
   editingProduct?: Product | null;
   onBack: () => void;
   /** Pass-through API JSON so parent can update session cache without refetch */
@@ -88,7 +91,8 @@ interface VendorAdminAddProductProps {
 
 export function VendorAdminAddProduct({ 
   vendorId, 
-  vendorName, 
+  vendorName,
+  vendorFreeShippingAccess = false,
   editingProduct,
   onBack, 
   onProductSaved 
@@ -105,6 +109,7 @@ export function VendorAdminAddProduct({
   const [barcode, setBarcode] = useState(initialData?.barcode || "");
   const [inventory, setInventory] = useState(initialData?.inventory || 0);
   const [weight, setWeight] = useState(initialData?.weight || "");
+  const [freeShipping, setFreeShipping] = useState(initialData?.freeShipping === true);
   const [status, setStatus] = useState(initialData?.status || "Active");
   const [trackQuantity, setTrackQuantity] = useState(initialData?.trackQuantity !== undefined ? initialData.trackQuantity : true);
   const [continueSellingOutOfStock, setContinueSellingOutOfStock] = useState(initialData?.continueSellingOutOfStock || false);
@@ -355,6 +360,9 @@ export function VendorAdminAddProduct({
         variants: hasVariants ? variants : undefined,
         variantOptions: hasVariants ? variantOptions : undefined,
         commissionRate: commissionRate ? parseFloat(commissionRate) : 0, // 🔥 Product commission rate (default 0)
+        ...(vendorFreeShippingAccess
+          ? { vendorFreeShipping: { [vendorId]: freeShipping } }
+          : {}),
       };
 
       console.log(`💾 Saving product for vendor "${vendorName}" (ID: ${vendorId}):`, {
@@ -645,15 +653,33 @@ export function VendorAdminAddProduct({
                 <CardDescription>Set product dimensions</CardDescription>
               </CardHeader>
               <CardContent>
-                <div>
-                  <Label htmlFor="weight">Weight (kg)</Label>
-                  <Input
-                    id="weight"
-                    type="number"
-                    placeholder="0.0"
-                    value={weight}
-                    onChange={(e) => setWeight(e.target.value)}
-                  />
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="weight">Weight (kg)</Label>
+                    <Input
+                      id="weight"
+                      type="number"
+                      placeholder="0.0"
+                      value={weight}
+                      onChange={(e) => setWeight(e.target.value)}
+                    />
+                  </div>
+                  {vendorFreeShippingAccess && (
+                    <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <Checkbox
+                        id="freeShipping"
+                        checked={freeShipping}
+                        onCheckedChange={(checked) => setFreeShipping(checked === true)}
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="freeShipping">Free shipping for this product</Label>
+                        <p className="text-xs text-slate-500">
+                          When customers buy only free-shipping products, delivery fees are 0 MMK
+                          at checkout.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

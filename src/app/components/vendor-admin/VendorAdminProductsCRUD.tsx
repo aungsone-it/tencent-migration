@@ -26,6 +26,7 @@ import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { Checkbox } from "../ui/checkbox";
+import { Switch } from "../ui/switch";
 import { toast } from "sonner";
 import {
   getCachedVendorProductsAdmin,
@@ -69,6 +70,7 @@ import {
   buildVendorProductCategoryLabels,
   resolveVendorProductCategoryLabel,
 } from "../../utils/vendorProductCategoryLabels";
+import { API_BASE_URL } from "../../../utils/api-client";
 
 /**
  * True when the in-memory assignable list can render this page/window without hitting the API.
@@ -117,6 +119,7 @@ interface Product {
   continueSellingOutOfStock?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  freeShipping?: boolean;
 }
 
 /** Platform catalog rows often carry `category` (Watch, Home, …) before vendor API merges it. */
@@ -191,6 +194,8 @@ export function VendorAdminProductsCRUD({
   const [assignPickerUseFullCache, setAssignPickerUseFullCache] = useState(false);
   const [assignPickerServerTotal, setAssignPickerServerTotal] = useState(0);
   const [assignPickerServerHasMore, setAssignPickerServerHasMore] = useState(false);
+  const [vendorFreeShippingAccess, setVendorFreeShippingAccess] = useState(false);
+  const [freeShippingToggleId, setFreeShippingToggleId] = useState<string | null>(null);
   /** Vendor picker: filter saved catalog while typing; server load only after Enter. */
   const [pickerUiMode, setPickerUiMode] = useState<"cache" | "server">("cache");
   const [pickerCommittedSearch, setPickerCommittedSearch] = useState("");
@@ -298,6 +303,74 @@ export function VendorAdminProductsCRUD({
       toast.error("Failed to load products");
     } finally {
       setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(vendorId)}`,
+          {
+            headers: {
+              ...getCloudBaseRequestHeaders(),
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+            },
+          }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setVendorFreeShippingAccess(data?.user?.freeShippingEnabled === true);
+        }
+      } catch {
+        if (!cancelled) setVendorFreeShippingAccess(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorId]);
+
+  const handleToggleProductFreeShipping = async (product: Product, next: boolean) => {
+    if (!vendorFreeShippingAccess) {
+      toast.error(t("products.freeShippingAccessRequired"));
+      return;
+    }
+    setFreeShippingToggleId(product.id);
+    try {
+      const res = await fetch(`${cloudbaseApiBaseUrl}/products/${product.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...getCloudBaseRequestHeaders(),
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+        },
+        body: JSON.stringify({
+          vendorFreeShipping: { [vendorId]: next },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : "Failed to update free shipping");
+      }
+      setProducts((prev) =>
+        prev.map((row) => (row.id === product.id ? { ...row, freeShipping: next } : row))
+      );
+      invalidateVendorProductsAdminCache(vendorId);
+      invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendorId, [
+        vendorStoreSlug,
+        routeStoreName,
+      ]);
+      toast.success(
+        next ? t("products.freeShippingEnabledForProduct") : t("products.freeShippingDisabledForProduct")
+      );
+    } catch (error) {
+      console.error("Failed to toggle product free shipping:", error);
+      toast.error(error instanceof Error ? error.message : t("products.freeShippingUpdateFailed"));
+    } finally {
+      setFreeShippingToggleId(null);
     }
   };
 
@@ -1015,6 +1088,11 @@ export function VendorAdminProductsCRUD({
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.inventory")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.category")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.price")}</th>
+                  {vendorFreeShippingAccess && (
+                    <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">
+                      {t("products.freeShipping")}
+                    </th>
+                  )}
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.actions")}</th>
                 </tr>
               </thead>
@@ -1066,6 +1144,22 @@ export function VendorAdminProductsCRUD({
                     <td className="py-3 px-4 text-sm font-semibold text-slate-900">
                       {Math.round(product.price).toLocaleString()} MMK
                     </td>
+                    {vendorFreeShippingAccess && (
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={product.freeShipping === true}
+                            disabled={freeShippingToggleId === product.id}
+                            onCheckedChange={(checked) =>
+                              void handleToggleProductFreeShipping(product, checked)
+                            }
+                          />
+                          <span className="text-xs text-slate-600">
+                            {product.freeShipping ? t("products.freeShippingOn") : t("products.freeShippingOff")}
+                          </span>
+                        </div>
+                      </td>
+                    )}
                     <td className="py-3 px-4">
                       <Button
                         variant="ghost"

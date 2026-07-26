@@ -17,6 +17,8 @@ export interface CartItem {
   vendorId: string;
   /** Snapshot at add-to-cart — used for vendor commission after order is fulfilled (super admin). */
   commissionRate?: number;
+  /** Snapshot at add-to-cart — zero shipping when all cart items qualify. */
+  freeShipping?: boolean;
 }
 
 interface CartContextType {

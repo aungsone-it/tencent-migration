@@ -908,6 +908,13 @@ export const zhTranslations: Record<string, string> = {
     'products.allAssigned': '所有目录产品已分配到您的店铺',
     'products.commission': '佣金',
     'products.searchFullCatalogPlaceholder': '按名称或 SKU 搜索 — 点击搜索按钮进行搜索',
+    'products.freeShipping': '免运费',
+    'products.freeShippingOn': '开启',
+    'products.freeShippingOff': '关闭',
+    'products.freeShippingAccessRequired': '您的店铺未开通免运费功能，请联系平台管理员。',
+    'products.freeShippingEnabledForProduct': '已为该产品开启免运费',
+    'products.freeShippingDisabledForProduct': '已为该产品关闭免运费',
+    'products.freeShippingUpdateFailed': '更新免运费设置失败',
     
     // Add Product
     'addProduct.back': '返回',

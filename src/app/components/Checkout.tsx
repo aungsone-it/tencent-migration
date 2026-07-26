@@ -90,6 +90,10 @@ import {
   listCheckoutLogisticsQuotes,
   resolveCheckoutLogisticsQuote,
 } from "../utils/checkoutLogistics";
+import {
+  checkoutQualifiesForFreeShipping,
+  resolveEffectiveCheckoutShippingFee,
+} from "../utils/freeShipping";
 
 /** KV-backed customer session (authApi / migoo-user) — AuthContext only has CloudBase sessions */
 function getMigooCustomerFromStorage(): {
@@ -1363,13 +1367,16 @@ export function Checkout({
       (!showDeliveryPartnerSelect || selectedDeliveryPartnerId)
   );
   const paymentSelectionEnabled = shippingMethodComplete;
-  const shippingFee = shippingMethodComplete ? (logisticsQuote?.shippingFee ?? 0) : 0;
-
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
     : items.length > 0
       ? items
       : miniSummaryItems;
+  const quotedShippingFee = shippingMethodComplete ? (logisticsQuote?.shippingFee ?? 0) : 0;
+  const shippingFee = resolveEffectiveCheckoutShippingFee({
+    quotedFee: quotedShippingFee,
+    checkoutItems,
+  });
   const checkoutSubtotal = buyNowOverride?.items?.length
     ? Number(buyNowOverride.total || 0)
     : items.length > 0
@@ -1384,8 +1391,11 @@ export function Checkout({
     if (!checkoutRegionKey) return t("checkout.selectRegionForShipping");
     if (!hasSelectedTownship) return t("checkout.selectTownship");
     if (!logisticsQuote) return t("checkout.shippingUnavailable");
+    if (shippingFee === 0 && checkoutQualifiesForFreeShipping(checkoutItems)) {
+      return t("checkout.free");
+    }
     return formatCheckoutShippingLabel(logisticsQuote, formatStorefrontPrice) || t("checkout.free");
-  }, [checkoutRegionKey, hasSelectedTownship, logisticsQuote, t]);
+  }, [checkoutItems, checkoutRegionKey, formatStorefrontPrice, hasSelectedTownship, logisticsQuote, shippingFee, t]);
 
   const estimatedDeliveryLabel = useMemo(() => {
     if (!logisticsQuote?.estimatedDays) return null;

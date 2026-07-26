@@ -69,7 +69,6 @@ const CACHE_LS_PREFIXES = [
   "migoo-shipping-addresses-",
   "migoo-applied-coupon",
   "vendor_storefront_",
-  "vendorAuth",
 ];
 
 /**

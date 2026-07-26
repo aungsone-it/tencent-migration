@@ -23,6 +23,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Truck,
 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
 import { VendorOnlinePresenceProfileView } from "./VendorOnlinePresenceFields";
@@ -105,6 +106,7 @@ interface Vendor {
   taxId?: string;
   bankName?: string;
   accountNumber?: string;
+  freeShippingEnabled?: boolean;
 }
 
 interface Product {
@@ -118,6 +120,7 @@ interface Product {
   images?: string[];
   image?: string;
   commissionRate?: number;
+  freeShipping?: boolean;
 }
 
 interface Order {
@@ -148,6 +151,7 @@ function mapVendorAdminJsonToProfileProducts(data: unknown): Product[] {
       image: p.images?.[0],
       commissionRate:
         typeof p.commissionRate === "number" ? p.commissionRate : parseFloat(p.commissionRate) || undefined,
+      freeShipping: p.freeShipping === true,
     };
   });
 }
@@ -354,6 +358,33 @@ class VendorProfileOrdersErrorBoundary extends Component<
     }
     return this.props.children;
   }
+}
+
+function sanitizeExportValue(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value === "string") {
+    if (value.startsWith("data:") && value.length > 200) return "[omitted binary data]";
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(sanitizeExportValue);
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = sanitizeExportValue(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
+function downloadExportFile(filename: string, content: string, mimeType: string): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
 }
 
 export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, onLoginAsVendor }: VendorProfileProps) {
@@ -718,6 +749,87 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
   }, [products, safeOrders, vendor.id, vendor.commission, vendorCatalogKeys]);
   
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  const vendorFreeShippingEnabled = vendor.freeShippingEnabled === true;
+  const freeShippingProductCount = useMemo(
+    () => products.filter((product) => product.freeShipping === true).length,
+    [products]
+  );
+
+  const handleSendEmail = useCallback(() => {
+    const email = String(vendor.email || "").trim();
+    if (!email) {
+      toast.error("This vendor has no email address on file.");
+      return;
+    }
+    const subject = encodeURIComponent("Message from Migoo Admin");
+    const body = encodeURIComponent(`Dear ${vendor.name},\n\n`);
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+  }, [vendor.email, vendor.name]);
+
+  const handleExportData = useCallback(() => {
+    const slug = String(vendor.storeSlug || vendor.name || vendor.id)
+      .trim()
+      .replace(/[^\w-]+/g, "_")
+      .slice(0, 40);
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      vendor: sanitizeExportValue({
+        ...vendor,
+        logo: vendor.logo ? "[omitted]" : undefined,
+        avatar: vendor.avatar ? "[omitted]" : undefined,
+      }),
+      storefrontSettings: sanitizeExportValue(storefrontSettings),
+      stats: {
+        totalRevenue,
+        totalOrders,
+        totalProducts,
+        activeProducts,
+        commissionEarned,
+        commissionRate: displayCommissionRate,
+        avgOrderValue: Math.round(avgOrderValue * 100) / 100,
+      },
+      products: sanitizeExportValue(products),
+      orders: sanitizeExportValue(
+        safeOrders.map((order: any) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          date: order.date || order.createdAt,
+          customer: orderDisplayCustomerName(order),
+          status: order.status,
+          shippingStatus: order.shippingStatus,
+          paymentStatus: order.paymentStatus,
+          items: (Array.isArray(order.items) ? order.items : [])
+            .filter((item: any) => lineItemBelongsToVendor(item, vendor, vendorCatalogKeys))
+            .map((item: any) => ({
+              name: item.name,
+              sku: item.sku,
+              quantity: item.quantity,
+              price: item.price,
+            })),
+        }))
+      ),
+    };
+
+    downloadExportFile(
+      `vendor_${slug}_${new Date().toISOString().slice(0, 10)}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json;charset=utf-8"
+    );
+    toast.success("Vendor data exported");
+  }, [
+    activeProducts,
+    avgOrderValue,
+    commissionEarned,
+    displayCommissionRate,
+    products,
+    safeOrders,
+    storefrontSettings,
+    totalOrders,
+    totalProducts,
+    totalRevenue,
+    vendor,
+    vendorCatalogKeys,
+  ]);
 
   const getStatusBadge = (status: VendorStatus) => {
     const variants: Record<string, { color: string; label: string }> = {
@@ -1059,11 +1171,11 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSendEmail}>
                 <Mail className="w-4 h-4 mr-2" />
                 Send Email
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportData}>
                 <Download className="w-4 h-4 mr-2" />
                 Export Data
               </DropdownMenuItem>
@@ -1092,6 +1204,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                 <div className="flex items-center gap-3 mb-2">
                   <h2 className="text-2xl font-semibold text-slate-900">{vendor.name}</h2>
                   {getStatusBadge(vendor.status)}
+                  {vendorFreeShippingEnabled && (
+                    <Badge className="bg-blue-100 text-blue-700 border-blue-200 border gap-1">
+                      <Truck className="w-3 h-3" />
+                      Free shipping enabled
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-slate-600 mb-4">{vendor.description || vendor.businessName || "Premium vendor partner"}</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1289,6 +1407,33 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                 </div>
               </div>
 
+              {vendorFreeShippingEnabled && (
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 mb-4">Free Shipping Feature</h3>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                        <Truck className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">Enabled by platform</Badge>
+                          <span className="text-sm text-slate-600">
+                            {freeShippingProductCount} of {totalProducts} product
+                            {totalProducts === 1 ? "" : "s"} marked free shipping
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          This vendor can mark products as free shipping in their admin portal. Checkout
+                          delivery fees become 0 MMK when the customer&apos;s cart contains only those
+                          products.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h3 className="text-base font-semibold text-slate-900 mb-4">Performance Summary</h3>
                 <div className="space-y-3">
@@ -1419,6 +1564,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                         <th className="text-left p-3 text-sm font-medium text-slate-600">Category</th>
                         <th className="text-left p-3 text-sm font-medium text-slate-600">Price</th>
                         <th className="text-left p-3 text-sm font-medium text-slate-600">Stock</th>
+                        {vendorFreeShippingEnabled && (
+                          <th className="text-left p-3 text-sm font-medium text-slate-600">Free shipping</th>
+                        )}
                         <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
                       </tr>
                     </thead>
@@ -1454,6 +1602,15 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                             })()}
                           </td>
                           <td className="p-3 text-sm text-slate-600">{product.stock}</td>
+                          {vendorFreeShippingEnabled && (
+                            <td className="p-3">
+                              {product.freeShipping ? (
+                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">Yes</Badge>
+                              ) : (
+                                <span className="text-sm text-slate-400">No</span>
+                              )}
+                            </td>
+                          )}
                           <td className="p-3">{getProductStatusBadge(product.status)}</td>
                         </tr>
                       ))}

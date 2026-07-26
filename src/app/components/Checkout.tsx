@@ -79,6 +79,10 @@ import { normalizeCheckoutStoragePath } from "../utils/vendorStorePaths";
 import { useIsMobile } from "./ui/use-mobile";
 import { useLanguage } from "../contexts/LanguageContext";
 import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
+import {
+  formatCustomerPhoneDisplay,
+  normalizeMyanmarPhone,
+} from "../utils/customerAuthIdentity";
 import { logisticsApi, type DeliveryPartner } from "../../utils/api";
 import {
   formatCheckoutShippingLabel,
@@ -121,6 +125,16 @@ function resolveUserIdFromRecord(u: unknown): string | null {
   if (typeof raw === "string" && raw.trim().length > 0) return raw.trim();
   if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
   return null;
+}
+
+function sanitizeMyanmarPhoneInput(value: string): string {
+  const cleaned = String(value || "")
+    .replace(/[^\d+\s-]/g, "")
+    .slice(0, 18);
+  if (cleaned.startsWith("+")) {
+    return `+${cleaned.slice(1).replace(/\+/g, "")}`;
+  }
+  return cleaned.replace(/\+/g, "");
 }
 
 interface CheckoutProps {
@@ -971,6 +985,9 @@ export function Checkout({
       country: initialSummarySnapshot?.shippingInfo?.country || "",
     };
   });
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const normalizedShippingPhone = normalizeMyanmarPhone(shippingInfo.phone);
+  const phoneInvalid = phoneTouched && !normalizedShippingPhone;
 
   const regionSelectOptions = useMemo(
     () => myanmarRegionSelectOptions(shippingInfo.state),
@@ -1118,15 +1135,20 @@ export function Checkout({
     if (step !== "checkout") return;
     const incomplete =
       !shippingInfo.fullName.trim() ||
-      !shippingInfo.phone.trim() ||
+      !normalizedShippingPhone ||
       !shippingInfo.address.trim() ||
       !shippingInfo.state.trim() ||
       !shippingInfo.city.trim();
-    if ((paymentMethod === "KPay" || paymentMethod === "KPay-PWA") && incomplete) {
+    if (
+      (paymentMethod === "COD" ||
+        paymentMethod === "KPay" ||
+        paymentMethod === "KPay-PWA") &&
+      incomplete
+    ) {
       setPaymentMethod("None");
       kpayAutoGenerateTriggeredRef.current = false;
     }
-  }, [shippingInfo, paymentMethod, step]);
+  }, [shippingInfo, normalizedShippingPhone, paymentMethod, step]);
 
   // Reset webhook confirmation whenever a new QR is generated (different order id).
   useEffect(() => {
@@ -1854,7 +1876,7 @@ export function Checkout({
   const getMissingRequiredFields = () => {
     const missingFields: string[] = [];
     if (!shippingInfo.fullName.trim()) missingFields.push(t("checkout.fullName"));
-    if (!shippingInfo.phone.trim()) missingFields.push(t("checkout.phoneNumber"));
+    if (!normalizedShippingPhone) missingFields.push(t("checkout.phoneNumber"));
     if (!shippingInfo.address.trim()) missingFields.push(t("checkout.address"));
     if (!shippingInfo.state.trim()) missingFields.push(t("checkout.stateRegion"));
     if (!shippingInfo.city.trim()) missingFields.push(t("checkout.township"));
@@ -1865,6 +1887,20 @@ export function Checkout({
       missingFields.push(t("checkout.deliveryMethod"));
     }
     return missingFields;
+  };
+
+  const validateRequiredCheckoutFields = () => {
+    setPhoneTouched(true);
+    if (shippingInfo.phone.trim() && !normalizedShippingPhone) {
+      toast.error(t("checkout.phoneInvalid"));
+      return false;
+    }
+    const missingFields = getMissingRequiredFields();
+    if (missingFields.length > 0) {
+      toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
+      return false;
+    }
+    return true;
   };
 
   const checkoutFieldsComplete = useMemo(
@@ -1885,12 +1921,18 @@ export function Checkout({
       toast.error(t("checkout.selectDeliveryMethodFirst"));
       return;
     }
-    const missingFields = getMissingRequiredFields();
-    if (missingFields.length > 0) {
-      toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
+    if (!validateRequiredCheckoutFields()) return;
+    setPaymentMethod("KPay");
+  };
+
+  const handleSelectCod = () => {
+    if (!paymentSelectionEnabled) {
+      toast.error(t("checkout.selectDeliveryMethodFirst"));
       return;
     }
-    setPaymentMethod("KPay");
+    if (!codPaymentAvailable) return;
+    if (!validateRequiredCheckoutFields()) return;
+    setPaymentMethod("COD");
   };
 
   const handleSelectKPayPwa = () => {
@@ -1898,11 +1940,7 @@ export function Checkout({
       toast.error(t("checkout.selectDeliveryMethodFirst"));
       return;
     }
-    const missingFields = getMissingRequiredFields();
-    if (missingFields.length > 0) {
-      toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
-      return;
-    }
+    if (!validateRequiredCheckoutFields()) return;
     setPaymentMethod("KPay-PWA");
   };
 
@@ -1917,11 +1955,7 @@ export function Checkout({
         toast.error(t("checkout.selectDeliveryMethodFirst"));
         return;
       }
-      const missingFields = getMissingRequiredFields();
-      if (missingFields.length > 0) {
-        toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
-        return;
-      }
+      if (!validateRequiredCheckoutFields()) return;
       if (finalTotal <= 0) {
         toast.error("Invalid amount for KBZPay payment");
         return;
@@ -1943,7 +1977,7 @@ export function Checkout({
         userId: effectiveUser?.id ?? null,
         customerName: shippingInfo.fullName,
         email: orderEmail,
-        phone: shippingInfo.phone,
+        phone: normalizedShippingPhone || shippingInfo.phone.trim(),
         subtotal: payableSubtotal,
         total: finalTotal,
         discount: discountAmount,
@@ -2130,11 +2164,7 @@ export function Checkout({
   const handlePlaceOrder = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
 
-    const missingFields = getMissingRequiredFields();
-    if (missingFields.length > 0) {
-      toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
-      return;
-    }
+    if (!validateRequiredCheckoutFields()) return;
     if (paymentMethod === "None") {
       toast.error(t("checkout.selectPaymentMethod"));
       return;
@@ -2224,7 +2254,7 @@ export function Checkout({
         customer: shippingInfo.fullName,
         customerName: shippingInfo.fullName,
         email: orderEmail,
-        phone: shippingInfo.phone,
+        phone: normalizedShippingPhone || shippingInfo.phone.trim(),
         status: "pending",
         paymentStatus:
           paymentMethod === "KPay"
@@ -2357,7 +2387,7 @@ export function Checkout({
           const newAddress = {
             id: `addr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             recipientName: shippingInfo.fullName,
-            phone: shippingInfo.phone,
+            phone: normalizedShippingPhone || shippingInfo.phone.trim(),
             addressLine1: shippingInfo.address,
             city: shippingInfo.city,
             state: shippingInfo.state,
@@ -2676,7 +2706,9 @@ export function Checkout({
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{t("checkout.phone")}</p>
-                  <p className="text-sm font-medium text-slate-900">{shippingInfo.phone}</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {formatCustomerPhoneDisplay(shippingInfo.phone)}
+                  </p>
                 </div>
                 {resolveOrderEmail() && (
                   <div>
@@ -2768,11 +2800,37 @@ export function Checkout({
                     <Input
                       id="vs-phone"
                       type="tel"
-                      placeholder="+95 9 XXX XXX XXX"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      maxLength={18}
+                      placeholder="+959XXXXXXXXX / 09XXXXXXXXX"
                       value={shippingInfo.phone}
-                      onChange={(e) => setShippingInfo({ ...shippingInfo, phone: e.target.value })}
-                      className={checkoutInputClass}
+                      onChange={(e) =>
+                        setShippingInfo({
+                          ...shippingInfo,
+                          phone: sanitizeMyanmarPhoneInput(e.target.value),
+                        })
+                      }
+                      onBlur={() => {
+                        setPhoneTouched(true);
+                        const normalized = normalizeMyanmarPhone(shippingInfo.phone);
+                        if (normalized) {
+                          setShippingInfo((current) => ({
+                            ...current,
+                            phone: formatCustomerPhoneDisplay(normalized),
+                          }));
+                        }
+                      }}
+                      aria-invalid={phoneInvalid}
+                      className={`${checkoutInputClass} ${
+                        phoneInvalid ? "border-red-500 focus:border-red-500" : ""
+                      }`}
                     />
+                    {phoneInvalid && (
+                      <p className="mt-1 text-xs text-red-600">
+                        {t("checkout.phoneInvalid")}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2910,7 +2968,7 @@ export function Checkout({
                 <div className={`space-y-3 ${!paymentSelectionEnabled ? "opacity-60" : ""}`}>
                   <button
                     type="button"
-                    onClick={() => codPaymentAvailable && setPaymentMethod("COD")}
+                    onClick={handleSelectCod}
                     disabled={!codPaymentAvailable || !paymentSelectionEnabled}
                     className={`w-full rounded-lg border p-4 text-left transition-colors ${
                       paymentMethod === "COD"
@@ -2991,9 +3049,14 @@ export function Checkout({
                             <QRCodeCanvas
                               value={kpaySession.qrContent}
                               size={184}
-                              level="M"
+                              level="H"
                               marginSize={2}
-                              imageSettings={undefined}
+                              imageSettings={{
+                                src: "/kbzpay-logo.png",
+                                width: 28,
+                                height: 28,
+                                excavate: true,
+                              }}
                             />
                           ) : (
                             <div className="px-4 text-center text-sm text-slate-500">

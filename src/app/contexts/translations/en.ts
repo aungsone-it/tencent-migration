@@ -242,6 +242,7 @@ export const enTranslations: Record<string, string> = {
     'checkout.fullName': 'Full Name',
     'checkout.fullNamePlaceholder': 'Enter your full name',
     'checkout.phoneNumber': 'Phone Number',
+    'checkout.phoneInvalid': 'Enter a valid Myanmar phone number (+959XXXXXXXXX or 09XXXXXXXXX)',
     'checkout.address': 'Address',
     'checkout.addressPlaceholder': 'No. 123, Main Street',
     'checkout.stateRegion': 'State/Region',

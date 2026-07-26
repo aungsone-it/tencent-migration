@@ -348,7 +348,7 @@ function customerSegmentFromRfm(cust: any): string {
 function normalizeAudiencePhone(raw: string | undefined): string {
   const normalized = String(raw || "").replace(/[\s\-]/g, "");
   if (!normalized) return "";
-  if (/^09\d{9}$/.test(normalized)) return `+959${normalized.slice(1)}`;
+  if (/^09\d{9}$/.test(normalized)) return `+95${normalized.slice(1)}`;
   if (/^\+959\d{9}$/.test(normalized)) return normalized;
   return normalized;
 }

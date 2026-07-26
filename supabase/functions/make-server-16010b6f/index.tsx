@@ -1858,7 +1858,7 @@ app.post("/make-server-16010b6f/auth/validate", async (c) => {
       } else {
         const canon =
           normalizedPhone.startsWith("09")
-            ? `+959${normalizedPhone.slice(1)}`
+            ? `+95${normalizedPhone.slice(1)}`
             : normalizedPhone;
         const allCustomers = await withTimeout(kv.getByPrefix("customer:"), 5000);
         const existingPhoneCustomer = Array.isArray(allCustomers)
@@ -1866,7 +1866,7 @@ app.post("/make-server-16010b6f/auth/validate", async (c) => {
               if (!c?.phone) return false;
               const p = String(c.phone).replace(/[\s\-]/g, "");
               const existing =
-                p.startsWith("09") ? `+959${p.slice(1)}` : p;
+                p.startsWith("09") ? `+95${p.slice(1)}` : p;
               return existing === canon;
             })
           : null;
@@ -13429,7 +13429,7 @@ app.get("/make-server-16010b6f/vendor/orders/:vendorId", async (c) => {
 function normalizeAudiencePhone(raw: string | undefined): string {
   const normalized = String(raw || "").replace(/[\s\-]/g, "");
   if (!normalized) return "";
-  if (/^09\d{9}$/.test(normalized)) return `+959${normalized.slice(1)}`;
+  if (/^09\d{9}$/.test(normalized)) return `+95${normalized.slice(1)}`;
   if (/^\+959\d{9}$/.test(normalized)) return normalized;
   return normalized;
 }

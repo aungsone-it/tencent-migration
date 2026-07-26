@@ -56,6 +56,7 @@ export const myTranslations: Record<string, string> = {
     'checkout.fullNamePlaceholder': 'အမည်အပြည့်အစုံ ထည့်ပါ',
     'checkout.fullName.placeholder': 'အမည်အပြည့်အစုံ ထည့်ပါ',
     'checkout.phoneNumber': 'ဖုန်းနံပါတ်',
+    'checkout.phoneInvalid': 'မှန်ကန်သော မြန်မာဖုန်းနံပါတ် ထည့်ပါ (+959XXXXXXXXX သို့မဟုတ် 09XXXXXXXXX)',
     'checkout.address': 'လိပ်စာ',
     'checkout.addressPlaceholder': 'ဥပမာ - အမှတ် ၁၂၃၊ လမ်းမကြီး',
     'checkout.stateRegion': 'တိုင်း/ပြည်နယ်',

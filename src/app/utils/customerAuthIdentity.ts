@@ -38,7 +38,7 @@ const MYANMAR_PHONE_RE = /^(\+959|09)\d{9}$/;
 export function normalizeMyanmarPhone(raw: string): string | null {
   const normalized = String(raw || "").replace(/[\s\-]/g, "");
   if (!MYANMAR_PHONE_RE.test(normalized)) return null;
-  if (normalized.startsWith("09")) return `+959${normalized.slice(1)}`;
+  if (normalized.startsWith("09")) return `+95${normalized.slice(1)}`;
   return normalized;
 }
 

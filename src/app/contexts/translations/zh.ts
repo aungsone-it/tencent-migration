@@ -223,6 +223,7 @@ export const zhTranslations: Record<string, string> = {
     'checkout.fullName': '姓名',
     'checkout.fullNamePlaceholder': '请输入姓名',
     'checkout.phoneNumber': '电话号码',
+    'checkout.phoneInvalid': '请输入有效的缅甸电话号码（+959XXXXXXXXX 或 09XXXXXXXXX）',
     'checkout.address': '地址',
     'checkout.addressPlaceholder': '例如：No. 123, Main Street',
     'checkout.stateRegion': '省/地区',

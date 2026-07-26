@@ -18,6 +18,10 @@ const ACTION_KEY_MAP: Record<string, string> = {
   "vendor deleted": "activity.vendorDeleted",
   "vendor application approved": "activity.vendorApproved",
   "vendor application rejected": "activity.vendorRejected",
+  "vendor free shipping enabled": "activity.vendorFreeShippingEnabled",
+  "vendor free shipping disabled": "activity.vendorFreeShippingDisabled",
+  "product free shipping enabled": "activity.productFreeShippingEnabled",
+  "product free shipping disabled": "activity.productFreeShippingDisabled",
 };
 
 const RESOURCE_KEY_MAP: Record<string, string> = {
@@ -40,6 +44,8 @@ const RESOURCE_KEY_MAP: Record<string, string> = {
   collaborator: "activity.resource.collaborator",
   collaborators: "activity.resource.collaborators",
   "vendor application": "activity.resource.vendorApplication",
+  vendor: "activity.resource.vendor",
+  vendors: "activity.resource.vendor",
   "vendor storefront": "activity.resource.vendorStorefront",
   "vendor custom domain": "activity.resource.vendorCustomDomain",
   domain: "activity.resource.domain",
@@ -61,6 +67,10 @@ const DETAIL_STATUS_KEY_MAP: Record<string, string> = {
   deleted: "activity.detail.deleted",
   active: "common.active",
   inactive: "common.inactive",
+  enabled: "activity.detail.enabled",
+  disabled: "activity.detail.disabled",
+  on: "products.freeShippingOn",
+  off: "products.freeShippingOff",
 };
 
 export function translateStaffActivityAction(action: string, t: TranslateFn): string {

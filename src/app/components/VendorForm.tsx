@@ -1,6 +1,7 @@
 import { Card } from "./ui/card";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
+import { useLanguage } from "../contexts/LanguageContext";
 import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
 import { API_BASE_URL } from '../../utils/api-client';
 
@@ -11,6 +12,7 @@ interface VendorFormProps {
 }
 
 export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
+  const { t } = useLanguage();
   const [name, setName] = useState(editingVendor?.name || "");
   const [email, setEmail] = useState(editingVendor?.email || "");
   const [phone, setPhone] = useState(editingVendor?.phone || "");
@@ -628,11 +630,10 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
                   <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <div className="space-y-1 pr-2">
                       <Label htmlFor="freeShippingEnabled" className="text-sm font-medium text-slate-900">
-                        Free shipping feature access
+                        {t("vendor.freeShippingFeatureAccess")}
                       </Label>
                       <p className="text-xs text-slate-500">
-                        Allow this vendor to mark selected store products as free shipping. Checkout
-                        shipping fees become 0 MMK when the cart contains only those products.
+                        {t("vendor.freeShippingFeatureAccessDesc")}
                       </p>
                     </div>
                     <Switch

@@ -227,3 +227,53 @@ export async function appendStaffActivity(
     console.warn("appendStaffActivity skipped:", e);
   }
 }
+
+async function appendGlobalFeedWithActorMeta(
+  row: StaffActivityEntry,
+  actor: { actorUserId: string; actorName: string; actorEmail: string; actorRole: string }
+): Promise<void> {
+  const feedEntry: StaffActivityFeedEntry = {
+    ...row,
+    actorUserId: actor.actorUserId,
+    actorName: actor.actorName,
+    actorEmail: actor.actorEmail,
+    actorRole: actor.actorRole,
+  };
+  const prevFeed = await kv.get(GLOBAL_FEED_KEY);
+  const feedArr = Array.isArray(prevFeed) ? (prevFeed as StaffActivityFeedEntry[]) : [];
+  const next = [feedEntry, ...feedArr].slice(0, MAX_GLOBAL_FEED);
+  await kv.set(GLOBAL_FEED_KEY, next);
+}
+
+/** Vendor portal actions (vendor-admin) — writes to global activity feed using vendor KV profile. */
+export async function appendVendorPortalActivity(
+  vendorId: string | undefined | null,
+  entry: Omit<StaffActivityEntry, "id" | "at"> & { at?: string }
+): Promise<void> {
+  const vid = String(vendorId || "").trim();
+  if (!vid) return;
+  try {
+    const vendorRaw = await kv.get(`vendor:${vid}`);
+    if (!vendorRaw || typeof vendorRaw !== "object") return;
+    const vendor = vendorRaw as Record<string, unknown>;
+    const at = entry.at || new Date().toISOString();
+    const id = `act_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    const row: StaffActivityEntry = {
+      id,
+      type: entry.type,
+      action: entry.action,
+      detail: entry.detail,
+      at,
+    };
+    const actorName = String(vendor.name || vendor.businessName || vendor.storeName || "").trim();
+    const actorEmail = String(vendor.email || "").trim();
+    await appendGlobalFeedWithActorMeta(row, {
+      actorUserId: vid,
+      actorName: actorName || actorEmail || vid,
+      actorEmail,
+      actorRole: "vendor-admin",
+    });
+  } catch (e) {
+    console.warn("appendVendorPortalActivity skipped:", e);
+  }
+}

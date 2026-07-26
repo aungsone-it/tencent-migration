@@ -40,6 +40,7 @@ import {
   ADMIN_PRODUCTS_LIST_CHANGED_EVENT,
   fetchVendorCategories,
   getCachedAdminAllProducts,
+  invalidateStaffActivitiesCache,
 } from "../../utils/module-cache";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import {
@@ -349,6 +350,7 @@ export function VendorAdminProductsCRUD({
         },
         body: JSON.stringify({
           vendorFreeShipping: { [vendorId]: next },
+          performedByVendorId: vendorId,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -363,6 +365,7 @@ export function VendorAdminProductsCRUD({
         vendorStoreSlug,
         routeStoreName,
       ]);
+      invalidateStaffActivitiesCache();
       toast.success(
         next ? t("products.freeShippingEnabledForProduct") : t("products.freeShippingDisabledForProduct")
       );

@@ -26,6 +26,7 @@ import {
   Truck,
 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
+import { useLanguage } from "../contexts/LanguageContext";
 import { VendorOnlinePresenceProfileView } from "./VendorOnlinePresenceFields";
 import { pickOnlinePresenceLinks } from "../utils/vendorOnlinePresence";
 import { Button } from "./ui/button";
@@ -243,7 +244,7 @@ function orderDisplayCustomerName(order: any): string {
       if (typeof v === "string" && v.trim() !== "") return v.trim();
     }
   }
-  return "Guest";
+  return "";
 }
 
 function normalizeOrderStatusKey(status: string | undefined): string {
@@ -388,6 +389,7 @@ function downloadExportFile(filename: string, content: string, mimeType: string)
 }
 
 export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, onLoginAsVendor }: VendorProfileProps) {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<"overview" | "products" | "orders" | "contract" | "storefront" | "social">("overview");
   const [socialRefreshKey, setSocialRefreshKey] = useState(() => Date.now());
   const [products, setProducts] = useState<Product[]>([]);
@@ -487,7 +489,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       console.log("🔄 Vendor logo updated via event:", event.detail);
       if (event.detail.vendorId === vendor.id && event.detail.logo) {
         setCurrentVendorLogo(event.detail.logo);
-        toast.success("Vendor logo updated!");
+        toast.success(t("vendorProfile.logoUpdated"));
       }
     };
     
@@ -544,7 +546,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
     } catch (error) {
       console.error("Error loading vendor products:", error);
       toast.error(
-        error instanceof Error ? error.message : "Could not load vendor products."
+        error instanceof Error ? error.message : t("vendorProfile.loadProductsError")
       );
       if (!forceRefresh || productsRef.current.length === 0) {
         setProducts([]);
@@ -581,7 +583,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       );
     } catch (error) {
       console.error("Error loading vendor orders:", error);
-      toast.error("Could not load vendor orders.");
+      toast.error(t("vendorProfile.loadOrdersError"));
       if (!forceRefresh || ordersRef.current.length === 0) {
         setOrders([]);
       }
@@ -669,7 +671,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       if (Number.isFinite(v)) {
         return {
           value: Math.round(v * 100) / 100,
-          subtitle: "Contract rate" as const,
+          subtitleKey: "vendorProfile.contractRate" as const,
         };
       }
     }
@@ -679,10 +681,10 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
     if (rates.length > 0) {
       return {
         value: Math.round(Math.max(...rates) * 100) / 100,
-        subtitle: "From product settings" as const,
+        subtitleKey: "vendorProfile.fromProductSettings" as const,
       };
     }
-    return { value: 0, subtitle: "Contract rate" as const };
+    return { value: 0, subtitleKey: "vendorProfile.contractRate" as const };
   }, [vendor.commission, products]);
 
   const displayCommissionRate = commissionRateDisplay.value;
@@ -758,13 +760,13 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
   const handleSendEmail = useCallback(() => {
     const email = String(vendor.email || "").trim();
     if (!email) {
-      toast.error("This vendor has no email address on file.");
+      toast.error(t("vendorProfile.noEmail"));
       return;
     }
-    const subject = encodeURIComponent("Message from Migoo Admin");
+    const subject = encodeURIComponent(t("vendorProfile.emailSubject"));
     const body = encodeURIComponent(`Dear ${vendor.name},\n\n`);
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
-  }, [vendor.email, vendor.name]);
+  }, [t, vendor.email, vendor.name]);
 
   const handleExportData = useCallback(() => {
     const slug = String(vendor.storeSlug || vendor.name || vendor.id)
@@ -815,7 +817,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       JSON.stringify(payload, null, 2),
       "application/json;charset=utf-8"
     );
-    toast.success("Vendor data exported");
+    toast.success(t("vendorProfile.exportSuccess"));
   }, [
     activeProducts,
     avgOrderValue,
@@ -824,6 +826,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
     products,
     safeOrders,
     storefrontSettings,
+    t,
     totalOrders,
     totalProducts,
     totalRevenue,
@@ -832,31 +835,45 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
   ]);
 
   const getStatusBadge = (status: VendorStatus) => {
-    const variants: Record<string, { color: string; label: string }> = {
-      active: { color: "bg-green-100 text-green-700 border-green-200", label: "Active" },
-      inactive: { color: "bg-gray-100 text-gray-700 border-gray-200", label: "Inactive" },
-      pending: { color: "bg-yellow-100 text-yellow-700 border-yellow-200", label: "Pending" },
-      suspended: { color: "bg-orange-100 text-orange-700 border-orange-200", label: "Suspended" },
-      banned: { color: "bg-red-100 text-red-700 border-red-200", label: "Banned" },
+    const labelKeys: Record<string, string> = {
+      active: "vendor.active",
+      inactive: "vendor.inactive",
+      pending: "vendorProfile.statusPending",
+      suspended: "vendor.suspended",
+      banned: "vendor.banned",
     };
-    const variant = variants[status] || variants.pending;
+    const colors: Record<string, string> = {
+      active: "bg-green-100 text-green-700 border-green-200",
+      inactive: "bg-gray-100 text-gray-700 border-gray-200",
+      pending: "bg-yellow-100 text-yellow-700 border-yellow-200",
+      suspended: "bg-orange-100 text-orange-700 border-orange-200",
+      banned: "bg-red-100 text-red-700 border-red-200",
+    };
+    const key = labelKeys[status] || labelKeys.pending;
+    const color = colors[status] || colors.pending;
     return (
-      <Badge className={`${variant.color} border`}>
-        {variant.label}
+      <Badge className={`${color} border`}>
+        {t(key)}
       </Badge>
     );
   };
 
   const getProductStatusBadge = (status: string) => {
-    const variants: Record<string, { color: string; label: string }> = {
-      active: { color: "bg-green-100 text-green-700 border-green-200", label: "Active" },
-      "off-shelf": { color: "bg-red-100 text-red-700 border-red-200", label: "Off Shelf" },
-      discontinued: { color: "bg-gray-100 text-gray-700 border-gray-200", label: "Discontinued" },
+    const labelKeys: Record<string, string> = {
+      active: "products.active",
+      "off-shelf": "products.offShelf",
+      discontinued: "vendorProfile.discontinued",
     };
-    const variant = variants[status] || variants.active;
+    const colors: Record<string, string> = {
+      active: "bg-green-100 text-green-700 border-green-200",
+      "off-shelf": "bg-red-100 text-red-700 border-red-200",
+      discontinued: "bg-gray-100 text-gray-700 border-gray-200",
+    };
+    const key = labelKeys[status] || labelKeys.active;
+    const color = colors[status] || colors.active;
     return (
-      <Badge className={`${variant.color} border text-xs`}>
-        {variant.label}
+      <Badge className={`${color} border text-xs`}>
+        {t(key)}
       </Badge>
     );
   };
@@ -864,19 +881,29 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
   const getOrderStatusBadge = (status: unknown) => {
     const normalizedStatus =
       normalizeOrderStatusKey(String(status ?? "")) || "pending";
-    const variants: Record<string, { color: string; label: string }> = {
-      pending: { color: "bg-yellow-100 text-yellow-700 border-yellow-200", label: "Pending" },
-      processing: { color: "bg-slate-100 text-slate-700 border-slate-200", label: "Processing" },
-      'ready-to-ship': { color: "bg-cyan-100 text-cyan-700 border-cyan-200", label: "Ready to Ship" },
-      fulfilled: { color: "bg-emerald-100 text-emerald-700 border-emerald-200", label: "Fulfilled" },
-      shipped: { color: "bg-purple-100 text-purple-700 border-purple-200", label: "Shipped" },
-      delivered: { color: "bg-green-100 text-green-700 border-green-200", label: "Delivered" },
-      cancelled: { color: "bg-red-100 text-red-700 border-red-200", label: "Cancelled" },
+    const labelKeys: Record<string, string> = {
+      pending: "orders.pending",
+      processing: "orders.processing",
+      "ready-to-ship": "orders.readyToShip",
+      fulfilled: "orders.fulfilled",
+      shipped: "orders.shipped",
+      delivered: "orders.delivered",
+      cancelled: "orders.cancelled",
     };
-    const variant = variants[normalizedStatus] || variants.pending;
+    const colors: Record<string, string> = {
+      pending: "bg-yellow-100 text-yellow-700 border-yellow-200",
+      processing: "bg-slate-100 text-slate-700 border-slate-200",
+      "ready-to-ship": "bg-cyan-100 text-cyan-700 border-cyan-200",
+      fulfilled: "bg-emerald-100 text-emerald-700 border-emerald-200",
+      shipped: "bg-purple-100 text-purple-700 border-purple-200",
+      delivered: "bg-green-100 text-green-700 border-green-200",
+      cancelled: "bg-red-100 text-red-700 border-red-200",
+    };
+    const key = labelKeys[normalizedStatus] || labelKeys.pending;
+    const color = colors[normalizedStatus] || colors.pending;
     return (
-      <Badge className={`${variant.color} border text-xs`}>
-        {variant.label}
+      <Badge className={`${color} border text-xs`}>
+        {t(key)}
       </Badge>
     );
   };
@@ -947,7 +974,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       } catch (error) {
         if (!cancelled) {
           console.error("Assign picker: failed to load products page", error);
-          toast.error("Failed to load products");
+          toast.error(t("vendorProfile.loadProductsFailed"));
           setAllPlatformProducts([]);
           setAssignPickerServerTotal(0);
           setAssignPickerServerHasMore(false);
@@ -1003,7 +1030,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
     const toAdd = selectedProductIds;
     const toRemove = [...new Set(pickerAssignedUncheckedIds)];
     if (toAdd.length === 0 && toRemove.length === 0) {
-      toast.error("No changes to apply");
+      toast.error(t("vendorProfile.noChanges"));
       return;
     }
 
@@ -1043,14 +1070,31 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
 
       if (addFailed > 0 || removeFailed > 0) {
         toast.warning(
-          `Updated ${vendor.name}: +${added} added, −${removed} removed. Some operations failed (${addFailed + removeFailed}).`
+          t("vendorProfile.productsUpdatePartial")
+            .replace("{vendor}", vendor.name)
+            .replace("{added}", String(added))
+            .replace("{removed}", String(removed))
+            .replace("{failed}", String(addFailed + removeFailed))
         );
       } else if (toAdd.length > 0 && toRemove.length > 0) {
-        toast.success(`Added ${added} and removed ${removed} product(s) for ${vendor.name}`);
+        toast.success(
+          t("vendorProfile.productsAddedRemoved")
+            .replace("{added}", String(added))
+            .replace("{removed}", String(removed))
+            .replace("{vendor}", vendor.name)
+        );
       } else if (toRemove.length > 0) {
-        toast.success(`Removed ${removed} product(s) from ${vendor.name}`);
+        toast.success(
+          t("vendorProfile.productsRemoved")
+            .replace("{count}", String(removed))
+            .replace("{vendor}", vendor.name)
+        );
       } else {
-        toast.success(`${added} product(s) added to ${vendor.name}`);
+        toast.success(
+          t("vendorProfile.productsAdded")
+            .replace("{count}", String(added))
+            .replace("{vendor}", vendor.name)
+        );
       }
 
       setShowProductSelectModal(false);
@@ -1064,7 +1108,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       await loadProducts(true);
     } catch (error) {
       console.error("Error applying vendor product picker:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to apply changes");
+      toast.error(error instanceof Error ? error.message : t("vendorProfile.applyFailed"));
     } finally {
       setSavingProducts(false);
     }
@@ -1135,8 +1179,8 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Vendor Profile</h1>
-            <p className="text-sm text-slate-500 mt-1">View comprehensive vendor information</p>
+            <h1 className="text-2xl font-semibold text-slate-900">{t("vendorProfile.title")}</h1>
+            <p className="text-sm text-slate-500 mt-1">{t("vendorProfile.subtitle")}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -1148,7 +1192,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               className="bg-slate-900 hover:bg-slate-800 text-white"
             >
               <Store className="w-4 h-4 mr-2" />
-              Login as Vendor
+              {t("vendorProfile.loginAsVendor")}
             </Button>
           )}
           <Button 
@@ -1158,11 +1202,11 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
             className="border-slate-300 text-slate-700 hover:bg-slate-50"
           >
             <Store className="w-4 h-4 mr-2" />
-            Manage Storefront
+            {t("vendorProfile.manageStorefront")}
           </Button>
           <Button type="button" variant="outline" onClick={() => onEdit(vendor)}>
             <Edit className="w-4 h-4 mr-2" />
-            Edit Profile
+            {t("vendorProfile.editProfile")}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1173,11 +1217,11 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={handleSendEmail}>
                 <Mail className="w-4 h-4 mr-2" />
-                Send Email
+                {t("vendorProfile.sendEmail")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleExportData}>
                 <Download className="w-4 h-4 mr-2" />
-                Export Data
+                {t("vendorProfile.exportData")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1207,11 +1251,13 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   {vendorFreeShippingEnabled && (
                     <Badge className="bg-blue-100 text-blue-700 border-blue-200 border gap-1">
                       <Truck className="w-3 h-3" />
-                      Free shipping enabled
+                      {t("vendor.freeShippingBadge")}
                     </Badge>
                   )}
                 </div>
-                <p className="text-slate-600 mb-4">{vendor.description || vendor.businessName || "Premium vendor partner"}</p>
+                <p className="text-slate-600 mb-4">
+                  {vendor.description || vendor.businessName || t("vendorProfile.defaultDescription")}
+                </p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <Mail className="w-4 h-4" />
@@ -1223,11 +1269,16 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <MapPin className="w-4 h-4" />
-                    <span>{vendor.location || "Myanmar"}</span>
+                    <span>{vendor.location || t("vendorProfile.defaultLocation")}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <Calendar className="w-4 h-4" />
-                    <span>Joined {vendor.joinedDate || "Recently"}</span>
+                    <span>
+                      {t("vendorProfile.joined").replace(
+                        "{date}",
+                        vendor.joinedDate || t("vendorProfile.joinedRecently")
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1241,7 +1292,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
         <Card className="p-4 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-500">Total Revenue</p>
+              <p className="text-xs text-slate-500">{t("vendorProfile.totalRevenue")}</p>
               <p className="text-xl font-semibold text-slate-900 mt-1">{formatMMK(totalRevenue)}</p>
             </div>
             <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -1253,9 +1304,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
         <Card className="p-4 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-500">Total Orders</p>
+              <p className="text-xs text-slate-500">{t("vendorProfile.totalOrders")}</p>
               <p className="text-xl font-semibold text-slate-900 mt-1">{totalOrders}</p>
-              <p className="text-xs text-slate-400 mt-0.5">All time</p>
+              <p className="text-xs text-slate-400 mt-0.5">{t("vendorProfile.allTime")}</p>
             </div>
             <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
               <ShoppingCart className="w-5 h-5 text-slate-600" />
@@ -1266,9 +1317,11 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
         <Card className="p-4 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-500">Products</p>
+              <p className="text-xs text-slate-500">{t("vendorProfile.products")}</p>
               <p className="text-xl font-semibold text-slate-900 mt-1">{totalProducts}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{activeProducts} active</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {t("vendorProfile.activeCount").replace("{count}", String(activeProducts))}
+              </p>
             </div>
             <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
               <Package className="w-5 h-5 text-green-600" />
@@ -1279,9 +1332,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
         <Card className="p-4 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-500">Commission Earned</p>
+              <p className="text-xs text-slate-500">{t("vendorProfile.commissionEarned")}</p>
               <p className="text-xl font-semibold text-slate-900 mt-1">{formatMMK(commissionEarned)}</p>
-              <p className="text-xs text-green-600 mt-0.5">To pay vendor</p>
+              <p className="text-xs text-green-600 mt-0.5">{t("vendorProfile.toPayVendor")}</p>
             </div>
             <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-5 h-5 text-orange-600" />
@@ -1292,10 +1345,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
         <Card className="p-4 border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-500">Commission Rate</p>
+              <p className="text-xs text-slate-500">{t("vendorProfile.commissionRate")}</p>
               <p className="text-xl font-semibold text-slate-900 mt-1">{displayCommissionRate}%</p>
-              <p className="text-xs text-slate-400 mt-0.5">{commissionRateDisplay.subtitle}</p>
-              <p className="text-xs text-green-600 mt-0.5">{formatMMK(commissionEarned)} to pay</p>
+              <p className="text-xs text-slate-400 mt-0.5">{t(commissionRateDisplay.subtitleKey)}</p>
+              <p className="text-xs text-green-600 mt-0.5">
+                {t("vendorProfile.toPay").replace("{amount}", formatMMK(commissionEarned))}
+              </p>
             </div>
             <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-5 h-5 text-pink-600" />
@@ -1317,7 +1372,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              Overview
+              {t("vendorProfile.tabOverview")}
             </button>
             <button
               type="button"
@@ -1328,7 +1383,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              Products ({totalProducts})
+              {t("vendorProfile.tabProducts").replace("{count}", String(totalProducts))}
             </button>
             <button
               type="button"
@@ -1339,7 +1394,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              Orders ({totalOrders})
+              {t("vendorProfile.tabOrders").replace("{count}", String(totalOrders))}
             </button>
             <button
               type="button"
@@ -1350,7 +1405,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              Contract
+              {t("vendorProfile.tabContract")}
             </button>
             <button
               type="button"
@@ -1361,7 +1416,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              Storefront
+              {t("vendorProfile.tabStorefront")}
             </button>
             <button
               type="button"
@@ -1375,7 +1430,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              Social Profile
+              {t("vendorProfile.tabSocial")}
             </button>
           </div>
         </div>
@@ -1386,30 +1441,32 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
           {activeTab === "overview" && (
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-4">Vendor Information</h3>
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">{t("vendorProfile.vendorInformation")}</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-slate-50 rounded-lg">
-                    <p className="text-sm text-slate-500 mb-1">Business Name</p>
+                    <p className="text-sm text-slate-500 mb-1">{t("vendorProfile.businessName")}</p>
                     <p className="font-medium text-slate-900">{vendor.businessName || vendor.name}</p>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-lg">
-                    <p className="text-sm text-slate-500 mb-1">Business Type</p>
-                    <p className="font-medium text-slate-900">{vendor.businessType || "General"}</p>
+                    <p className="text-sm text-slate-500 mb-1">{t("vendorProfile.businessType")}</p>
+                    <p className="font-medium text-slate-900">{vendor.businessType || t("vendorProfile.general")}</p>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-lg">
-                    <p className="text-sm text-slate-500 mb-1">Tax ID</p>
-                    <p className="font-medium text-slate-900">{vendor.taxId || "N/A"}</p>
+                    <p className="text-sm text-slate-500 mb-1">{t("vendorProfile.taxId")}</p>
+                    <p className="font-medium text-slate-900">{vendor.taxId || t("vendorProfile.na")}</p>
                   </div>
                   <div className="p-4 bg-slate-50 rounded-lg">
-                    <p className="text-sm text-slate-500 mb-1">Bank Account</p>
-                    <p className="font-medium text-slate-900">{vendor.bankName || "N/A"} - {vendor.accountNumber || "N/A"}</p>
+                    <p className="text-sm text-slate-500 mb-1">{t("vendorProfile.bankAccount")}</p>
+                    <p className="font-medium text-slate-900">
+                      {vendor.bankName || t("vendorProfile.na")} - {vendor.accountNumber || t("vendorProfile.na")}
+                    </p>
                   </div>
                 </div>
               </div>
 
               {vendorFreeShippingEnabled && (
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900 mb-4">Free Shipping Feature</h3>
+                  <h3 className="text-lg font-semibold text-slate-900 mb-4">{t("vendor.freeShippingFeatureTitle")}</h3>
                   <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
@@ -1417,16 +1474,17 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                       </div>
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">Enabled by platform</Badge>
+                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">
+                            {t("vendor.freeShippingEnabledByPlatform")}
+                          </Badge>
                           <span className="text-sm text-slate-600">
-                            {freeShippingProductCount} of {totalProducts} product
-                            {totalProducts === 1 ? "" : "s"} marked free shipping
+                            {t("vendor.freeShippingProductsCount")
+                              .replace("{count}", String(freeShippingProductCount))
+                              .replace("{total}", String(totalProducts))}
                           </span>
                         </div>
                         <p className="text-sm text-slate-600">
-                          This vendor can mark products as free shipping in their admin portal. Checkout
-                          delivery fees become 0 MMK when the customer&apos;s cart contains only those
-                          products.
+                          {t("vendor.freeShippingFeatureDesc")}
                         </p>
                       </div>
                     </div>
@@ -1435,7 +1493,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               )}
 
               <div>
-                <h3 className="text-base font-semibold text-slate-900 mb-4">Performance Summary</h3>
+                <h3 className="text-base font-semibold text-slate-900 mb-4">{t("vendorProfile.performanceSummary")}</h3>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                     <div className="flex items-center gap-3">
@@ -1443,8 +1501,8 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                         <DollarSign className="w-5 h-5 text-purple-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-slate-900">Total Revenue</p>
-                        <p className="text-xs text-slate-500">All time earnings</p>
+                        <p className="text-sm font-medium text-slate-900">{t("vendorProfile.totalRevenue")}</p>
+                        <p className="text-xs text-slate-500">{t("vendorProfile.allTimeEarnings")}</p>
                       </div>
                     </div>
                     <p className="text-base font-semibold text-slate-900">{formatMMK(totalRevenue)}</p>
@@ -1456,8 +1514,8 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                         <Package className="w-5 h-5 text-green-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-slate-900">Active Products</p>
-                        <p className="text-xs text-slate-500">Currently available</p>
+                        <p className="text-sm font-medium text-slate-900">{t("vendorProfile.activeProducts")}</p>
+                        <p className="text-xs text-slate-500">{t("vendorProfile.currentlyAvailable")}</p>
                       </div>
                     </div>
                     <p className="text-base font-semibold text-slate-900">{activeProducts}</p>
@@ -1469,8 +1527,10 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                         <TrendingUp className="w-5 h-5 text-pink-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-slate-900">Commission to Pay Vendor</p>
-                        <p className="text-xs text-slate-500">Referral bonus at {vendor.commission}%</p>
+                        <p className="text-sm font-medium text-slate-900">{t("vendorProfile.commissionToPay")}</p>
+                        <p className="text-xs text-slate-500">
+                          {t("vendorProfile.referralBonus").replace("{rate}", String(vendor.commission ?? 0))}
+                        </p>
                       </div>
                     </div>
                     <p className="text-base font-semibold text-green-600">{formatMMK(commissionEarned)}</p>
@@ -1484,7 +1544,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
           {activeTab === "products" && (
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-slate-900">Vendor Products</h3>
+                <h3 className="text-lg font-semibold text-slate-900">{t("vendorProfile.vendorProducts")}</h3>
                 <div className="flex items-center gap-2">
                   <Button 
                     variant="outline" 
@@ -1493,9 +1553,11 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                     className="border-slate-300 text-slate-700 hover:bg-slate-50"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Select Product
+                    {t("products.selectProduct")}
                   </Button>
-                  <Badge variant="secondary">{totalProducts} total</Badge>
+                  <Badge variant="secondary">
+                    {t("vendorProfile.totalBadge").replace("{count}", String(totalProducts))}
+                  </Badge>
                 </div>
               </div>
               
@@ -1504,12 +1566,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50">
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Product</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.product")}</th>
                         <th className="text-left p-3 text-sm font-medium text-slate-600">SKU</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Category</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Price</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Stock</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.category")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.price")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("vendorProfile.stock")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.status")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1544,14 +1606,14 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               ) : products.length === 0 ? (
                 <div className="text-center py-12">
                   <Package className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-slate-900 mb-1">No Products Yet</h3>
-                  <p className="text-sm text-slate-500 mb-4">This vendor hasn't added any products</p>
+                  <h3 className="text-lg font-medium text-slate-900 mb-1">{t("vendorProfile.noProductsYet")}</h3>
+                  <p className="text-sm text-slate-500 mb-4">{t("vendorProfile.noProductsDesc")}</p>
                   <Button 
                     onClick={handleSelectProduct}
                     className="bg-slate-900 hover:bg-slate-800"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Select Product
+                    {t("products.selectProduct")}
                   </Button>
                 </div>
               ) : (
@@ -1559,15 +1621,15 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50">
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Product</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.product")}</th>
                         <th className="text-left p-3 text-sm font-medium text-slate-600">SKU</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Category</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Price</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Stock</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.category")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.price")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("vendorProfile.stock")}</th>
                         {vendorFreeShippingEnabled && (
-                          <th className="text-left p-3 text-sm font-medium text-slate-600">Free shipping</th>
+                          <th className="text-left p-3 text-sm font-medium text-slate-600">{t("vendor.freeShippingColumn")}</th>
                         )}
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("products.status")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1605,9 +1667,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                           {vendorFreeShippingEnabled && (
                             <td className="p-3">
                               {product.freeShipping ? (
-                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">Yes</Badge>
+                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">{t("vendor.freeShippingYes")}</Badge>
                               ) : (
-                                <span className="text-sm text-slate-400">No</span>
+                                <span className="text-sm text-slate-400">{t("vendor.freeShippingNo")}</span>
                               )}
                             </td>
                           )}
@@ -1626,7 +1688,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
             <VendorProfileOrdersErrorBoundary>
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-slate-900">Vendor Orders</h3>
+                <h3 className="text-lg font-semibold text-slate-900">{t("vendorProfile.vendorOrders")}</h3>
                 <div className="flex items-center gap-2">
                   <Button 
                     type="button"
@@ -1643,9 +1705,11 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                     ) : (
                       <RefreshCw className="w-4 h-4 mr-2" />
                     )}
-                    Refresh Data
+                    {t("vendorProfile.refreshData")}
                   </Button>
-                  <Badge variant="secondary">{totalOrders} total</Badge>
+                  <Badge variant="secondary">
+                    {t("vendorProfile.totalBadge").replace("{count}", String(totalOrders))}
+                  </Badge>
                 </div>
               </div>
               
@@ -1654,12 +1718,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50">
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Order #</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Date</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Customer</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Items</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Total</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("vendorProfile.orderNumber")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.date")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.customer")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.items")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.total")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.status")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1691,20 +1755,20 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               ) : safeOrders.length === 0 ? (
                 <div className="text-center py-12">
                   <ShoppingCart className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-slate-900 mb-1">No Orders Yet</h3>
-                  <p className="text-sm text-slate-500">No orders have been placed for this vendor's products</p>
+                  <h3 className="text-lg font-medium text-slate-900 mb-1">{t("vendorProfile.noOrdersYet")}</h3>
+                  <p className="text-sm text-slate-500">{t("vendorProfile.noOrdersDesc")}</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50">
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Order #</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Date</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Customer</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Items</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Total</th>
-                        <th className="text-left p-3 text-sm font-medium text-slate-600">Status</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("vendorProfile.orderNumber")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.date")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.customer")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.items")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.total")}</th>
+                        <th className="text-left p-3 text-sm font-medium text-slate-600">{t("orders.status")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1732,7 +1796,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                             </td>
                             <td className="p-3 text-sm text-slate-600">{textForTableCell(order.date) || "—"}</td>
                             <td className="p-3 text-sm text-slate-600">
-                              {orderDisplayCustomerName(order)}
+                              {orderDisplayCustomerName(order) || t("vendorProfile.guest")}
                             </td>
                             <td className="p-3 text-sm text-slate-600">{vendorItemsCount}</td>
                             <td className="p-3 text-sm font-medium text-slate-900">{formatMMK(vendorTotal)}</td>
@@ -1752,23 +1816,23 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
           {activeTab === "contract" && (
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-4">Contract Details</h3>
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">{t("vendorProfile.contractDetails")}</h3>
                 <Card className="p-6 border border-slate-200 bg-slate-50">
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-600">Commission Rate</span>
+                      <span className="text-sm text-slate-600">{t("vendorProfile.commissionRate")}</span>
                       <span className="font-semibold text-slate-900">{displayCommissionRate}%</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-600">Contract Start Date</span>
-                      <span className="font-medium text-slate-900">{vendor.joinedDate || "N/A"}</span>
+                      <span className="text-sm text-slate-600">{t("vendorProfile.contractStartDate")}</span>
+                      <span className="font-medium text-slate-900">{vendor.joinedDate || t("vendorProfile.na")}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-600">Status</span>
+                      <span className="text-sm text-slate-600">{t("orders.status")}</span>
                       {getStatusBadge(vendor.status)}
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-600">Total Earnings (Platform)</span>
+                      <span className="text-sm text-slate-600">{t("vendorProfile.totalEarningsPlatform")}</span>
                       <span className="font-semibold text-green-600">{formatMMK(commissionEarned)}</span>
                     </div>
                   </div>
@@ -1776,17 +1840,14 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               </div>
 
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-4">Terms & Conditions</h3>
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">{t("vendorProfile.termsTitle")}</h3>
                 <Card className="p-6 border border-slate-200">
                   <div className="space-y-3 text-sm text-slate-600">
-                    <p>• Vendor agrees to maintain product quality standards</p>
-                    <p>
-                      • Commission rate of {displayCommissionRate}% applies to sales (product-level rates
-                      when set)
-                    </p>
-                    <p>• Vendor is responsible for product inventory and fulfillment</p>
-                    <p>• Platform provides marketing and sales infrastructure</p>
-                    <p>• Monthly settlement of commissions on the 1st of each month</p>
+                    <p>{t("vendorProfile.term1")}</p>
+                    <p>{t("vendorProfile.term2").replace("{rate}", String(displayCommissionRate))}</p>
+                    <p>{t("vendorProfile.term3")}</p>
+                    <p>{t("vendorProfile.term4")}</p>
+                    <p>{t("vendorProfile.term5")}</p>
                   </div>
                 </Card>
               </div>
@@ -1821,15 +1882,15 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       >
         <DialogContent className="!w-[80vw] !max-w-[80vw] max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Select Products</DialogTitle>
+            <DialogTitle>{t("vendorProfile.selectProducts")}</DialogTitle>
             <DialogDescription>
-              Add products from the platform to this vendor's inventory.
+              {t("vendorProfile.selectProductsDesc")}
             </DialogDescription>
           </DialogHeader>
           
           {/* Search Box */}
           <AdminClearableSearchInput
-            placeholder="Search products by name, SKU, or category..."
+            placeholder={t("vendorProfile.searchProductsPlaceholder")}
             value={searchProductQuery}
             onValueChange={(v) => {
               setSearchProductQuery(v);
@@ -1847,12 +1908,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                       <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                         <div className="w-4 h-4 bg-slate-200 rounded animate-pulse"></div>
                       </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Product</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.product")}</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">SKU</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Category</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Price</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Stock</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Status</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.category")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.price")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("vendorProfile.stock")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.status")}</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white">
@@ -1890,9 +1951,9 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
             ) : pickerShowEmpty ? (
               <div className="text-center py-12">
                 <Package className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-900 mb-1">No Products Found</h3>
+                <h3 className="text-lg font-medium text-slate-900 mb-1">{t("vendorProfile.noProductsFound")}</h3>
                 <p className="text-sm text-slate-500">
-                  {searchProductQuery ? "No products match your search criteria" : "All platform products are already assigned to this vendor"}
+                  {searchProductQuery ? t("vendorProfile.noSearchMatch") : t("vendorProfile.allAssigned")}
                 </p>
               </div>
             ) : (
@@ -1930,12 +1991,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                           }}
                         />
                       </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Product</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.product")}</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">SKU</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Category</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Price</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Stock</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">Status</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.category")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.price")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("vendorProfile.stock")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.status")}</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white">
@@ -2000,7 +2061,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
           {!loadingAllProducts && !pickerShowEmpty && (
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-1 py-2 border border-slate-200 rounded-lg bg-slate-50/80">
               <div className="flex items-center gap-2 text-sm text-slate-600">
-                <span>Rows per page</span>
+                <span>{t("vendorProfile.rowsPerPage")}</span>
                 <Select
                   value={String(assignPickerPageSize)}
                   onValueChange={(v) => {
@@ -2019,8 +2080,10 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                   </SelectContent>
                 </Select>
                 <span className="text-slate-500">
-                  Page {assignPickerPage} of {assignPickerTotalPages} · {assignPickerFooterProductCount}{" "}
-                  products
+                  {t("vendorProfile.pageOf")
+                    .replace("{page}", String(assignPickerPage))
+                    .replace("{total}", String(assignPickerTotalPages))
+                    .replace("{count}", String(assignPickerFooterProductCount))}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -2051,12 +2114,12 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
           {/* Footer with stats and actions */}
           <DialogFooter className="flex items-center justify-between border-t border-slate-200 pt-4">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
-              <span>{selectedProductIds.length} to add</span>
+              <span>{t("vendorProfile.toAdd").replace("{count}", String(selectedProductIds.length))}</span>
               {pickerAssignedUncheckedIds.length > 0 ? (
                 <>
                   <span className="text-slate-400">•</span>
                   <span className="text-amber-700">
-                    {pickerAssignedUncheckedIds.length} to remove from vendor
+                    {t("vendorProfile.toRemove").replace("{count}", String(pickerAssignedUncheckedIds.length))}
                   </span>
                 </>
               ) : null}
@@ -2064,15 +2127,18 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                 <>
                   <span className="text-slate-400">•</span>
                   <span className="text-slate-500">
-                    {pickerAssignedCheckedOnPageCount} on this page linked to vendor
+                    {t("vendorProfile.linkedOnPage").replace("{count}", String(pickerAssignedCheckedOnPageCount))}
                   </span>
                 </>
               ) : null}
               <span className="text-slate-400">•</span>
               <span>
                 {assignPickerUseFullCache
-                  ? `${pickerAssignableFromFullCache.length} matching catalog`
-                  : `${assignPickerServerTotal} products in catalog`}
+                  ? t("vendorProfile.matchingCatalog").replace(
+                      "{count}",
+                      String(pickerAssignableFromFullCache.length)
+                    )
+                  : t("vendorProfile.productsInCatalog").replace("{count}", String(assignPickerServerTotal))}
               </span>
             </div>
             <div className="flex gap-2">
@@ -2080,7 +2146,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                 variant="outline"
                 onClick={() => setShowProductSelectModal(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 variant="default"
@@ -2096,7 +2162,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
                 ) : (
                   <Check className="w-4 h-4 mr-2" />
                 )}
-                Apply changes
+                {t("vendorProfile.applyChanges")}
               </Button>
             </div>
           </DialogFooter>

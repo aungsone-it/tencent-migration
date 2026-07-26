@@ -488,7 +488,7 @@ export function Vendor({
     return (
       <Badge className="bg-blue-100 text-blue-700 border-blue-200 border gap-1">
         <Truck className="w-3 h-3" />
-        Free shipping enabled
+        {t("vendor.freeShippingBadge")}
       </Badge>
     );
   };
@@ -578,6 +578,9 @@ export function Vendor({
         const url = typeof L === "string" ? L : "";
         body.logo = url;
       }
+      if (user?.id && String(user.id).trim()) {
+        body.performedByUserId = String(user.id).trim();
+      }
 
       const response = await fetch(`${API_BASE_URL}/vendors/${editingVendor.id}`, {
         method: "PUT",
@@ -630,6 +633,8 @@ export function Vendor({
       };
 
       closeEditAndOpenVendorProfile(mergedVendor);
+
+      invalidateStaffActivitiesCache();
 
       alert(`✅ Vendor "${mergedVendor.name || result.vendor?.name}" updated successfully!`);
 
@@ -1301,7 +1306,7 @@ export function Vendor({
                   </th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.name")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.email")}</th>
-                  <th className="text-left p-4 text-sm font-medium text-slate-600">Location</th>
+                  <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.location")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.products")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.status")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.joined")}</th>
@@ -1368,7 +1373,7 @@ export function Vendor({
                     </th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.name')}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.email')}</th>
-                    <th className="text-left p-4 text-sm font-medium text-slate-600">Location</th>
+                    <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.location")}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.products')}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.status')}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.joined')}</th>

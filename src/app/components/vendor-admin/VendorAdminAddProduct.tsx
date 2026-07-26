@@ -38,6 +38,9 @@ import { toast } from "sonner";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
 import { compressMultipleImagesToDataURLVendor } from "../../../utils/imageCompression";
 import { RichTextEditor } from "../RichTextEditor";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { Switch } from "../ui/switch";
+import { invalidateStaffActivitiesCache } from "../../utils/module-cache";
 
 interface Variant {
   id: string;
@@ -97,6 +100,7 @@ export function VendorAdminAddProduct({
   onBack, 
   onProductSaved 
 }: VendorAdminAddProductProps) {
+  const { t } = useLanguage();
   const mode = editingProduct ? "edit" : "add";
   const initialData = editingProduct;
 
@@ -361,7 +365,10 @@ export function VendorAdminAddProduct({
         variantOptions: hasVariants ? variantOptions : undefined,
         commissionRate: commissionRate ? parseFloat(commissionRate) : 0, // 🔥 Product commission rate (default 0)
         ...(vendorFreeShippingAccess
-          ? { vendorFreeShipping: { [vendorId]: freeShipping } }
+          ? {
+              vendorFreeShipping: { [vendorId]: freeShipping },
+              performedByVendorId: vendorId,
+            }
           : {}),
       };
 
@@ -399,6 +406,9 @@ export function VendorAdminAddProduct({
       if (response.ok) {
         const responseData = await response.json();
         console.log(`✅ Product saved successfully:`, responseData);
+        if (vendorFreeShippingAccess) {
+          invalidateStaffActivitiesCache();
+        }
         toast.success(mode === "edit" ? "Product updated successfully!" : "Product created successfully!");
         if (onProductSaved) {
           onProductSaved(responseData);
@@ -665,19 +675,18 @@ export function VendorAdminAddProduct({
                     />
                   </div>
                   {vendorFreeShippingAccess && (
-                    <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                      <Checkbox
-                        id="freeShipping"
-                        checked={freeShipping}
-                        onCheckedChange={(checked) => setFreeShipping(checked === true)}
-                      />
-                      <div className="space-y-1">
-                        <Label htmlFor="freeShipping">Free shipping for this product</Label>
+                    <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="space-y-1 pr-2">
+                        <Label htmlFor="freeShipping">{t("products.freeShippingForProduct")}</Label>
                         <p className="text-xs text-slate-500">
-                          When customers buy only free-shipping products, delivery fees are 0 MMK
-                          at checkout.
+                          {t("products.freeShippingForProductDesc")}
                         </p>
                       </div>
+                      <Switch
+                        id="freeShipping"
+                        checked={freeShipping}
+                        onCheckedChange={setFreeShipping}
+                      />
                     </div>
                   )}
                 </div>

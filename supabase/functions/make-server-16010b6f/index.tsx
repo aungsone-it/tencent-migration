@@ -45,7 +45,7 @@ import {
   deleteOwnedStorageRefs,
   refsRemovedSinceUpdate,
 } from "./storage_delete_helpers.tsx";
-import { appendStaffActivity, isStaffAuditActor, isValidStaffActorId } from "./staff_activity_helpers.tsx";
+import { appendStaffActivity, appendVendorPortalActivity, isStaffAuditActor, isValidStaffActorId } from "./staff_activity_helpers.tsx";
 import { buildCategoryLocaleNames, ensureCategoryLocaleNames } from "./category_i18n.tsx";
 import {
   assertAdminMonitoringAllowed,
@@ -4185,7 +4185,9 @@ app.post("/make-server-16010b6f/products", async (c) => {
     const rawBody = await c.req.json();
     const performedByUserId =
       typeof rawBody.performedByUserId === "string" ? rawBody.performedByUserId.trim() : "";
-    const { performedByUserId: _actorStrip, ...body } = rawBody;
+    const performedByVendorId =
+      typeof rawBody.performedByVendorId === "string" ? rawBody.performedByVendorId.trim() : "";
+    const { performedByUserId: _actorStrip, performedByVendorId: _vendorActorStrip, ...body } = rawBody;
     const id = `prod_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     
     // Format price properly for storage and display
@@ -4303,6 +4305,20 @@ app.post("/make-server-16010b6f/products", async (c) => {
         action: "Product created",
         detail: `${pname} · SKU ${psku}`,
       });
+
+      const createdVendorFreeShipping =
+        productData.vendorFreeShipping && typeof productData.vendorFreeShipping === "object"
+          ? (productData.vendorFreeShipping as Record<string, boolean>)
+          : {};
+      await logProductFreeShippingActivities({
+        existingProduct: { vendorFreeShipping: {} },
+        nextVendorFreeShipping: createdVendorFreeShipping,
+        patchMap: body.vendorFreeShipping,
+        productName: pname,
+        productSku: psku,
+        performedByUserId,
+        performedByVendorId,
+      });
       
       // 🗑️ Invalidate dashboard + product list caches since we created a new product
       invalidateDashboardCache();
@@ -4340,8 +4356,11 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
     const rawBody = await c.req.json();
     const performedByUserId =
       typeof rawBody.performedByUserId === "string" ? rawBody.performedByUserId.trim() : "";
+    const performedByVendorId =
+      typeof rawBody.performedByVendorId === "string" ? rawBody.performedByVendorId.trim() : "";
     const {
       performedByUserId: _actorStrip,
+      performedByVendorId: _vendorActorStrip,
       _addToSelectedVendors,
       selectedVendors: bodySelectedVendors,
       ...restPatch
@@ -4405,6 +4424,8 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
       existingProduct.vendorFreeShipping && typeof existingProduct.vendorFreeShipping === "object"
         ? { ...existingProduct.vendorFreeShipping }
         : {};
+    const vendorFreeShippingPatch =
+      restPatch.vendorFreeShipping !== undefined ? restPatch.vendorFreeShipping : undefined;
     if (restPatch.vendorFreeShipping !== undefined) {
       const patchMap = restPatch.vendorFreeShipping;
       if (patchMap && typeof patchMap === "object") {
@@ -4452,7 +4473,9 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
     });
     
     // Super-admin vendor assignment: only selectedVendors/_add (skip full-catalog SKU scan — avoids timeouts)
-    const patchKeys = Object.keys(rawBody || {}).filter((k) => k !== "performedByUserId");
+    const patchKeys = Object.keys(rawBody || {}).filter(
+      (k) => k !== "performedByUserId" && k !== "performedByVendorId"
+    );
     const isVendorOnlyUpdate =
       patchKeys.length > 0 &&
       patchKeys.every((k) => k === "selectedVendors" || k === "_addToSelectedVendors");
@@ -4502,11 +4525,26 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
 
       const uname = String(updatedProduct.name || updatedProduct.title || "Product").slice(0, 160);
       const usku = String(updatedProduct.sku || "—");
-      await appendStaffActivity(performedByUserId, {
-        type: "product_updated",
-        action: "Product updated",
-        detail: `${uname} · SKU ${usku}`,
+      const isFreeShippingOnlyPatch =
+        patchKeys.length === 1 && patchKeys[0] === "vendorFreeShipping";
+
+      await logProductFreeShippingActivities({
+        existingProduct,
+        nextVendorFreeShipping,
+        patchMap: vendorFreeShippingPatch,
+        productName: uname,
+        productSku: usku,
+        performedByUserId,
+        performedByVendorId,
       });
+
+      if (!isFreeShippingOnlyPatch) {
+        await appendStaffActivity(performedByUserId, {
+          type: "product_updated",
+          action: "Product updated",
+          detail: `${uname} · SKU ${usku}`,
+        });
+      }
       
       // 🗑️ Invalidate dashboard cache since we updated a product
       invalidateDashboardCache();
@@ -8223,6 +8261,60 @@ async function logVendorStaffActivity(
   });
 }
 
+async function logProductFreeShippingActivities(args: {
+  existingProduct: Record<string, unknown>;
+  nextVendorFreeShipping: Record<string, boolean>;
+  patchMap: unknown;
+  productName: string;
+  productSku: string;
+  performedByUserId: string;
+  performedByVendorId: string;
+}): Promise<void> {
+  const patchMap = args.patchMap;
+  if (!patchMap || typeof patchMap !== "object") return;
+  const prevMap =
+    args.existingProduct.vendorFreeShipping &&
+    typeof args.existingProduct.vendorFreeShipping === "object"
+      ? (args.existingProduct.vendorFreeShipping as Record<string, boolean>)
+      : {};
+
+  for (const [vid, enabledRaw] of Object.entries(patchMap as Record<string, unknown>)) {
+    const vendorKey = String(vid || "").trim();
+    if (!vendorKey) continue;
+    const prevEnabled = prevMap[vendorKey] === true;
+    const nextEnabled =
+      enabledRaw === true
+        ? true
+        : enabledRaw === false
+          ? false
+          : args.nextVendorFreeShipping[vendorKey] === true;
+    if (prevEnabled === nextEnabled) continue;
+
+    const action = nextEnabled ? "Product free shipping enabled" : "Product free shipping disabled";
+    const vendorRecord = await withTimeout(kv.get(`vendor:${vendorKey}`), 3000).catch(() => null);
+    const vendorLabel = String(
+      (vendorRecord as Record<string, unknown> | null)?.name ||
+        (vendorRecord as Record<string, unknown> | null)?.businessName ||
+        vendorKey
+    ).slice(0, 80);
+    const detail = `${args.productName} · SKU ${args.productSku} · ${vendorLabel}`;
+
+    if (isValidStaffActorId(args.performedByUserId)) {
+      await appendStaffActivity(args.performedByUserId, {
+        type: "product_updated",
+        action,
+        detail,
+      });
+    } else if (args.performedByVendorId && args.performedByVendorId === vendorKey) {
+      await appendVendorPortalActivity(vendorKey, {
+        type: "product_updated",
+        action,
+        detail,
+      });
+    }
+  }
+}
+
 function pickVendorApplicationActorId(body: Record<string, unknown>): string {
   const performedByUserId = body.performedByUserId;
   if (typeof performedByUserId === "string" && isValidStaffActorId(performedByUserId.trim())) {
@@ -8610,6 +8702,9 @@ app.put("/make-server-16010b6f/vendors/:id", async (c) => {
   try {
     const id = c.req.param("id");
     const body = await c.req.json();
+    const performedByUserId =
+      typeof body.performedByUserId === "string" ? body.performedByUserId.trim() : "";
+    const { performedByUserId: _actorStrip, ...vendorPatch } = body;
     
     // 🔒 Validate vendor ID
     if (!id || id.trim() === "") {
@@ -8624,10 +8719,10 @@ app.put("/make-server-16010b6f/vendors/:id", async (c) => {
     }
     
     // 🔒 Validate status if it's being updated
-    if (body.status) {
+    if (vendorPatch.status) {
       const validStatuses = ["active", "inactive", "pending", "suspended", "banned"];
-      if (!validStatuses.includes(body.status)) {
-        console.error("❌ Invalid status:", body.status);
+      if (!validStatuses.includes(vendorPatch.status)) {
+        console.error("❌ Invalid status:", vendorPatch.status);
         return c.json({ 
           success: false, 
           error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` 
@@ -8637,10 +8732,13 @@ app.put("/make-server-16010b6f/vendors/:id", async (c) => {
     
     const updatedVendor = {
       ...existingVendor,
-      ...body,
+      ...vendorPatch,
       id,
       updatedAt: new Date().toISOString(),
     };
+
+    const prevFreeShippingEnabled = (existingVendor as Record<string, unknown>).freeShippingEnabled === true;
+    const nextFreeShippingEnabled = updatedVendor.freeShippingEnabled === true;
 
     const prevLogoRef =
       typeof (existingVendor as any)?.logo === "string" && (existingVendor as any).logo.trim()
@@ -8771,6 +8869,17 @@ app.put("/make-server-16010b6f/vendors/:id", async (c) => {
     }
     
     console.log(`✅ Vendor ${id} updated successfully. Status: ${updatedVendor.status || 'unchanged'}`);
+
+    if (
+      Object.prototype.hasOwnProperty.call(vendorPatch, "freeShippingEnabled") &&
+      prevFreeShippingEnabled !== nextFreeShippingEnabled
+    ) {
+      await logVendorStaffActivity(
+        performedByUserId,
+        updatedVendor as Record<string, unknown>,
+        nextFreeShippingEnabled ? "Vendor free shipping enabled" : "Vendor free shipping disabled"
+      );
+    }
     
     return c.json({ 
       success: true,

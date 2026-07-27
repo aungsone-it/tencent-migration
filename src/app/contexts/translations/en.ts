@@ -963,7 +963,7 @@ export const enTranslations: Record<string, string> = {
     'products.freeShippingDisabledForProduct': 'Free shipping disabled for this product',
     'products.freeShippingUpdateFailed': 'Failed to update free shipping',
     'products.freeShippingForProduct': 'Free shipping for this product',
-    'products.freeShippingForProductDesc': 'When customers buy only free-shipping products, delivery fees are 0 MMK at checkout.',
+    'products.freeShippingForProductDesc': 'Applies only to your store. When customers buy only free-shipping products from you, delivery fees are 0 MMK at checkout.',
     
     // Add Product
     'addProduct.back': 'Back',
@@ -1050,9 +1050,10 @@ export const enTranslations: Record<string, string> = {
     'categories.appearAutomatically': 'Categories will appear here automatically when the super admin assigns products to your store.',
     'categories.viewReadOnly': 'View Category (Read-Only)',
     'categories.freeShippingPartial': 'Partial',
+    'categories.freeShippingVendorScopedHint': 'Free shipping toggles apply only to your store. The same product can be free shipping at one vendor and paid shipping at another.',
     'categories.freeShippingNoProducts': 'Add products to this category before changing free shipping.',
-    'categories.freeShippingEnabledForCategory': 'Free shipping enabled for all products in this category',
-    'categories.freeShippingDisabledForCategory': 'Free shipping disabled for all products in this category',
+    'categories.freeShippingEnabledForCategory': 'Free shipping enabled for all products in this category (your store only)',
+    'categories.freeShippingDisabledForCategory': 'Free shipping disabled for all products in this category (your store only)',
     'categories.freeShippingUpdateFailed': 'Failed to update category free shipping',
     
     // Orders

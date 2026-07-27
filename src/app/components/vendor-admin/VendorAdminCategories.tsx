@@ -476,6 +476,11 @@ export function VendorAdminCategories({
             <p className="text-sm text-slate-600 mt-1">
               Products assigned to this vendor are available to organize, but super-admin product categories are no longer imported here.
             </p>
+            {vendorFreeShippingAccess && (
+              <p className="text-sm text-slate-600 mt-2">
+                {t("categories.freeShippingVendorScopedHint")}
+              </p>
+            )}
           </div>
         </div>
       </Card>

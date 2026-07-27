@@ -924,7 +924,7 @@ export const zhTranslations: Record<string, string> = {
     'products.freeShippingDisabledForProduct': '已为该产品关闭免运费',
     'products.freeShippingUpdateFailed': '更新免运费设置失败',
     'products.freeShippingForProduct': '此产品免运费',
-    'products.freeShippingForProductDesc': '当顾客仅购买免运费产品时，结账时配送费为 0 缅元。',
+    'products.freeShippingForProductDesc': '仅适用于您的店铺。当顾客仅向您购买免运费产品时，结账时配送费为 0 缅元。',
     
     // Add Product
     'addProduct.back': '返回',
@@ -1011,9 +1011,10 @@ export const zhTranslations: Record<string, string> = {
     'categories.appearAutomatically': '超级管理员向您的店铺分配产品后，类别会自动显示在这里。',
     'categories.viewReadOnly': '查看类别（只读）',
     'categories.freeShippingPartial': '部分',
+    'categories.freeShippingVendorScopedHint': '免运费设置仅适用于您的店铺。同一产品在不同供应商处可分别设置是否免运费。',
     'categories.freeShippingNoProducts': '请先向该类别添加产品，再更改免运费设置。',
-    'categories.freeShippingEnabledForCategory': '已为该类别下所有产品开启免运费',
-    'categories.freeShippingDisabledForCategory': '已为该类别下所有产品关闭免运费',
+    'categories.freeShippingEnabledForCategory': '已为该类别下所有产品开启免运费（仅您的店铺）',
+    'categories.freeShippingDisabledForCategory': '已为该类别下所有产品关闭免运费（仅您的店铺）',
     'categories.freeShippingUpdateFailed': '更新类别免运费设置失败',
     
     // Orders

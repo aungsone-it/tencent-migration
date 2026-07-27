@@ -5,7 +5,7 @@
 
 Use this when onboarding developers, reviewing PRs, or deciding where new logic belongs.
 
-**Related docs:** [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) · [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) · [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md)
+**Related docs:** [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) · [FREE_SHIPPING.md](./FREE_SHIPPING.md) · [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) · [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md)
 
 ---
 
@@ -310,7 +310,9 @@ Redirect to apex `/summary` (e.g. `nexa-apex.online/summary`) → Continue Shopp
 
 **Client rule:** Client never marks an order as paid. It waits for server state.
 
-Files: `Checkout.tsx`, `kpayClient.ts`, `supabase/functions/.../kpay_routes.tsx`, `pwa_finalize.ts`
+**Free shipping:** When every cart line qualifies (`checkoutQualifiesForFreeShipping` in `freeShipping.ts`), `Checkout.tsx` sets shipping to **0 MMK**, disables the delivery-partner selector, and still requires region/township. Server order create re-validates zero shipping against product KV.
+
+Files: `Checkout.tsx`, `freeShipping.ts`, `kpayClient.ts`, `supabase/functions/.../kpay_routes.tsx`, `pwa_finalize.ts`
 
 ---
 

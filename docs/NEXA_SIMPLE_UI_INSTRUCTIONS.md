@@ -49,8 +49,9 @@ Platform staff at `https://www.nexa-mm.com/admin` have one of **four roles**. Th
 3. Manage your store in the vendor admin:
    - `https://yourstore.nexa-mm.com/admin`, or
    - `https://www.nexa-mm.com/vendor/your-store-slug/admin` (path-based)
-4. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-apex.online/` or `https://migoo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
-5. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).
+4. **Free shipping** (if enabled for your store): mark products or whole categories on **Products** / **Categories** — see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
+5. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-apex.online/` or `https://migoo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
+6. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).
 
 ### Applying to sell
 
@@ -68,6 +69,7 @@ At `https://www.nexa-mm.com/vendor/application`:
 - Use the store phone contact to choose **Dial** or **Viber**. On desktop the choice appears on hover; on mobile both buttons are shown in the menu.
 - Tap **Add to Home** (above the chat bubble) to save a vendor store shortcut on your phone. On Android Chrome you may get an install prompt; on iPhone use Safari → Share → Add to Home Screen.
 - Checkout supports **Cash on Delivery** and **KBZPay**. After KBZPay app payment, order summary may open on the platform apex `/summary` (e.g. `https://nexa-apex.online/summary`); use Continue Shopping to return to the vendor store.
+- **Free shipping:** when every item in your cart is marked free shipping for that store, checkout shows **FREE** delivery (0 MMK). Mixed carts pay normal delivery fees.
 - **Forgot password:** customers and vendors use the reset page — enter email, OTP code from email, new password. Vendors: **Forgot Password?** on `/vendor/login`.
 
 ## Quick troubleshooting

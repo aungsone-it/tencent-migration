@@ -114,9 +114,11 @@ Guest checkout may be available, but signed-in accounts are easier to track late
 
 1. Open **Cart** → **Checkout**.
 2. Enter or select **shipping address** and phone number.
-3. Choose **Cash on Delivery (COD)** or **KBZPay**.
-4. Review items and total.
-5. Tap **Place Order** or **Pay with KBZPay**.
+3. Choose a **delivery region / township** (required even when shipping is free).
+4. If every item in the cart qualifies for **free shipping**, delivery is **FREE (0 MMK)** and the delivery-method selector is locked. If the cart mixes free and paid-shipping items, choose a delivery partner and pay the quoted fee.
+5. Choose **Cash on Delivery (COD)** or **KBZPay**.
+6. Review items and total.
+7. Tap **Place Order** or **Pay with KBZPay**.
 
 Before paying, confirm address, phone, items, and quantities. Review **Terms** and **Privacy** in the menu if needed.
 
@@ -230,6 +232,14 @@ Use **Preview / Open store** before sharing your link. Test checkout when possib
 4. Save.
 
 Keep stock accurate, assign categories, and use clear photos and prices.
+
+**Free shipping** (when the platform has enabled it for your store):
+
+- Turn on **Free shipping** per product on the **Products** list, or use the **category chips** above the table to bulk-enable a whole category.
+- The same **Categories** tab also has a free-shipping column for bulk toggles.
+- Only products you mark are free for **your store** — not for other vendors selling the same product.
+
+Test checkout with an all-free-shipping cart to confirm delivery shows **FREE**.
 
 ### 3.5 Orders
 

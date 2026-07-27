@@ -109,6 +109,7 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 
 - Checkout starts on the **vendor storefront** host where the customer is shopping.
 - Active payment choices are **Cash on Delivery**, **KBZPay QR**, and **KBZPay PWA**. Card/bank/Stripe helpers are not production checkout paths.
+- **Free shipping:** when all cart items qualify, `Checkout.tsx` locks delivery-partner selection and charges 0 MMK shipping; see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
 - PWA return URL targets unified apex summary (e.g. `nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; see `vendorCheckoutPaths.ts`, `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, edge `middleware.ts`).
 - `storefrontOrigin` on the checkout draft drives **Continue Shopping** back to the vendor host.
 

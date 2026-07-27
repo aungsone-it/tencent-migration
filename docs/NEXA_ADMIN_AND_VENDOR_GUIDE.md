@@ -63,6 +63,15 @@ The **Appearance** tab is hidden in the UI; branding fields live under **General
 - While the Activities tab is open, the client polls incrementally every **30 seconds** (`?since=` timestamp) — no full reload on every visit
 - Approve/reject/delete actions require the acting staff member’s CloudBase Auth UUID (`performedByUserId`) from the browser session
 
+### Vendors and free shipping access
+
+When reviewing or editing a vendor (**Vendor → Review applications** or vendor profile):
+
+- **Free shipping feature access** — super admin toggle (`vendor.freeShippingEnabled`). When off, the vendor admin portal hides free-shipping controls.
+- Vendor profile shows how many products are marked free shipping for that store.
+
+Full data model, API, and checkout rules: [FREE_SHIPPING.md](./FREE_SHIPPING.md).
+
 ### Orders
 
 - Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
@@ -119,6 +128,24 @@ After approval, the vendor completes setup at `/vendor/setup` and signs in at `/
 - Finances
 - Settings/branding (logo, subdomain preview, custom domain, terms/privacy, social links)
 
+### Free shipping (vendor catalog)
+
+Available only when super admin has enabled **Free shipping feature access** for this vendor.
+
+| Location | Control |
+|----------|---------|
+| **Products** | Per-product switch; **Free shipping by category** chips for bulk on/off |
+| **Categories** | Per-category switch — updates all products assigned to that category |
+
+Rules:
+
+- Free shipping is **per vendor**, not global on the product. The same shared catalog product can differ by vendor.
+- Category toggles bulk-update products; categories do not store a separate `freeShipping` field.
+- **Partial** on a category means some products are on and some off — click to turn all off, then re-enable as needed.
+- Products and Categories tabs stay in sync via client refresh events after toggles.
+
+See [FREE_SHIPPING.md](./FREE_SHIPPING.md) for checkout behavior and API details.
+
 ### Public storefront verification
 
 Use **preview / open store** from vendor admin to verify:
@@ -127,6 +154,7 @@ Use **preview / open store** from vendor admin to verify:
 - **scroll position** when opening a product and going back (same category tab)
 - pricing and stock
 - checkout readiness: Cash on Delivery, KBZPay QR, and KBZPay PWA
+- **free shipping:** when all cart items qualify, checkout shows **FREE** delivery and locks the delivery-method selector; mixed carts use normal logistics quotes
 - storefront contact: phone menu offers native Dial and Viber chat
 - **Add to Home** button (floating, above chat) — test on Android Chrome over HTTPS; verify home-screen icon uses store name/logo
 
@@ -165,10 +193,12 @@ Before release windows, confirm:
 - **Vendor application** form accepts `+959…` / `09…` phones and rejects duplicate emails
 - Storefront language menu shows English/Burmese; admin language controls stay English/Chinese
 - after backend deploy: run read-model validation (`docs/READ_MODEL_ROLLOUT.md`)
+- **Free shipping:** super admin access toggle → vendor category bulk ON/OFF → storefront checkout with all-free cart shows 0 MMK shipping
 
 ## 6) Related docs
 
 - Backend / scaling: `docs/ARCHITECTURE_AND_BACKEND.md`
+- Free shipping: `docs/FREE_SHIPPING.md`
 - Routing/architecture: `docs/CODE_REVIEW_AND_ROUTING.md`
 - Deployment: `docs/DEPLOYMENT.md`
 - Read-model rollout: `docs/READ_MODEL_ROLLOUT.md`

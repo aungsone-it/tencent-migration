@@ -43,10 +43,10 @@ All major entities are stored as JSON documents in `kv_store_16010b6f`:
 
 | Key prefix | Entity |
 |------------|--------|
-| `product:` | Products |
+| `product:` | Products — includes optional `vendorFreeShipping: { [vendorId]: true }` for per-vendor free shipping |
 | `order:` | Orders |
 | `customer:` | Customer profiles |
-| `vendor:` | Vendor records |
+| `vendor:` | Vendor records — includes optional `freeShippingEnabled` (super-admin feature gate) |
 | `vendor_application:` | Vendor applications |
 | `kpay_txn:` | KBZPay transaction state (on TCB — not re-imported from Supabase) |
 | `kpay_pwa_draft:` | KBZPay PWA checkout drafts (orphan recovery in super-admin Orders) |
@@ -136,6 +136,17 @@ Uses server pagination + category filter (see `fetchVendorProducts` in `module-c
 - Myanmar phone: `+959XXXXXXXXX` or `09XXXXXXXXX`
 - Store description: minimum 10 characters
 - Email policy: one email per vendor account; blocks duplicate pending/approved applications (`vendorEmailPolicyConflict`)
+
+**Free shipping (vendor-scoped):**
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `PUT` | `/products/:id` | Patch `vendorFreeShipping` map for one vendor |
+| `POST` | `/vendor/categories/:categoryId/bulk-free-shipping` | Bulk enable/disable for all category `productIds` |
+| `GET` | `/vendor/categories-details/:vendorId` | Category rows include `freeShippingEnabledCount` / `freeShippingTotalCount` |
+| `GET` | `/vendor/products-admin/:vendorId` | Products include derived `freeShipping` boolean |
+
+Order create rejects `shippingFee === 0` unless every line item resolves as free shipping for that vendor in KV. Client helpers: `src/app/utils/freeShipping.ts`. Full reference: [FREE_SHIPPING.md](./FREE_SHIPPING.md).
 
 **Admin audit (Settings → Activities):** Tracks **super-admin portal** actions only — product/user/vendor CRUD (explicit), settings, categories, orders status changes, etc. Storefront traffic (cart, checkout, KBZPay, customer self-service) is **not** logged. Actor must be a staff profile in `auth:user:{id}` with a staff role; `x-actor-user-id` is sent only from `migoo-staff-actor-id` (admin session), never from customer `migoo-user`.
 
@@ -286,6 +297,7 @@ Functions (source → package → deploy):
 | [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md) | Routes, hosts, guards |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Hosting checklist |
 | [PAYMENTS.md](./PAYMENTS.md) | KBZPay flows |
+| [FREE_SHIPPING.md](./FREE_SHIPPING.md) | Per-vendor free shipping — KV model, API, checkout |
 | [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) | LCP, client cache |
 | [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md) | Read-model deploy validation |
 | [LEGACY_DOCS.md](./LEGACY_DOCS.md) | Outdated root markdown files |

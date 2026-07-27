@@ -24,6 +24,7 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | **TencentDB migration** | Supabase → TencentDB for PostgreSQL: KV + SQL read-model tables imported; **KPay txn/draft** and **chat** KV skipped (KPay already on TCB). Scripts: `test:db`, `import:supabase-data`, `db:schema`, `setup:tcb-first` |
 | **Super-admin Orders** | KBZPay **draft recovery** panel; optimistic list updates; badge count normalization |
 | **Logistics admin** | Delivery partners CRUD, per-region rates, logo upload (~500KB compress), warehouse role access |
+| **Free shipping** | Per-vendor product flags; super admin grants access; category + product bulk toggles; checkout 0 MMK when cart qualifies — see [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md) |
 | **Image storage** | **Production default:** files in TencentDB KV (`storage:obj:*` keys); optional CloudBase object storage via `CLOUDBASE_STORAGE_API_BASE_URL` |
 
 ### Earlier (June 2026)
@@ -83,6 +84,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
   - **Path-based (local dev / apex)** — `/vendor/:storeSlug/*`
 - Terms and privacy: `/terms`, `/privacy` on vendor hosts; `/vendor/:slug/terms` on path-based URLs
 - Bilingual storefront UI: English / Burmese. Admin language switching remains English / Simplified Chinese.
+- **Free shipping** (when vendor enabled by platform): cart items marked free shipping show **0 MMK** delivery when the cart contains only those items; mixed carts use normal logistics quotes
 - Store phone contact: desktop hover menu asks whether to **Dial** or open **Viber**; mobile menu shows both actions.
 - **Add to Home** — floating button above chat; Android Chrome can show native install prompt; iOS uses Safari Share → Add to Home Screen (see [docs/VENDOR_ADD_TO_HOME.md](docs/VENDOR_ADD_TO_HOME.md))
 
@@ -108,6 +110,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 - Dashboard, products, categories, inventory, orders, customers, chat, marketing, finances, settings
 - **Orders:** paginated SQL read model; KBZPay **orphaned draft recovery** (amber panel when paid drafts lack orders); status changes and recover use optimistic UI (no full-list blink)
 - Vendor management (**Review applications** only), promotions, collaborator flows
+- **Vendor free shipping:** grant per-vendor feature access; view free-shipping product counts on vendor profile
 - **Settings → General** — platform name, logo, support contact (formerly split with Appearance; Appearance tab is hidden)
 - **Settings → Users** — staff accounts (owner-only)
 - **Settings → Activities** — global audit timeline for all admin actions (visible to everyone who can open Settings)
@@ -120,6 +123,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 - Admin portal: `/vendor/:storeName/admin/*`
 - Settings: branding, subdomain URL preview, custom domain, terms/privacy content, social links, stock policy
 - Analytics, products, categories, orders, customers, finances
+- **Free shipping** (when enabled by platform): toggle per product or bulk by category; applies only to this vendor’s store — [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md)
 
 ## Key Routes (quick reference)
 
@@ -297,6 +301,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/TCB_CONSOLE_SETUP.md](doc
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and env setup |
 | [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) | Read-model deploy validation and monitoring |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |
+| [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md) | Per-vendor free shipping — data model, admin UI, checkout rules |
 | [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, deploy refresh, scroll restore, Realtime scale notes |
 | [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows |
 | [docs/CLIENT_INSTRUCTIONS.md](docs/CLIENT_INSTRUCTIONS.md) | **End-user manual** — how to shop, sell, and manage (presentation-style) |

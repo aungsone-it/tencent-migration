@@ -1056,6 +1056,7 @@ export const enTranslations: Record<string, string> = {
     'categories.freeShippingEnabledForCategory': 'Free shipping enabled for all products in this category (your store only)',
     'categories.freeShippingDisabledForCategory': 'Free shipping disabled for all products in this category (your store only)',
     'categories.freeShippingUpdateFailed': 'Failed to update category free shipping',
+    'categories.freeShippingPartialSync': 'Updated {count} of {total} products. Refresh and try again if any items are still out of sync.',
     
     // Orders
     'orders.title': 'Orders',

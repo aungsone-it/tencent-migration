@@ -1744,6 +1744,29 @@ export async function fetchVendorCategories(vendorId: string) {
   return enrichVendorCategoriesWithLocaleNames(active);
 }
 
+/** All vendor-owned categories for admin (includes hidden); used for bulk free-shipping toggles. */
+export async function fetchVendorCategoriesAdminDetails(vendorId: string) {
+  const candidates = vendorIdentifierCandidates(vendorId);
+  let response: Response | null = null;
+  for (const candidate of candidates) {
+    response = await fetch(
+      `${API_ROOT}/vendor/categories-details/${encodeURIComponent(candidate)}`,
+      {
+        headers: cloudbaseHeaders(),
+      }
+    );
+    if (response.ok) break;
+  }
+
+  if (!response || !response.ok) {
+    const status = response?.status ?? 0;
+    throw new Error(`Failed to fetch vendor categories: ${status}`);
+  }
+
+  const data = await response.json();
+  return filterVendorCreatedCategories(data.categories || [], vendorId);
+}
+
 // Fetch vendor orders (vendor admin)
 export async function fetchVendorOrders(vendorId: string, bustHttpCache = false) {
   const url = new URL(
@@ -2456,6 +2479,18 @@ export const ADMIN_PRODUCTS_BROADCAST_CHANNEL = "migoo-admin-products-cache";
 
 /** Same-tab: full admin product list changed (create/delete/realtime insert) — force refetch, not inventory merge. */
 export const ADMIN_PRODUCTS_LIST_CHANGED_EVENT = "migoo-admin-products-list-changed";
+
+/** Vendor admin: category or product free-shipping flags changed — refresh product/category views. */
+export const VENDOR_FREE_SHIPPING_CHANGED_EVENT = "migoo-vendor-free-shipping-changed";
+
+export function notifyVendorFreeShippingChanged(vendorId: string): void {
+  invalidateVendorProductsAdminCache(vendorId);
+  moduleCache.invalidate(CACHE_KEYS.vendorCategories(vendorId));
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(VENDOR_FREE_SHIPPING_CHANGED_EVENT, { detail: { vendorId } })
+  );
+}
 
 /**
  * Bust paginated + page-1 localStorage and notify all tabs to refetch the products grid.

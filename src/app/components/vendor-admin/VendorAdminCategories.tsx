@@ -10,9 +10,10 @@ import { VendorAdminCategoryForm } from "./VendorAdminCategoryForm";
 import { cacheManager } from "../../utils/cacheManager";
 import { toast } from "sonner";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
-import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories, broadcastVendorCategoryAssignmentChanged, invalidateVendorProductsAdminCache, invalidateVendorStorefrontCatalogCachesAfterProductLinkChange } from "../../utils/module-cache";
+import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories, broadcastVendorCategoryAssignmentChanged, invalidateVendorStorefrontCatalogCachesAfterProductLinkChange, notifyVendorFreeShippingChanged, VENDOR_FREE_SHIPPING_CHANGED_EVENT } from "../../utils/module-cache";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { resolveCategoryFreeShippingToggleTarget } from "../../utils/freeShipping";
 import { API_BASE_URL } from "../../../utils/api-client";
 
 interface Product {
@@ -208,7 +209,7 @@ export function VendorAdminCategories({
       }
 
       const updatedCount = Number(data.updatedCount ?? total);
-      const enabledCount = next ? updatedCount : 0;
+      const enabledCount = Number(data.freeShippingEnabledCount ?? (next ? updatedCount : 0));
       setCategories((prev) =>
         prev.map((cat) =>
           cat.id === category.id
@@ -221,11 +222,18 @@ export function VendorAdminCategories({
             : cat
         )
       );
-      invalidateVendorProductsAdminCache(vendorId);
+      notifyVendorFreeShippingChanged(vendorId);
       invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendorId, [vendorName, vendorStoreSlug]);
-      toast.success(
-        next ? t("categories.freeShippingEnabledForCategory") : t("categories.freeShippingDisabledForCategory")
-      );
+      if (!next && updatedCount < total) {
+        toast.warning(
+          t("categories.freeShippingPartialSync").replace("{count}", String(updatedCount)).replace("{total}", String(total))
+        );
+      } else {
+        toast.success(
+          next ? t("categories.freeShippingEnabledForCategory") : t("categories.freeShippingDisabledForCategory")
+        );
+      }
+      void loadCategories(true, false);
     } catch (error: any) {
       console.error("Failed to toggle category free shipping:", error);
       toast.error(error?.message || t("categories.freeShippingUpdateFailed"));
@@ -283,6 +291,16 @@ export function VendorAdminCategories({
     loadCategories(isRevisit, categories.length === 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorId, isActive]);
+
+  useEffect(() => {
+    const onFreeShippingChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ vendorId?: string }>).detail;
+      if (detail?.vendorId && detail.vendorId !== vendorId) return;
+      void loadCategories(true, false);
+    };
+    window.addEventListener(VENDOR_FREE_SHIPPING_CHANGED_EVENT, onFreeShippingChanged);
+    return () => window.removeEventListener(VENDOR_FREE_SHIPPING_CHANGED_EVENT, onFreeShippingChanged);
+  }, [vendorId]);
 
   const filteredCategories = useMemo(
     () =>
@@ -583,7 +601,10 @@ export function VendorAdminCategories({
                               (category.freeShippingTotalCount ?? category.productIds.length) === 0
                             }
                             onCheckedChange={(checked) =>
-                              void handleToggleCategoryFreeShipping(category, checked)
+                              void handleToggleCategoryFreeShipping(
+                                category,
+                                resolveCategoryFreeShippingToggleTarget(category, checked)
+                              )
                             }
                           />
                           {isCategoryFreeShippingPartial(category) && (

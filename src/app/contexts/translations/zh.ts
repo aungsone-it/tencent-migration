@@ -1017,6 +1017,7 @@ export const zhTranslations: Record<string, string> = {
     'categories.freeShippingEnabledForCategory': '已为该类别下所有产品开启免运费（仅您的店铺）',
     'categories.freeShippingDisabledForCategory': '已为该类别下所有产品关闭免运费（仅您的店铺）',
     'categories.freeShippingUpdateFailed': '更新类别免运费设置失败',
+    'categories.freeShippingPartialSync': '已更新 {total} 个产品中的 {count} 个。如有未同步项，请刷新后重试。',
     
     // Orders
     'orders.title': '订单',

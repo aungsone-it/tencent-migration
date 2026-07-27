@@ -96,6 +96,7 @@ export const myTranslations: Record<string, string> = {
     'checkout.selectDeliveryMethod': 'ပို့ဆောင်သူ ရွေးပါ',
     'checkout.selectDeliveryMethodFirst': 'ငွေပေးချေမှုမရွေးမီ ဒေသနှင့် မြို့နယ်၊ ပို့ဆောင်သူကို ရွေးပါ။',
     'checkout.deliveryMethodDescription': 'သင့်ဒေသကို ပို့ဆောင်သူ များစု ရှိပါသည်။ သင်နှစ်သက်ရာ ရွေးချယ်ပါ။',
+    'checkout.freeShippingDeliveryLocked': 'စျေးဝယ်ခြင်းထဲရှိ ပစ္စည်းအားလုံး အခမဲ့ပို့ဆောင်ခ ရှိပါသည်။ ပို့ဆောင်နည်းလမ်းကို အလိုအလျောက် သတ်မှတ်ထားပါသည်။',
     'checkout.codAvailable': 'ပို့ဆောင်ရာတွင် ငွေချေနိုင်သည်',
     'checkout.total': 'စုစုပေါင်း',
     'checkout.processing': 'လုပ်ဆောင်နေသည်...',

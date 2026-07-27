@@ -266,6 +266,7 @@ export const zhTranslations: Record<string, string> = {
     'checkout.selectDeliveryMethod': '选择配送方式',
     'checkout.selectDeliveryMethodFirst': '请先选择地区、乡镇和配送方式，再选择支付方式。',
     'checkout.deliveryMethodDescription': '您的地区有多家配送商，请选择您偏好的配送商。',
+    'checkout.freeShippingDeliveryLocked': '购物车商品均享免运费，配送方式已自动设置。',
     'checkout.codAvailable': '支持货到付款',
     'checkout.withinDays': '{days} 天内',
     'checkout.total': '总计',
@@ -1009,6 +1010,11 @@ export const zhTranslations: Record<string, string> = {
     'categories.noCategoriesYet': '暂无类别',
     'categories.appearAutomatically': '超级管理员向您的店铺分配产品后，类别会自动显示在这里。',
     'categories.viewReadOnly': '查看类别（只读）',
+    'categories.freeShippingPartial': '部分',
+    'categories.freeShippingNoProducts': '请先向该类别添加产品，再更改免运费设置。',
+    'categories.freeShippingEnabledForCategory': '已为该类别下所有产品开启免运费',
+    'categories.freeShippingDisabledForCategory': '已为该类别下所有产品关闭免运费',
+    'categories.freeShippingUpdateFailed': '更新类别免运费设置失败',
     
     // Orders
     'orders.title': '订单',

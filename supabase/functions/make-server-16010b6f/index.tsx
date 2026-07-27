@@ -14078,7 +14078,9 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
       }
     }
 
+    const vendorFreeShippingEnabled = vendorHasFreeShippingAccess(vendorData);
     let vendorProducts: any[] = [];
+    const assignedProductById = new Map<string, any>();
     if (categoryProductIds.size > 0) {
       const allProducts = await withRetry(
         () => withTimeout(kv.getByPrefix("product:"), 30000),
@@ -14086,10 +14088,14 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
         1500
       );
       const productRows = Array.isArray(allProducts) ? allProducts : [];
-      vendorProducts = productRows.filter((p: any) => {
-        if (!vendorMatches(p)) return false;
-        return categoryProductIds.has(String(p?.id || "").trim());
-      });
+      for (const p of productRows) {
+        const productId = String(p?.id || "").trim();
+        if (!productId || !categoryProductIds.has(productId)) continue;
+        assignedProductById.set(productId, p);
+        if (vendorMatches(p)) {
+          vendorProducts.push(p);
+        }
+      }
     }
 
     const categoriesWithCount = await Promise.all(
@@ -14101,6 +14107,16 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
         const productsInCategory = vendorProducts.filter(
           (p: any) => assignedSet.has(String(p?.id || "").trim())
         );
+        let freeShippingEnabledCount = 0;
+        for (const productId of assignedIds) {
+          const product = assignedProductById.get(productId);
+          if (
+            product &&
+            resolveProductFreeShippingForVendor(product, actualVendorId, vendorFreeShippingEnabled)
+          ) {
+            freeShippingEnabledCount += 1;
+          }
+        }
 
         const localizedCategory = await ensureCategoryLocaleNames(cat);
         const missingMy = !String(cat?.names?.my || "").trim() && String(localizedCategory?.names?.my || "").trim();
@@ -14114,6 +14130,8 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
           ...localizedCategory,
           productCount: productsInCategory.length,
           productIds: assignedIds,
+          freeShippingEnabledCount,
+          freeShippingTotalCount: assignedIds.length,
           products: productsInCategory.map((p: any) => ({
             id: p.id,
             name: p.name,
@@ -14122,6 +14140,11 @@ app.get("/make-server-16010b6f/vendor/categories-details/:vendorId", async (c) =
             image: p.image,
             status: p.status,
             inventory: p.inventory,
+            freeShipping: resolveProductFreeShippingForVendor(
+              p,
+              actualVendorId,
+              vendorFreeShippingEnabled
+            ),
           })),
         };
       })
@@ -14411,6 +14434,83 @@ app.delete("/make-server-16010b6f/vendor/categories/:categoryId", async (c) => {
   } catch (error: any) {
     console.error("❌ Failed to delete category:", error);
     return c.json({ error: error.message || "Failed to delete category" }, 500);
+  }
+});
+
+// Bulk enable/disable free shipping for all products in a vendor category
+app.post("/make-server-16010b6f/vendor/categories/:categoryId/bulk-free-shipping", async (c) => {
+  try {
+    const categoryId = decodeURIComponent(c.req.param("categoryId"));
+    const body = await c.req.json().catch(() => ({}));
+    const enabled = body?.enabled === true;
+    const actualVendorId = await resolveVendorIdFromSlugOrId(String(body?.vendorId || "").trim());
+
+    if (!actualVendorId) {
+      return c.json({ error: "vendorId is required" }, 400);
+    }
+
+    const category = await kv.get(categoryId);
+    if (!category) {
+      return c.json({ error: "Category not found" }, 404);
+    }
+    const ownershipError = assertVendorCategoryOwnership(categoryId, actualVendorId, category);
+    if (ownershipError) {
+      return c.json({ error: ownershipError }, 403);
+    }
+
+    const vendorData = await kv.get(`vendor:${actualVendorId}`);
+    if (!vendorHasFreeShippingAccess(vendorData)) {
+      return c.json({ error: "Vendor does not have free shipping access" }, 403);
+    }
+
+    const productIds = Array.isArray(category.productIds)
+      ? category.productIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+      : [];
+    if (productIds.length === 0) {
+      return c.json({ success: true, updatedCount: 0, productIds: [] });
+    }
+
+    const updatedProductIds: string[] = [];
+    for (const productId of productIds) {
+      const existingProduct = await withTimeout(kv.get(`product:${productId}`), 5000).catch(() => null);
+      if (!existingProduct || typeof existingProduct !== "object") continue;
+
+      const nextVendorFreeShipping =
+        existingProduct.vendorFreeShipping && typeof existingProduct.vendorFreeShipping === "object"
+          ? { ...existingProduct.vendorFreeShipping }
+          : {};
+      if (enabled) {
+        nextVendorFreeShipping[actualVendorId] = true;
+      } else {
+        delete nextVendorFreeShipping[actualVendorId];
+      }
+
+      const updatedProduct = {
+        ...existingProduct,
+        vendorFreeShipping: nextVendorFreeShipping,
+        updatedAt: new Date().toISOString(),
+      };
+      await withTimeout(kv.set(`product:${productId}`, updatedProduct), 8000);
+      queueProductReadModelSync(productId, updatedProduct);
+      updatedProductIds.push(productId);
+    }
+
+    invalidateDashboardCache();
+    clearCache("products");
+
+    console.log(
+      `✅ Category free shipping bulk ${enabled ? "enabled" : "disabled"}: ${categoryId} (${updatedProductIds.length} products)`
+    );
+    return c.json({
+      success: true,
+      updatedCount: updatedProductIds.length,
+      productIds: updatedProductIds,
+      freeShippingEnabledCount: enabled ? updatedProductIds.length : 0,
+      freeShippingTotalCount: productIds.length,
+    });
+  } catch (error: any) {
+    console.error("❌ Failed to bulk update category free shipping:", error);
+    return c.json({ error: error.message || "Failed to update category free shipping" }, 500);
   }
 });
 

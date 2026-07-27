@@ -282,6 +282,7 @@ export const enTranslations: Record<string, string> = {
     'checkout.selectDeliveryMethod': 'Select delivery method',
     'checkout.selectDeliveryMethodFirst': 'Select region, township, and delivery method before choosing payment.',
     'checkout.deliveryMethodDescription': 'Multiple carriers serve your area. Choose the one you prefer.',
+    'checkout.freeShippingDeliveryLocked': 'Free shipping applies to all items in your cart. Delivery method is set automatically.',
     'checkout.codAvailable': 'Cash on delivery available',
     'checkout.total': 'Total',
     'checkout.processing': 'Processing...',
@@ -1039,6 +1040,11 @@ export const enTranslations: Record<string, string> = {
     'categories.noCategoriesYet': 'No categories yet',
     'categories.appearAutomatically': 'Categories will appear here automatically when the super admin assigns products to your store.',
     'categories.viewReadOnly': 'View Category (Read-Only)',
+    'categories.freeShippingPartial': 'Partial',
+    'categories.freeShippingNoProducts': 'Add products to this category before changing free shipping.',
+    'categories.freeShippingEnabledForCategory': 'Free shipping enabled for all products in this category',
+    'categories.freeShippingDisabledForCategory': 'Free shipping disabled for all products in this category',
+    'categories.freeShippingUpdateFailed': 'Failed to update category free shipping',
     
     // Orders
     'orders.title': 'Orders',

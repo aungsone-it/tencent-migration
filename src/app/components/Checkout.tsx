@@ -1360,18 +1360,19 @@ export function Checkout({
     hasSelectedTownship &&
     logisticsQuotes.length > 1;
   const shippingUnavailable = hasSelectedRegion && hasSelectedTownship && !logisticsQuote;
-  const shippingMethodComplete = Boolean(
-    hasSelectedRegion &&
-      hasSelectedTownship &&
-      logisticsQuote &&
-      (!showDeliveryPartnerSelect || selectedDeliveryPartnerId)
-  );
-  const paymentSelectionEnabled = shippingMethodComplete;
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
     : items.length > 0
       ? items
       : miniSummaryItems;
+  const isFreeShippingCheckout = checkoutQualifiesForFreeShipping(checkoutItems);
+  const shippingMethodComplete = Boolean(
+    hasSelectedRegion &&
+      hasSelectedTownship &&
+      logisticsQuote &&
+      (isFreeShippingCheckout || !showDeliveryPartnerSelect || selectedDeliveryPartnerId)
+  );
+  const paymentSelectionEnabled = shippingMethodComplete;
   const quotedShippingFee = shippingMethodComplete ? (logisticsQuote?.shippingFee ?? 0) : 0;
   const shippingFee = resolveEffectiveCheckoutShippingFee({
     quotedFee: quotedShippingFee,
@@ -1407,9 +1408,10 @@ export function Checkout({
   const deliveryPartnerSelectOptions = useMemo(
     () =>
       logisticsQuotes.map((quote) => {
-        const priceLabel =
-          formatCheckoutShippingLabel(quote, formatStorefrontPrice) ||
-          t("checkout.free");
+        const priceLabel = isFreeShippingCheckout
+          ? t("checkout.free")
+          : formatCheckoutShippingLabel(quote, formatStorefrontPrice) ||
+            t("checkout.free");
         const etaLabel = quote.estimatedDays
           ? formatEstimatedDeliveryLabel(quote.estimatedDays, (days) =>
               t("checkout.withinDays").replace("{days}", String(days))
@@ -1420,7 +1422,7 @@ export function Checkout({
           : `${quote.partner.name} — ${priceLabel}`;
         return { id: quote.partner.id, label };
       }),
-    [logisticsQuotes, t]
+    [isFreeShippingCheckout, logisticsQuotes, formatStorefrontPrice, t]
   );
 
   const codPaymentAvailable =
@@ -1890,7 +1892,7 @@ export function Checkout({
     if (!shippingInfo.address.trim()) missingFields.push(t("checkout.address"));
     if (!shippingInfo.state.trim()) missingFields.push(t("checkout.stateRegion"));
     if (!shippingInfo.city.trim()) missingFields.push(t("checkout.township"));
-    if (showDeliveryPartnerSelect && !selectedDeliveryPartnerId) {
+    if (showDeliveryPartnerSelect && !selectedDeliveryPartnerId && !isFreeShippingCheckout) {
       missingFields.push(t("checkout.deliveryMethod"));
     }
     if (hasSelectedRegion && hasSelectedTownship && shippingUnavailable) {
@@ -1920,6 +1922,7 @@ export function Checkout({
       t,
       showDeliveryPartnerSelect,
       selectedDeliveryPartnerId,
+      isFreeShippingCheckout,
       shippingUnavailable,
       hasSelectedRegion,
       hasSelectedTownship,
@@ -2933,14 +2936,23 @@ export function Checkout({
               {showDeliveryPartnerSelect && (
                 <div>
                   <Label htmlFor="vs-delivery-partner" className={checkoutLabelClass}>
-                    {t("checkout.deliveryMethod")} *
+                    {t("checkout.deliveryMethod")}
+                    {!isFreeShippingCheckout && " *"}
                   </Label>
                   <Select
                     value={selectedDeliveryPartnerId}
                     onValueChange={setSelectedDeliveryPartnerId}
-                    required
+                    disabled={isFreeShippingCheckout}
+                    required={!isFreeShippingCheckout}
                   >
-                    <SelectTrigger id="vs-delivery-partner" className={checkoutSelectClass}>
+                    <SelectTrigger
+                      id="vs-delivery-partner"
+                      className={`${checkoutSelectClass}${
+                        isFreeShippingCheckout
+                          ? " cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500 opacity-60"
+                          : ""
+                      }`}
+                    >
                       <SelectValue placeholder={t("checkout.selectDeliveryMethod")} />
                     </SelectTrigger>
                     <SelectContent>
@@ -2951,6 +2963,11 @@ export function Checkout({
                       ))}
                     </SelectContent>
                   </Select>
+                  {isFreeShippingCheckout && (
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      {t("checkout.freeShippingDeliveryLocked")}
+                    </p>
+                  )}
                 </div>
               )}
 

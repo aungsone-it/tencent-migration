@@ -5,13 +5,15 @@ import { Input } from "../ui/input";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
+import { Switch } from "../ui/switch";
 import { VendorAdminCategoryForm } from "./VendorAdminCategoryForm";
 import { cacheManager } from "../../utils/cacheManager";
 import { toast } from "sonner";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../../utils/supabase/info";
-import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories, broadcastVendorCategoryAssignmentChanged } from "../../utils/module-cache";
+import { ADMIN_PRODUCTS_INITIAL_PAGE_SIZE, filterVendorCreatedCategories, broadcastVendorCategoryAssignmentChanged, invalidateVendorProductsAdminCache, invalidateVendorStorefrontCatalogCachesAfterProductLinkChange } from "../../utils/module-cache";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { API_BASE_URL } from "../../../utils/api-client";
 
 interface Product {
   id: string;
@@ -22,6 +24,7 @@ interface Product {
   category: string;
   inventory: number;
   status: string;
+  freeShipping?: boolean;
 }
 
 interface CategoryInfo {
@@ -35,6 +38,8 @@ interface CategoryInfo {
   status: "active" | "hide";
   productIds: string[];
   createdAt: string;
+  freeShippingEnabledCount?: number;
+  freeShippingTotalCount?: number;
 }
 
 interface VendorAdminCategoriesProps {
@@ -62,6 +67,8 @@ export function VendorAdminCategories({
   const [editingCategory, setEditingCategory] = useState<CategoryInfo | null>(null);
   const [listPage, setListPage] = useState(1);
   const [listPageSize, setListPageSize] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
+  const [vendorFreeShippingAccess, setVendorFreeShippingAccess] = useState(false);
+  const [freeShippingToggleCategoryId, setFreeShippingToggleCategoryId] = useState<string | null>(null);
   const wasActiveRef = useRef(false);
 
   const cleanupImportedCategories = async () => {
@@ -126,7 +133,105 @@ export function VendorAdminCategories({
       productCount: activeProducts,
       activeProducts,
       createdAt: String(cat?.createdAt || ""),
+      freeShippingEnabledCount: Number(cat?.freeShippingEnabledCount ?? 0),
+      freeShippingTotalCount: Number(cat?.freeShippingTotalCount ?? productIds.length),
     };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/vendor-auth/profile/${encodeURIComponent(vendorId)}`,
+          {
+            headers: {
+              ...getCloudBaseRequestHeaders(),
+              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+            },
+          }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setVendorFreeShippingAccess(data?.user?.freeShippingEnabled === true);
+        }
+      } catch {
+        if (!cancelled) setVendorFreeShippingAccess(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorId]);
+
+  const getCategoryFreeShippingChecked = (category: CategoryInfo) => {
+    const total = category.freeShippingTotalCount ?? category.productIds.length;
+    const enabled = category.freeShippingEnabledCount ?? 0;
+    return total > 0 && enabled === total;
+  };
+
+  const isCategoryFreeShippingPartial = (category: CategoryInfo) => {
+    const total = category.freeShippingTotalCount ?? category.productIds.length;
+    const enabled = category.freeShippingEnabledCount ?? 0;
+    return total > 0 && enabled > 0 && enabled < total;
+  };
+
+  const handleToggleCategoryFreeShipping = async (category: CategoryInfo, next: boolean) => {
+    if (!vendorFreeShippingAccess) {
+      toast.error(t("products.freeShippingAccessRequired"));
+      return;
+    }
+    const total = category.freeShippingTotalCount ?? category.productIds.length;
+    if (total === 0) {
+      toast.error(t("categories.freeShippingNoProducts"));
+      return;
+    }
+
+    setFreeShippingToggleCategoryId(category.id);
+    try {
+      const response = await fetch(
+        `${cloudbaseApiBaseUrl}/vendor/categories/${encodeURIComponent(category.id)}/bulk-free-shipping`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+          },
+          body: JSON.stringify({ vendorId, enabled: next }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : t("categories.freeShippingUpdateFailed"));
+      }
+
+      const updatedCount = Number(data.updatedCount ?? total);
+      const enabledCount = next ? updatedCount : 0;
+      setCategories((prev) =>
+        prev.map((cat) =>
+          cat.id === category.id
+            ? {
+                ...cat,
+                freeShippingEnabledCount: enabledCount,
+                freeShippingTotalCount: Number(data.freeShippingTotalCount ?? total),
+                products: cat.products.map((product) => ({ ...product, freeShipping: next })),
+              }
+            : cat
+        )
+      );
+      invalidateVendorProductsAdminCache(vendorId);
+      invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendorId, [vendorName, vendorStoreSlug]);
+      toast.success(
+        next ? t("categories.freeShippingEnabledForCategory") : t("categories.freeShippingDisabledForCategory")
+      );
+    } catch (error: any) {
+      console.error("Failed to toggle category free shipping:", error);
+      toast.error(error?.message || t("categories.freeShippingUpdateFailed"));
+    } finally {
+      setFreeShippingToggleCategoryId(null);
+    }
   };
 
   const loadCategories = async (forceRefresh = false, showFullLoading = categories.length === 0) => {
@@ -417,6 +522,9 @@ export function VendorAdminCategories({
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("categories.description")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("categories.products")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("categories.status")}</th>
+                  {vendorFreeShippingAccess && (
+                    <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.freeShipping")}</th>
+                  )}
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("categories.actions")}</th>
                 </tr>
               </thead>
@@ -460,6 +568,25 @@ export function VendorAdminCategories({
                         </Badge>
                       )}
                     </td>
+                    {vendorFreeShippingAccess && (
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={getCategoryFreeShippingChecked(category)}
+                            disabled={
+                              freeShippingToggleCategoryId === category.id ||
+                              (category.freeShippingTotalCount ?? category.productIds.length) === 0
+                            }
+                            onCheckedChange={(checked) =>
+                              void handleToggleCategoryFreeShipping(category, checked)
+                            }
+                          />
+                          {isCategoryFreeShippingPartial(category) && (
+                            <span className="text-xs text-amber-700">{t("categories.freeShippingPartial")}</span>
+                          )}
+                        </div>
+                      </td>
+                    )}
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
                         <Button

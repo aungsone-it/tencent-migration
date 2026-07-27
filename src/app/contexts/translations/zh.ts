@@ -925,6 +925,7 @@ export const zhTranslations: Record<string, string> = {
     'products.freeShippingUpdateFailed': '更新免运费设置失败',
     'products.freeShippingForProduct': '此产品免运费',
     'products.freeShippingForProductDesc': '仅适用于您的店铺。当顾客仅向您购买免运费产品时，结账时配送费为 0 缅元。',
+    'products.categoryFreeShippingTitle': '按类别设置免运费',
     
     // Add Product
     'addProduct.back': '返回',

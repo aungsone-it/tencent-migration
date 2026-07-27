@@ -964,6 +964,7 @@ export const enTranslations: Record<string, string> = {
     'products.freeShippingUpdateFailed': 'Failed to update free shipping',
     'products.freeShippingForProduct': 'Free shipping for this product',
     'products.freeShippingForProductDesc': 'Applies only to your store. When customers buy only free-shipping products from you, delivery fees are 0 MMK at checkout.',
+    'products.categoryFreeShippingTitle': 'Free shipping by category',
     
     // Add Product
     'addProduct.back': 'Back',

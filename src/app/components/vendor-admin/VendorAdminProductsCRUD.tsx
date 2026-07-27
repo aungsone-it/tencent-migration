@@ -123,6 +123,14 @@ interface Product {
   freeShipping?: boolean;
 }
 
+interface VendorCategoryFreeShippingRow {
+  id: string;
+  name: string;
+  productIds: string[];
+  freeShippingEnabledCount: number;
+  freeShippingTotalCount: number;
+}
+
 /** Platform catalog rows often carry `category` (Watch, Home, …) before vendor API merges it. */
 function enrichVendorProductsWithPlatformCategories(products: Product[]): Product[] {
   const catalog = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
@@ -197,6 +205,8 @@ export function VendorAdminProductsCRUD({
   const [assignPickerServerHasMore, setAssignPickerServerHasMore] = useState(false);
   const [vendorFreeShippingAccess, setVendorFreeShippingAccess] = useState(false);
   const [freeShippingToggleId, setFreeShippingToggleId] = useState<string | null>(null);
+  const [vendorCategories, setVendorCategories] = useState<VendorCategoryFreeShippingRow[]>([]);
+  const [freeShippingToggleCategoryId, setFreeShippingToggleCategoryId] = useState<string | null>(null);
   /** Vendor picker: filter saved catalog while typing; server load only after Enter. */
   const [pickerUiMode, setPickerUiMode] = useState<"cache" | "server">("cache");
   const [pickerCommittedSearch, setPickerCommittedSearch] = useState("");
@@ -259,9 +269,29 @@ export function VendorAdminProductsCRUD({
           forceRefresh,
         );
         setVendorCategoryByProductId(buildVendorProductCategoryLabels(categories));
+        setVendorCategories(
+          categories
+            .map((cat: any) => {
+              const productIds = Array.isArray(cat?.productIds)
+                ? cat.productIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+                : [];
+              return {
+                id: String(cat?.id || ""),
+                name: String(cat?.name || ""),
+                productIds,
+                freeShippingEnabledCount: Number(cat?.freeShippingEnabledCount ?? 0),
+                freeShippingTotalCount: Number(cat?.freeShippingTotalCount ?? productIds.length),
+              };
+            })
+            .filter((cat: VendorCategoryFreeShippingRow) => cat.id && cat.name)
+            .sort((a: VendorCategoryFreeShippingRow, b: VendorCategoryFreeShippingRow) =>
+              a.name.localeCompare(b.name)
+            )
+        );
       } catch (error) {
         console.warn("Failed to load vendor category labels:", error);
         setVendorCategoryByProductId(new Map());
+        setVendorCategories([]);
       }
     },
     [vendorId],
@@ -374,6 +404,83 @@ export function VendorAdminProductsCRUD({
       toast.error(error instanceof Error ? error.message : t("products.freeShippingUpdateFailed"));
     } finally {
       setFreeShippingToggleId(null);
+    }
+  };
+
+  const getCategoryFreeShippingChecked = (category: VendorCategoryFreeShippingRow) => {
+    const total = category.freeShippingTotalCount || category.productIds.length;
+    return total > 0 && category.freeShippingEnabledCount === total;
+  };
+
+  const isCategoryFreeShippingPartial = (category: VendorCategoryFreeShippingRow) => {
+    const total = category.freeShippingTotalCount || category.productIds.length;
+    return total > 0 && category.freeShippingEnabledCount > 0 && category.freeShippingEnabledCount < total;
+  };
+
+  const handleToggleCategoryFreeShipping = async (
+    category: VendorCategoryFreeShippingRow,
+    next: boolean
+  ) => {
+    if (!vendorFreeShippingAccess) {
+      toast.error(t("products.freeShippingAccessRequired"));
+      return;
+    }
+    const total = category.freeShippingTotalCount || category.productIds.length;
+    if (total === 0) {
+      toast.error(t("categories.freeShippingNoProducts"));
+      return;
+    }
+
+    setFreeShippingToggleCategoryId(category.id);
+    try {
+      const res = await fetch(
+        `${cloudbaseApiBaseUrl}/vendor/categories/${encodeURIComponent(category.id)}/bulk-free-shipping`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+          },
+          body: JSON.stringify({ vendorId, enabled: next }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : t("categories.freeShippingUpdateFailed"));
+      }
+
+      const updatedCount = Number(data.updatedCount ?? total);
+      const enabledCount = next ? updatedCount : 0;
+      const affectedIds = new Set(category.productIds);
+      setVendorCategories((prev) =>
+        prev.map((cat) =>
+          cat.id === category.id
+            ? {
+                ...cat,
+                freeShippingEnabledCount: enabledCount,
+                freeShippingTotalCount: Number(data.freeShippingTotalCount ?? total),
+              }
+            : cat
+        )
+      );
+      setProducts((prev) =>
+        prev.map((row) => (affectedIds.has(row.id) ? { ...row, freeShipping: next } : row))
+      );
+      invalidateVendorProductsAdminCache(vendorId);
+      invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendorId, [
+        vendorStoreSlug,
+        routeStoreName,
+      ]);
+      invalidateStaffActivitiesCache();
+      toast.success(
+        next ? t("categories.freeShippingEnabledForCategory") : t("categories.freeShippingDisabledForCategory")
+      );
+    } catch (error) {
+      console.error("Failed to toggle category free shipping:", error);
+      toast.error(error instanceof Error ? error.message : t("categories.freeShippingUpdateFailed"));
+    } finally {
+      setFreeShippingToggleCategoryId(null);
     }
   };
 
@@ -1014,6 +1121,36 @@ export function VendorAdminProductsCRUD({
           </SelectContent>
         </Select>
       </div>
+
+      {vendorFreeShippingAccess && vendorCategories.length > 0 && (
+        <Card className="p-4 border-slate-200">
+          <p className="text-sm font-medium text-slate-900">{t("products.categoryFreeShippingTitle")}</p>
+          <p className="text-xs text-slate-500 mt-1 mb-3">{t("categories.freeShippingVendorScopedHint")}</p>
+          <div className="flex flex-wrap gap-2">
+            {vendorCategories.map((category) => (
+              <div
+                key={category.id}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+              >
+                <span className="text-sm font-medium text-slate-800">{category.name}</span>
+                <Switch
+                  checked={getCategoryFreeShippingChecked(category)}
+                  disabled={
+                    freeShippingToggleCategoryId === category.id ||
+                    (category.freeShippingTotalCount || category.productIds.length) === 0
+                  }
+                  onCheckedChange={(checked) =>
+                    void handleToggleCategoryFreeShipping(category, checked)
+                  }
+                />
+                {isCategoryFreeShippingPartial(category) && (
+                  <span className="text-xs text-amber-700">{t("categories.freeShippingPartial")}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {selectedProducts.length > 0 && (
         <Card className="p-4 bg-amber-50 border-amber-200">

@@ -9,6 +9,7 @@ import customerApp from "./customer_routes.tsx";
 import userApp from "./user_routes.tsx";
 import socialProfileApp from "./social_profile_routes.tsx";
 import logisticsApp from "./logistics_routes.tsx";
+import subscriptionApp from "./subscription_routes.tsx";
 import { createPaymentIntent, verifyPayment } from "./stripe_routes.tsx";
 import {
   createKPayQr,
@@ -1292,6 +1293,7 @@ app.route("/make-server-16010b6f", customerApp);
 app.route("/make-server-16010b6f", userApp);
 app.route("/make-server-16010b6f", socialProfileApp);
 app.route("/make-server-16010b6f", logisticsApp);
+app.route("/make-server-16010b6f", subscriptionApp);
 
 // ============================================
 // STRIPE PAYMENT ROUTES

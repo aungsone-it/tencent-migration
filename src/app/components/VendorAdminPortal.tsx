@@ -23,6 +23,7 @@ import {
   AlertCircle,
   User,
   Edit,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -44,6 +45,8 @@ import { VendorAdminOrderManagement } from "./vendor-admin/VendorAdminOrderManag
 import { VendorAdminSettings } from "./vendor-admin/VendorAdminSettings";
 import { VendorAdminFinances } from "./vendor-admin/VendorAdminFinances";
 import { VendorAdminUsers } from "./vendor-admin/VendorAdminUsers";
+import { VendorAdminSubscriptions } from "./vendor-admin/VendorAdminSubscriptions";
+import { VendorAdminSubscribers } from "./vendor-admin/VendorAdminSubscribers";
 import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { API_BASE_URL } from "../../utils/api-client";
 import { applyVendorStoreLogoFavicon, resetDocumentFavicon } from "../utils/documentFavicon";
@@ -86,7 +89,17 @@ function vendorNavAvatarSrc(vendor: Pick<Vendor, "avatar" | "email" | "name">): 
   return `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(seed)}`;
 }
 
-type VendorPage = "dashboard" | "products" | "categories" | "orders" | "settings" | "finances" | "users";
+type VendorPage =
+  | "dashboard"
+  | "products"
+  | "categories"
+  | "orders"
+  | "subscriptions"
+  | "subscription-plans"
+  | "subscription-subscribers"
+  | "settings"
+  | "finances"
+  | "users";
 
 interface SubNavItem {
   id: VendorPage;
@@ -447,6 +460,11 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
     setMountedPages((prev) => (prev.includes(currentPage) ? prev : [...prev, currentPage]));
   }, [currentPage]);
 
+  useEffect(() => {
+    if (currentPage !== "subscription-plans" && currentPage !== "subscription-subscribers") return;
+    setExpandedItems((prev) => (prev.includes("subscriptions") ? prev : [...prev, "subscriptions"]));
+  }, [currentPage]);
+
   // Poll vendor pending orders on a long interval (same badge behavior as super admin orders)
   useEffect(() => {
     const fetchPendingOrders = async () => {
@@ -591,6 +609,17 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
       bgColor: "bg-teal-50",
     },
     {
+      id: "subscriptions" as VendorPage,
+      name: "Subscriptions",
+      icon: Sparkles,
+      color: "text-violet-600",
+      bgColor: "bg-violet-50",
+      subItems: [
+        { id: "subscription-plans" as VendorPage, label: "Plans" },
+        { id: "subscription-subscribers" as VendorPage, label: "Subscribers" },
+      ],
+    },
+    {
       id: "finances" as VendorPage,
       name: t("vendorAdmin.finances"),
       icon: DollarSign,
@@ -683,6 +712,11 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
         );
       case "users":
         return <VendorAdminUsers vendorId={vendor.id} vendorName={vendor.name} />;
+      case "subscriptions":
+      case "subscription-plans":
+        return <VendorAdminSubscriptions vendorId={vendor.id} vendorName={vendor.name} />;
+      case "subscription-subscribers":
+        return <VendorAdminSubscribers vendorId={vendor.id} vendorName={vendor.name} />;
       default:
         return null;
     }
@@ -791,7 +825,9 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
           <ul className="space-y-1.5">
             {navigation.map((item) => {
               const Icon = item.icon;
-              const isActive = currentPage === item.id;
+              const isActive =
+                currentPage === item.id ||
+                Boolean(item.subItems?.some((subItem) => subItem.id === currentPage));
               const badge = item.id === 'orders' ? unreadNotifications : undefined;
               
               return (

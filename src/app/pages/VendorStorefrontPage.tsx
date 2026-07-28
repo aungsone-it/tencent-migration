@@ -45,6 +45,7 @@ import { StorefrontAwareRouteFallback } from "../components/RouteLoadingFallback
 import { Store, ArrowLeft } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { seedStorefrontPolicyCacheFromVendorSettings } from "../hooks/useStorefrontPolicyData";
+import { readSubscriptionPwaPending } from "../utils/subscriptionPwa";
 
 function parseVendorStorePath(pathname: string): { storeName: string; tail: string[] } | null {
   const parts = pathname.split("/").filter(Boolean);
@@ -234,6 +235,15 @@ export function VendorStorefrontPage() {
   const params = useParams();
   const location = useLocation();
   const { setStorefrontLanguageOverride } = useLanguage();
+
+  useLayoutEffect(() => {
+    if (!isUnifiedKpaySummaryPath(location.pathname)) return;
+    const pending = readSubscriptionPwaPending();
+    if (!pending?.merchantOrderId || !pending.storefrontOrigin) return;
+    const target = new URL(pending.originPath || "/", pending.storefrontOrigin);
+    target.searchParams.set("subscription_payment", pending.merchantOrderId);
+    window.location.replace(target.toString());
+  }, [location.pathname]);
 
   useEffect(() => {
     setStorefrontLanguageOverride("my");

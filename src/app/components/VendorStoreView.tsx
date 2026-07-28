@@ -169,6 +169,7 @@ import { formatMyanmarLocationLine } from "../utils/myanmarRegionLabels";
 import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 import { VendorStorefrontFooter } from "./VendorStorefrontFooter";
 import { VendorInstallFab } from "./VendorInstallFab";
+import { StorefrontSubscriptions } from "./StorefrontSubscriptions";
 import { NotificationCenter } from "./NotificationCenter";
 import { useChatNotification } from "../contexts/ChatNotificationContext";
 import { authApi, wishlistApi } from "../../utils/api";
@@ -5769,14 +5770,17 @@ export function VendorStoreView({
     ]
   );
 
+  const [subscriptionPlansOpen, setSubscriptionPlansOpen] = useState(false);
   const { setSuppressFloatingChat } = useLoading();
 
   const suppressFloatingChatForVendorShell = useMemo(
     () =>
       showVendorPageFullSkeleton ||
+      subscriptionPlansOpen ||
       (vendorViewMode === "storefront" && isVendorProductDetailPath && !selectedProduct),
     [
       showVendorPageFullSkeleton,
+      subscriptionPlansOpen,
       vendorViewMode,
       isVendorProductDetailPath,
       selectedProduct,
@@ -7084,6 +7088,16 @@ export function VendorStoreView({
           </>
         ) : (
           <>
+            <StorefrontSubscriptions
+              vendorId={canonicalVendorId || vendorId}
+              storeName={storeName}
+              user={user}
+              onRequireAuth={() => {
+                setShowAuthModal(true);
+                setAuthMode("login");
+              }}
+              onOpenChange={setSubscriptionPlansOpen}
+            />
             {/* Network / timeout — not an empty catalog or app bug */}
             {serverStatus === 'unhealthy' && (
               <div className="flex flex-col items-center justify-center py-16 sm:py-24 max-w-md mx-auto px-4 text-center">
@@ -7223,7 +7237,7 @@ export function VendorStoreView({
     {!cartOpen && (
       <>
         <BackToTop scrollContainerRef={vendorScrollRootRef} scrollContainerKey={vendorScrollRebindKey} />
-        {!showVendorPageFullSkeleton && (
+        {!showVendorPageFullSkeleton && !subscriptionPlansOpen && (
           <VendorInstallFab
             storeName={storeName}
             storeLogo={storeLogo}

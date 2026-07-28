@@ -14,6 +14,7 @@ import {
 } from "../utils/kpayClient";
 import { maybeRedirectKpayReturnToUnifiedSummary } from "../utils/kpayUnifiedSummaryRedirect";
 import { notifyAdminOrdersUpdated } from "../utils/adminOrdersRealtime";
+import { readSubscriptionPwaPending } from "../utils/subscriptionPwa";
 
 type ReturnState =
   | { kind: "loading" }
@@ -46,13 +47,15 @@ function navigateToSummary(url: string, navigate: ReturnType<typeof useNavigate>
 export function KPayReturnPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [subscriptionPending] = useState(() => readSubscriptionPwaPending());
 
   const merchantOrderId = useMemo(
     () =>
       searchParams.get("merch_order_id") ||
       searchParams.get("merchOrderId") ||
+      subscriptionPending?.merchantOrderId ||
       "",
-    [searchParams],
+    [searchParams, subscriptionPending?.merchantOrderId],
   );
   const prepayIdFromUrl = useMemo(
     () => searchParams.get("prepay_id") || "",
@@ -90,6 +93,19 @@ export function KPayReturnPage() {
 
   useLayoutEffect(() => {
     if (!merchantOrderId || redirectDoneRef.current) return;
+    if (
+      subscriptionPending?.merchantOrderId === merchantOrderId &&
+      subscriptionPending.storefrontOrigin
+    ) {
+      redirectDoneRef.current = true;
+      const target = new URL(
+        subscriptionPending.originPath || "/",
+        subscriptionPending.storefrontOrigin,
+      );
+      target.searchParams.set("subscription_payment", merchantOrderId);
+      window.location.replace(target.toString());
+      return;
+    }
     if (maybeRedirectKpayReturnToUnifiedSummary()) {
       redirectDoneRef.current = true;
       return;
@@ -108,7 +124,7 @@ export function KPayReturnPage() {
       }),
       navigate,
     );
-  }, [merchantOrderId, prepayIdFromUrl, navigate]);
+  }, [merchantOrderId, prepayIdFromUrl, navigate, subscriptionPending]);
 
   useEffect(() => {
     if (!merchantOrderId) return;

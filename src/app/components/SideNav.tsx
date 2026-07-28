@@ -1,7 +1,7 @@
 // Side Navigation Component - Main navigation menu
 import { useState, useEffect } from "react";
 import { Link } from "react-router";
-import { Home, Package, ShoppingCart, Store, Video, MessageSquare, Users, DollarSign, Truck, FileText, Settings, ChevronDown } from "lucide-react";
+import { Home, Package, ShoppingCart, Store, Video, MessageSquare, Users, DollarSign, Truck, FileText, Settings, ChevronDown, Crown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +38,7 @@ export type SideNavAllowedLabels = Set<string>;
 
 interface SubNavItem {
   label: string;
+  page?: string;
 }
 
 interface NavItem {
@@ -206,6 +207,9 @@ export function SideNav({
       'Live stream': 'nav.liveStream',
       'Chat': 'nav.chat',
       'Customers': 'nav.customers',
+      'Subscriptions': 'Subscriptions',
+      'Plans': 'Plans',
+      'Subscribers': 'Subscribers',
       'Finances': 'nav.finances',
       'Logistics': 'nav.logistics',
       'Blog post': 'nav.blogPost',
@@ -239,6 +243,14 @@ export function SideNav({
     // { icon: Video, label: "Live stream" },
     { icon: MessageSquare, label: "Chat", badge: badgeCounts?.chat || 0 },
     { icon: Users, label: "Customers" },
+    {
+      icon: Crown,
+      label: "Subscriptions",
+      subItems: [
+        { label: "Plans", page: "Subscription Plans" },
+        { label: "Subscribers", page: "Subscription Subscribers" },
+      ],
+    },
     { icon: DollarSign, label: "Finances" },
     { icon: Truck, label: "Logistics" },
     // HIDDEN: Blog post section (can be restored later)
@@ -259,7 +271,7 @@ export function SideNav({
       : (navItems
           .map((item) => {
             if (item.subItems && item.subItems.length > 0) {
-              const subs = item.subItems.filter((s) => allowedPageLabels.has(s.label));
+              const subs = item.subItems.filter((s) => allowedPageLabels.has(s.page || s.label));
               if (subs.length === 0) return null;
               return { ...item, subItems: subs };
             }
@@ -267,10 +279,13 @@ export function SideNav({
           })
           .filter(Boolean) as NavItem[]);
 
-  // Auto-expand Product section if we're on a product sub-page
+  // Auto-expand the section containing the current sub-page.
   useEffect(() => {
     if (["Product", "Categories", "Inventory"].includes(currentPage)) {
       setExpandedItems(prev => prev.includes("Product") ? prev : [...prev, "Product"]);
+    }
+    if (["Subscription Plans", "Subscription Subscribers"].includes(currentPage)) {
+      setExpandedItems(prev => prev.includes("Subscriptions") ? prev : [...prev, "Subscriptions"]);
     }
     // HIDDEN: Blog post auto-expand
     // if (["Blog post", "Blog category"].includes(currentPage)) {
@@ -294,8 +309,8 @@ export function SideNav({
     }
   };
 
-  const handleSubNavClick = (subLabel: string) => {
-    onNavigate(subLabel);
+  const handleSubNavClick = (subItem: SubNavItem) => {
+    onNavigate(subItem.page || subItem.label);
   };
 
   return (
@@ -348,7 +363,9 @@ export function SideNav({
       <nav className="flex-1 px-4 py-6 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-300 hover:scrollbar-thumb-slate-400 scrollbar-thumb-rounded-full">
         <ul className="space-y-1.5">
           {filteredNavItems.map((item) => {
-            const isActive = currentPage === item.label;
+            const isActive =
+              currentPage === item.label ||
+              Boolean(item.subItems?.some((subItem) => currentPage === (subItem.page || subItem.label)));
             
             return (
               <li key={item.label}>
@@ -380,12 +397,12 @@ export function SideNav({
                 {item.subItems && expandedItems.includes(item.label) && (
                   <ul className="mt-2 ml-6 space-y-1 border-l-2 border-slate-200 pl-4">
                     {item.subItems.map((subItem) => {
-                      const isSubActive = currentPage === subItem.label;
+                      const isSubActive = currentPage === (subItem.page || subItem.label);
                       
                       return (
                         <li key={subItem.label}>
                           <button
-                            onClick={() => handleSubNavClick(subItem.label)}
+                            onClick={() => handleSubNavClick(subItem)}
                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-300 ${
                               isSubActive
                                 ? "bg-slate-100 text-slate-900 font-medium shadow-md"

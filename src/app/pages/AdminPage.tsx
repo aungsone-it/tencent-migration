@@ -40,6 +40,12 @@ const Orders = lazy(() => import("../components/Orders").then((m) => ({ default:
 const CustomersEnhanced = lazy(() =>
   import("../components/CustomersEnhanced").then((m) => ({ default: m.CustomersEnhanced }))
 );
+const AdminSubscriptionPlans = lazy(() =>
+  import("../components/AdminSubscriptions").then((m) => ({ default: m.AdminSubscriptionPlans }))
+);
+const AdminSubscriptionSubscribers = lazy(() =>
+  import("../components/AdminSubscriptions").then((m) => ({ default: m.AdminSubscriptionSubscribers }))
+);
 const Chat = lazy(() => import("../components/Chat").then((m) => ({ default: m.Chat })));
 const Marketing = lazy(() => import("../components/Marketing").then((m) => ({ default: m.Marketing })));
 const LiveStreamMulti = lazy(() =>
@@ -85,6 +91,8 @@ const ADMIN_PAGES = {
   INVENTORY: 'Inventory',
   ORDERS: 'Orders',
   CUSTOMERS: 'Customers',
+  SUBSCRIPTION_PLANS: 'Subscription Plans',
+  SUBSCRIPTION_SUBSCRIBERS: 'Subscription Subscribers',
   CHAT: 'Chat',
   DISCOUNT: 'Promo Setting',
   LIVE_STREAM: 'Live stream',
@@ -272,6 +280,8 @@ export function AdminPage() {
     "inventory": ADMIN_PAGES.INVENTORY,
     "orders": ADMIN_PAGES.ORDERS,
     "customers": ADMIN_PAGES.CUSTOMERS,
+    "subscription-plans": ADMIN_PAGES.SUBSCRIPTION_PLANS,
+    "subscription-subscribers": ADMIN_PAGES.SUBSCRIPTION_SUBSCRIBERS,
     "chat": ADMIN_PAGES.CHAT,
     "marketing": ADMIN_PAGES.DISCOUNT,
     "livestream": ADMIN_PAGES.LIVE_STREAM,
@@ -297,6 +307,8 @@ export function AdminPage() {
     [ADMIN_PAGES.INVENTORY]: "inventory",
     [ADMIN_PAGES.ORDERS]: "orders",
     [ADMIN_PAGES.CUSTOMERS]: "customers",
+    [ADMIN_PAGES.SUBSCRIPTION_PLANS]: "subscription-plans",
+    [ADMIN_PAGES.SUBSCRIPTION_SUBSCRIBERS]: "subscription-subscribers",
     [ADMIN_PAGES.CHAT]: "chat",
     [ADMIN_PAGES.DISCOUNT]: "marketing",
     [ADMIN_PAGES.LIVE_STREAM]: "livestream",
@@ -702,6 +714,10 @@ export function AdminPage() {
             }}
           />
         );
+      case ADMIN_PAGES.SUBSCRIPTION_PLANS:
+        return <AdminSubscriptionPlans />;
+      case ADMIN_PAGES.SUBSCRIPTION_SUBSCRIBERS:
+        return <AdminSubscriptionSubscribers />;
       case ADMIN_PAGES.CHAT:
         return (
           <Chat

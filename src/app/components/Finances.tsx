@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  DollarSign,
 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -66,7 +67,7 @@ function isFinanciallyAccruedTransaction(transaction: any): boolean {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "-");
-  return status === "ready-to-ship" || status === "fulfilled";
+  return status === "processing" || status === "ready-to-ship" || status === "fulfilled";
 }
 
 function filterFinancesTransactionsByRange(transactions: any[], range: DateRange | undefined): any[] {
@@ -196,15 +197,23 @@ export function Finances() {
   }, []);
 
   // Extract data from API response
-  const transactions = useMemo(
-    () => (financialData?.transactions || []).filter((t: any) => isFinanciallyAccruedTransaction(t)),
+  const allTransactions = useMemo(
+    () => financialData?.transactions || [],
     [financialData?.transactions]
+  );
+  const transactions = useMemo(
+    () => allTransactions.filter((t: any) => isFinanciallyAccruedTransaction(t)),
+    [allTransactions]
   );
   const vendorPayouts = financialData?.vendorPayouts || [];
 
   const scopedTransactions = useMemo(
     () => filterFinancesTransactionsByRange(transactions, pageDateRange),
     [transactions, pageDateRange]
+  );
+  const scopedAllTransactions = useMemo(
+    () => filterFinancesTransactionsByRange(allTransactions, pageDateRange),
+    [allTransactions, pageDateRange]
   );
 
   const dashboardSummary = useMemo(() => {
@@ -222,6 +231,10 @@ export function Finances() {
   const revenueStatTotal = useMemo(
     () => scopedTransactions.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0),
     [scopedTransactions]
+  );
+  const totalRevenueStatTotal = useMemo(
+    () => scopedAllTransactions.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0),
+    [scopedAllTransactions]
   );
 
   const commissionPayoutStatTotal = totalCommission;
@@ -374,8 +387,8 @@ export function Finances() {
         </div>
         
         {/* Skeleton stat cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {Array.from({ length: 2 }).map((_, index) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
+          {Array.from({ length: 3 }).map((_, index) => (
             <Card key={`skeleton-stat-${index}`} className="animate-pulse">
               <div className="p-6 space-y-3">
                 <div className="h-4 bg-slate-200 rounded w-24"></div>
@@ -458,12 +471,31 @@ export function Finances() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         <Card className="@container flex h-full min-h-[11rem] flex-col">
           <CardContent className="flex h-full min-h-0 flex-1 flex-col p-6">
             <div className="flex min-h-0 flex-1 items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-slate-600">{t("finances.totalRevenue")}</p>
+                <FinancesStatMmk value={totalRevenueStatTotal} />
+                <div className="mt-2 flex items-center gap-1">
+                  <ArrowUpRight className="h-4 w-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-600">+0.0%</span>
+                  <span className="text-sm text-slate-500">from last month</span>
+                </div>
+              </div>
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-500">
+                <DollarSign className="h-6 w-6 text-white" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="@container flex h-full min-h-[11rem] flex-col">
+          <CardContent className="flex h-full min-h-0 flex-1 flex-col p-6">
+            <div className="flex min-h-0 flex-1 items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-600">{t("finances.revenue")}</p>
                 <FinancesStatMmk value={revenueStatTotal} />
                 <div className="mt-2 flex items-center gap-1">
                   <ArrowUpRight className="h-4 w-4 text-green-600" />

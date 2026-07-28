@@ -1,6 +1,6 @@
 /**
  * Vendor commission earned — same rules as super-admin vendor profile:
- * accrues only on orders in ready-to-ship / fulfilled,
+ * accrues only on orders shipped or later in the fulfillment pipeline,
  * per line net of order-level discount, using line → product → vendor default %.
  */
 
@@ -21,12 +21,14 @@ export function normalizeOrderStatusKey(status: string | undefined): string {
 
 /** Commission & vendor revenue accrue only after fulfillment pipeline (aligned with VendorProfile). */
 export const VENDOR_COMMISSION_ACCRUE_STATUSES = new Set([
+  "processing",
   "ready-to-ship",
   "fulfilled",
 ]);
 
 /** Orders eligible for KBZPay commission withdrawal (ready-to-ship onward). */
 export const VENDOR_WITHDRAWABLE_STATUSES = new Set([
+  "processing",
   "ready-to-ship",
   "fulfilled",
   "shipped",

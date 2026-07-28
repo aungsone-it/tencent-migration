@@ -99,7 +99,7 @@ interface OrderDetailsProps {
 const getStatusBadge = (status: OrderStatus) => {
   const statusConfig = {
     pending: { label: "Pending", className: "bg-yellow-100 text-yellow-700 border-yellow-300" },
-    processing: { label: "Processing", className: "bg-blue-100 text-blue-700 border-blue-300" },
+    processing: { label: "Shipped", className: "bg-blue-100 text-blue-700 border-blue-300" },
     fulfilled: { label: "Fulfilled", className: "bg-green-100 text-green-700 border-green-300" },
     cancelled: { label: "Cancelled", className: "bg-red-100 text-red-700 border-red-300" },
     "ready-to-ship": { label: "Ready to Ship", className: "bg-purple-100 text-purple-700 border-purple-300" },
@@ -362,7 +362,7 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="processing">Processing</SelectItem>
+                        <SelectItem value="processing">Shipped</SelectItem>
                         <SelectItem value="ready-to-ship">Ready to Ship</SelectItem>
                         <SelectItem value="fulfilled">Fulfilled</SelectItem>
                         <SelectItem value="cancelled">Cancelled</SelectItem>

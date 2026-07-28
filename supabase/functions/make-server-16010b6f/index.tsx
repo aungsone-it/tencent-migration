@@ -5748,7 +5748,7 @@ function formatOrderStatusLabel(status: unknown): string {
   const normalized = normalizeOrderStatus(String(status || ""));
   if (normalized === "cancelled") return "cancelled";
   if (normalized === "fulfilled") return "fulfilled";
-  if (normalized === "processing") return "processing";
+  if (normalized === "processing") return "shipped";
   if (normalized === "pending") return "pending";
   if (normalized === "ready-to-ship") return "ready to ship";
   const raw = String(status || "").trim();
@@ -5820,11 +5820,11 @@ async function resolveOrderStorage(orderIdParam: string): Promise<{
 
 function isInventoryCommitStatus(status: string | undefined): boolean {
   const n = normalizeOrderStatus(status);
-  return n === "ready-to-ship" || n === "fulfilled";
+  return n === "processing" || n === "ready-to-ship" || n === "fulfilled";
 }
 
 /**
- * Stock was persisted (deducted) only after admin sets ready-to-ship / fulfilled — see `inventoryDeducted`.
+ * Stock is persisted once an order is ready to ship, shipped, or fulfilled — see `inventoryDeducted`.
  */
 function physicallyReducedInventory(order: { inventoryDeducted?: boolean }): boolean {
   return order.inventoryDeducted === true;
@@ -6485,7 +6485,7 @@ app.put("/make-server-16010b6f/orders/:id", async (c) => {
       nextInventoryFlag = false;
     }
 
-    // 3) First move to ready-to-ship or fulfilled → deduct once (not yet committed in KV)
+    // 3) First move to ready-to-ship, shipped (legacy key: processing), or fulfilled → deduct once.
     if (
       !isNowCancelled &&
       body.status !== undefined &&

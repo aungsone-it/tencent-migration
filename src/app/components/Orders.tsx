@@ -100,7 +100,7 @@ function isFinanciallyAccruedOrderStatus(status: string | undefined): boolean {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "-");
-  return normalized === "ready-to-ship" || normalized === "fulfilled";
+  return normalized === "processing" || normalized === "ready-to-ship" || normalized === "fulfilled";
 }
 
 function normalizeOrderListStatus(status: string | undefined): string {
@@ -1654,7 +1654,7 @@ export function Orders({
 
   const statusDistributionData = [
     { name: "Pending", value: pendingOrders },
-    { name: "Processing", value: processingOrders },
+    { name: "Shipped", value: processingOrders },
     { name: "Fulfilled", value: fulfilledOrders },
     {
       name: "Cancelled",

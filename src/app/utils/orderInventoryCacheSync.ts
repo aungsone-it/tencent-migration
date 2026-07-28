@@ -35,7 +35,7 @@ export function normalizeOrderLineParentProductId(raw: unknown): string {
 
 function isInventoryCommitStatus(status: string | undefined): boolean {
   const n = normalizeOrderStatus(status);
-  return n === "ready-to-ship" || n === "fulfilled";
+  return n === "processing" || n === "ready-to-ship" || n === "fulfilled";
 }
 
 /** Same as server: stock was committed only when flag is explicitly true. */
@@ -143,7 +143,7 @@ export function syncAdminInventoryCacheAfterOrderStatusChange(
     return;
   }
 
-  // 2) Move away from ready-to-ship / fulfilled → restore (new flow only)
+  // 2) Move away from shipped / ready-to-ship / fulfilled → restore (new flow only)
   if (
     items.length > 0 &&
     isInventoryCommitStatus(existingOrder.status) &&
@@ -155,7 +155,7 @@ export function syncAdminInventoryCacheAfterOrderStatusChange(
     return;
   }
 
-  // 3) First move to ready-to-ship or fulfilled → deduct once
+  // 3) First move to shipped / ready-to-ship / fulfilled → deduct once
   if (
     !isNowCancelled &&
     isInventoryCommitStatus(newStatusRaw) &&

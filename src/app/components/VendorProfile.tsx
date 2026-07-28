@@ -326,8 +326,9 @@ function orderLineNetAfterDiscount(lineGross: number, order: any): number {
   return lineGross;
 }
 
-/** Commission & vendor revenue accrue only after fulfillment pipeline (super admin ready-to-ship / fulfilled). */
+/** Commission & vendor revenue accrue once an order is shipped or later in fulfillment. */
 const VENDOR_COMMISSION_STATUSES = new Set([
+  "processing",
   "ready-to-ship",
   "fulfilled",
   "shipped",

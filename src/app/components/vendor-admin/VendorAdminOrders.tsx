@@ -166,7 +166,7 @@ const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
 const getStatusBadge = (status: OrderStatus) => {
   const variants = {
     pending: { color: "bg-amber-100 text-amber-700 border-amber-200", icon: Clock, label: "Pending" },
-    processing: { color: "bg-blue-100 text-blue-700 border-blue-200", icon: Package, label: "Processing" },
+    processing: { color: "bg-blue-100 text-blue-700 border-blue-200", icon: Package, label: "Shipped" },
     fulfilled: { color: "bg-green-100 text-green-700 border-green-200", icon: CheckCircle, label: "Fulfilled" },
     cancelled: { color: "bg-red-100 text-red-700 border-red-200", icon: XCircle, label: "Cancelled" },
     "ready-to-ship": { color: "bg-purple-100 text-purple-700 border-purple-200", icon: Package, label: "Ready to Ship" },
@@ -391,7 +391,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
   // Status breakdown pie chart data
   const statusPieData = [
     { name: "Pending", value: filteredStatusBreakdown.pending, color: COLORS[2] },
-    { name: "Processing", value: filteredStatusBreakdown.processing, color: COLORS[0] },
+    { name: "Shipped", value: filteredStatusBreakdown.processing, color: COLORS[0] },
     { name: "Fulfilled", value: filteredStatusBreakdown.fulfilled, color: COLORS[1] },
     { name: "Cancelled", value: filteredStatusBreakdown.cancelled, color: COLORS[3] },
   ].filter(item => item.value > 0);
@@ -604,7 +604,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
   // Status distribution data for pie chart
   const statusDistributionData = [
     { name: "Pending", value: pendingOrders },
-    { name: "Processing", value: processingOrders },
+    { name: "Shipped", value: processingOrders },
     { name: "Fulfilled", value: fulfilledOrders },
     { name: "Cancelled", value: orders.filter(o => o.status === "cancelled").length },
   ].filter(item => item.value > 0);
@@ -1028,7 +1028,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="processing">Processing</SelectItem>
+                    <SelectItem value="processing">Shipped</SelectItem>
                     <SelectItem value="fulfilled">Fulfilled</SelectItem>
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                     <SelectItem value="ready-to-ship">Ready to Ship</SelectItem>
@@ -1257,7 +1257,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="processing">Processing</SelectItem>
+                <SelectItem value="processing">Shipped</SelectItem>
                 <SelectItem value="fulfilled">Fulfilled</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
                 <SelectItem value="ready-to-ship">Ready to Ship</SelectItem>

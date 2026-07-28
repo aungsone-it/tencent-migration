@@ -106,7 +106,7 @@ export function deriveShippingStatusFromOrder(order: OrderLikeForBadges): AdminS
 
 const CUSTOMER_ORDER_STATUS_LABELS: Record<AdminOrderBadgeStatus, string> = {
   pending: "Pending",
-  processing: "Processing",
+  processing: "Shipped",
   fulfilled: "Delivered",
   cancelled: "Cancelled",
   "ready-to-ship": "Shipping",

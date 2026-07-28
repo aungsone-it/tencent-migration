@@ -317,6 +317,123 @@ app.get("/vendor/subscribers/:vendorId", async (c) => {
   }
 });
 
+app.get("/admin/subscription-plans", async (c) => {
+  try {
+    const rows = await kv.getByPrefix("subscription_plan:");
+    const plans = await Promise.all(
+      (Array.isArray(rows) ? rows : [])
+        .filter((plan) => plan && typeof plan === "object" && !plan.archivedAt)
+        .map(async (plan) => {
+          const vendor = await kv.get(`vendor:${String(plan.vendorId || "")}`).catch(() => null);
+          return {
+            ...plan,
+            vendorName: text(
+              vendor?.storeName || vendor?.businessName || vendor?.name || plan.vendorId || "Vendor",
+              160,
+            ),
+          };
+        }),
+    );
+    plans.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    const activePlans = plans.filter((plan) => plan.status === "active");
+    return c.json({
+      plans,
+      summary: {
+        total: plans.length,
+        active: activePlans.length,
+        inactive: plans.length - activePlans.length,
+        vendors: new Set(plans.map((plan) => String(plan.vendorId || ""))).size,
+        activePlanValue: activePlans.reduce((sum, plan) => sum + positiveMmk(plan.price), 0),
+      },
+    });
+  } catch (error) {
+    console.error("Failed to load platform subscription plans", error);
+    return c.json({ error: "Failed to load subscription plans" }, 500);
+  }
+});
+
+app.get("/admin/subscribers", async (c) => {
+  try {
+    const [rows, customerRows] = await Promise.all([
+      kv.getByPrefix("customer_subscription:"),
+      kv.getByPrefix("customer:"),
+    ]);
+    const now = Date.now();
+    const subscribers = await Promise.all(
+      (Array.isArray(rows) ? rows : [])
+        .filter((row) => row && typeof row === "object")
+        .map(async (row) => {
+          const customerId = String(row.customerId || "").trim();
+          const customer = (Array.isArray(customerRows) ? customerRows : []).find(
+            (candidate) =>
+              candidate &&
+              typeof candidate === "object" &&
+              !Array.isArray(candidate) &&
+              (String(candidate.userId || "").trim() === customerId ||
+                String(candidate.id || "").trim() === customerId),
+          );
+          const [plan, vendor, authProfile] = await Promise.all([
+            getPlan(String(row.planId || "")),
+            kv.get(`vendor:${String(row.vendorId || "")}`).catch(() => null),
+            customerId ? kv.get(`auth:user:${customerId}`).catch(() => null) : Promise.resolve(null),
+          ]);
+          const profile =
+            authProfile && typeof authProfile === "object" && !Array.isArray(authProfile)
+              ? authProfile
+              : {};
+          const email = text(customer?.email || profile.email || row.customerEmail, 200);
+          const imageCandidates = [
+            customer?.profileImageUrl,
+            customer?.avatar,
+            profile.profileImageUrl,
+            profile.avatar,
+          ];
+          const profileImageUrl =
+            imageCandidates
+              .map((value) => text(value, 2000))
+              .find((value) => /^https?:\/\//i.test(value) || value.startsWith("data:image/")) || "";
+          const periodEnd = new Date(String(row.currentPeriodEnd || 0)).getTime();
+          return {
+            ...row,
+            customerName: text(
+              customer?.name || profile.name || profile.fullName || row.customerName || "Customer",
+              120,
+            ),
+            customerEmail: email.toLowerCase().endsWith("@phone.migoo.store") ? "" : email,
+            customerPhone: text(customer?.phone || profile.phone || row.customerPhone, 80),
+            profileImageUrl,
+            vendorName: text(
+              vendor?.storeName || vendor?.businessName || vendor?.name || row.vendorId || "Vendor",
+              160,
+            ),
+            status: periodEnd > now && row.status === "active" ? "active" : "expired",
+            plan: plan
+              ? { id: plan.id, name: plan.name, price: plan.price }
+              : { id: String(row.planId || ""), name: "Archived plan", price: 0 },
+          };
+        }),
+    );
+    subscribers.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    const activeSubscribers = subscribers.filter((item) => item.status === "active");
+    return c.json({
+      subscribers,
+      summary: {
+        total: subscribers.length,
+        active: activeSubscribers.length,
+        expired: subscribers.length - activeSubscribers.length,
+        vendors: new Set(subscribers.map((item) => String(item.vendorId || ""))).size,
+        activeValue: activeSubscribers.reduce(
+          (sum, item) => sum + positiveMmk(item.plan?.price),
+          0,
+        ),
+      },
+    });
+  } catch (error) {
+    console.error("Failed to load platform subscribers", error);
+    return c.json({ error: "Failed to load subscribers" }, 500);
+  }
+});
+
 app.get("/subscriptions/customer/:customerId", async (c) => {
   try {
     const customerId = text(c.req.param("customerId"), 160);

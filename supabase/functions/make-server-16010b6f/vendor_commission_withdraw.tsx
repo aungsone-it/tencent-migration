@@ -1,6 +1,10 @@
 import { Context } from "hono";
 import * as kv from "./kv_store.tsx";
 import { invokeKPayBusinessPay } from "./kpay_routes.tsx";
+import {
+  paidSubscriptionPaymentDate,
+  subscriptionPaymentSplit,
+} from "./subscription_finance.ts";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -240,6 +244,21 @@ function computeVendorAccruedPayout(
   return Math.round(payout * 100) / 100;
 }
 
+function computeVendorSubscriptionPayout(
+  payments: AnyRecord[],
+  vendorId: string,
+): number {
+  return payments.reduce((sum, payment) => {
+    if (
+      !paidSubscriptionPaymentDate(payment) ||
+      String(payment?.vendorId || "").trim() !== vendorId
+    ) {
+      return sum;
+    }
+    return sum + subscriptionPaymentSplit(payment).vendorPayout;
+  }, 0);
+}
+
 type VendorWithdrawalRecord = {
   id: string;
   vendorId: string;
@@ -284,9 +303,10 @@ async function computeVendorWallet(vendorId: string) {
   const vendorIds = await resolveVendorIdentifierSet(vendorId);
   const defaultCommissionPercent = parseCommissionPercent(vendor.commission) || 15;
 
-  const [orders, products, withdrawals] = await Promise.all([
+  const [orders, products, subscriptionPayments, withdrawals] = await Promise.all([
     kv.getByPrefix("order:").catch(() => [] as AnyRecord[]),
     kv.getByPrefix("product:").catch(() => [] as AnyRecord[]),
+    kv.getByPrefix("subscription_payment:").catch(() => [] as AnyRecord[]),
     listVendorWithdrawals(vendorId),
   ]);
 
@@ -294,13 +314,18 @@ async function computeVendorWallet(vendorId: string) {
   const validProducts = (Array.isArray(products) ? products.filter(Boolean) : []).filter((p) =>
     productBelongsToVendor(p as AnyRecord, vendorIds)
   );
-  const totalEarned = computeVendorAccruedPayout(
+  const orderPayout = computeVendorAccruedPayout(
     validOrders,
     validProducts,
     vendorId,
     vendorIds,
     defaultCommissionPercent,
   );
+  const subscriptionPayout = computeVendorSubscriptionPayout(
+    Array.isArray(subscriptionPayments) ? subscriptionPayments.filter(Boolean) : [],
+    vendorId,
+  );
+  const totalEarned = Math.round((orderPayout + subscriptionPayout) * 100) / 100;
   const reserved = withdrawnTotal(withdrawals);
   const availableBalance = Math.max(0, Math.round((totalEarned - reserved) * 100) / 100);
 
@@ -390,7 +415,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
     const requestedAmount =
       body.amount != null && body.amount !== ""
         ? Math.round(parseMoney(body.amount))
-        : Math.round(wallet.availableBalance);
+        : Math.floor(wallet.availableBalance);
 
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
       return c.json({ error: "Withdrawal amount must be greater than zero" }, 400);

@@ -694,7 +694,9 @@ export function VendorAdminFinances({
                   <span className="font-semibold text-slate-900 tabular-nums">
                     {walletLoading
                       ? "…"
-                      : `${Math.round(wallet?.availableBalance ?? 0).toLocaleString()} MMK`}
+                      : `${(wallet?.availableBalance ?? 0).toLocaleString(undefined, {
+                          maximumFractionDigits: 2,
+                        })} MMK`}
                   </span>
                 </div>
                 <Button
@@ -1000,7 +1002,9 @@ export function VendorAdminFinances({
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm">
               <p className="text-slate-600">Available balance</p>
               <p className="text-xl font-semibold text-slate-900 tabular-nums">
-                {Math.round(wallet?.availableBalance ?? 0).toLocaleString()} MMK
+                {(wallet?.availableBalance ?? 0).toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })} MMK
               </p>
               <p className="text-xs text-slate-500 mt-1">
                 Minimum withdrawal: {(wallet?.minWithdrawAmount ?? 1).toLocaleString()} MMK

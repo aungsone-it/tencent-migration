@@ -1,5 +1,11 @@
 import { Hono } from "hono";
 import * as kv from "./kv_store.tsx";
+import { createClient } from "./cloudbase_compat.ts";
+import {
+  isPaidSubscriptionPayment,
+  splitSubscriptionRevenue,
+  subscriptionPaymentSplit,
+} from "./subscription_finance.ts";
 
 type PlanStatus = "active" | "inactive";
 type SubscriptionPlan = {
@@ -16,6 +22,9 @@ type SubscriptionPlan = {
 };
 
 const app = new Hono();
+const supabase = createClient(undefined, undefined, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
 const MAX_PLANS = 10;
 const PERIOD_DAYS = 30;
 
@@ -24,8 +33,8 @@ function text(value: unknown, max = 500): string {
 }
 
 function positiveMmk(value: unknown): number {
-  const amount = Math.round(Number(value));
-  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  const amount = Number(value);
+  return Number.isInteger(amount) && amount > 0 ? amount : 0;
 }
 
 function normalizePromises(value: unknown): string[] {
@@ -166,6 +175,8 @@ app.post("/subscriptions/start", async (c) => {
     if (!planId || !customerId) return c.json({ error: "planId and customerId are required" }, 400);
     const plan = await getPlan(planId);
     if (!plan || plan.status !== "active") return c.json({ error: "This plan is not available" }, 404);
+    const planPrice = positiveMmk(plan.price);
+    if (!planPrice) return c.json({ error: "This plan has an invalid price" }, 409);
     const merchantOrderId = `SUB${Date.now()}${Math.floor(Math.random() * 10000)
       .toString()
       .padStart(4, "0")}`;
@@ -178,7 +189,7 @@ app.post("/subscriptions/start", async (c) => {
       customerName,
       customerEmail,
       customerPhone,
-      amount: plan.price,
+      amount: planPrice,
       status: "pending",
       createdAt: new Date().toISOString(),
     };
@@ -196,22 +207,44 @@ app.post("/subscriptions/payment/:merchantOrderId/confirm", async (c) => {
     const payment = await kv.get(`subscription_payment:${merchantOrderId}`);
     if (!payment || typeof payment !== "object") return c.json({ error: "Subscription payment not found" }, 404);
     const p = payment as Record<string, any>;
-    if (p.status === "paid" && p.subscriptionId) {
+    if (isPaidSubscriptionPayment(p)) {
+      const storedSplit = subscriptionPaymentSplit(p);
+      if (
+        p.vendorPayout !== storedSplit.vendorPayout ||
+        p.platformRevenue !== storedSplit.platformRevenue
+      ) {
+        await kv.set(`subscription_payment:${merchantOrderId}`, {
+          ...p,
+          ...storedSplit,
+        });
+      }
       const existingSubscription = await kv.get(`customer_subscription:${p.vendorId}:${p.customerId}`);
-      if (existingSubscription?.id === p.subscriptionId) {
+      if (p.subscriptionId && existingSubscription?.id === p.subscriptionId) {
         return c.json({ success: true, subscription: existingSubscription });
       }
+      // A paid transaction is terminal. Never extend a subscription twice during repair/retry.
+      return c.json(
+        { error: "This payment was already processed; the subscription record needs repair" },
+        409,
+      );
     }
     const txn = await kv.get(`kpay_txn:${merchantOrderId}`);
     if (!txn || String(txn.status || "").toLowerCase() !== "paid") {
       return c.json({ error: "Payment has not been confirmed by KBZPay", status: "pending" }, 409);
     }
-    if (positiveMmk(txn.amount) !== positiveMmk(p.amount)) {
+    const paidAmount = positiveMmk(txn.amount);
+    const expectedAmount = positiveMmk(p.amount);
+    if (
+      !paidAmount ||
+      !expectedAmount ||
+      paidAmount !== expectedAmount
+    ) {
       return c.json({ error: "Paid amount does not match the plan price" }, 409);
     }
     const key = `customer_subscription:${p.vendorId}:${p.customerId}`;
     const existing = await kv.get(key);
     const now = new Date();
+    const revenueSplit = splitSubscriptionRevenue(p.amount);
     const oldEnd = existing?.currentPeriodEnd ? new Date(existing.currentPeriodEnd) : null;
     const periodStart = oldEnd && oldEnd > now ? oldEnd : now;
     const subscription = {
@@ -230,14 +263,29 @@ app.post("/subscriptions/payment/:merchantOrderId/confirm", async (c) => {
       createdAt: existing?.createdAt || now.toISOString(),
       updatedAt: now.toISOString(),
     };
-    await kv.set(key, subscription);
-    await kv.set(`subscription_payment:${merchantOrderId}`, {
+    const paidPayment = {
       ...p,
+      ...revenueSplit,
       status: "paid",
       paidAt: now.toISOString(),
       subscriptionId: subscription.id,
-    });
-    return c.json({ success: true, subscription });
+    };
+    // The RPC serializes updates by vendor/customer and persists entitlement + accounting atomically.
+    const { data: persistedSubscription, error: persistError } = await supabase.rpc(
+      "rpc_confirm_subscription_payment",
+      {
+        p_payment_key: `subscription_payment:${merchantOrderId}`,
+        p_subscription_key: key,
+        p_subscription_template: subscription,
+        p_paid_payment: paidPayment,
+        p_period_days: PERIOD_DAYS,
+      },
+    );
+    if (persistError) throw new Error(persistError.message);
+    if (!persistedSubscription || typeof persistedSubscription !== "object") {
+      throw new Error("Subscription confirmation did not return a subscription");
+    }
+    return c.json({ success: true, subscription: persistedSubscription });
   } catch (error) {
     console.error("Failed to confirm subscription payment", error);
     return c.json({ error: "Failed to confirm subscription payment" }, 500);

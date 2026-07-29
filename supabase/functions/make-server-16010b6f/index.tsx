@@ -10,6 +10,10 @@ import userApp from "./user_routes.tsx";
 import socialProfileApp from "./social_profile_routes.tsx";
 import logisticsApp from "./logistics_routes.tsx";
 import subscriptionApp from "./subscription_routes.tsx";
+import {
+  paidSubscriptionPaymentDate,
+  subscriptionPaymentSplit,
+} from "./subscription_finance.ts";
 import { createPaymentIntent, verifyPayment } from "./stripe_routes.tsx";
 import {
   createKPayQr,
@@ -10198,7 +10202,38 @@ app.get("/make-server-16010b6f/finances", async (c) => {
   });
 });
 
-async function jsonFinancesAnalyticsFromReadModel(): Promise<Record<string, unknown> | null> {
+async function listSubscriptionPlatformRevenueEntries() {
+  const rows = await kv.getByPrefix("subscription_payment:");
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
+    .map((payment) => {
+      const paidAt = paidSubscriptionPaymentDate(payment);
+      const split = subscriptionPaymentSplit(payment);
+      if (!paidAt || split.grossAmount <= 0) return null;
+      return {
+        id: String(payment.merchantOrderId || payment.id || ""),
+        date: paidAt.toISOString(),
+        grossAmount: split.grossAmount,
+        vendorPayout: split.vendorPayout,
+        platformRevenue: split.platformRevenue,
+      };
+    })
+    .filter(
+      (
+        entry,
+      ): entry is {
+        id: string;
+        date: string;
+        grossAmount: number;
+        vendorPayout: number;
+        platformRevenue: number;
+      } => entry !== null,
+    );
+}
+
+async function jsonFinancesAnalyticsFromReadModel(
+  subscriptionRevenueEntries: Array<Record<string, unknown>>,
+): Promise<Record<string, unknown> | null> {
   try {
     const { data, error } = await supabase.rpc("rpc_finances_analytics");
     if (error) {
@@ -10215,6 +10250,7 @@ async function jsonFinancesAnalyticsFromReadModel(): Promise<Record<string, unkn
       paymentMethods: Array.isArray(body.paymentMethods) ? body.paymentMethods : [],
       revenueChartData: Array.isArray(body.revenueChartData) ? body.revenueChartData : [],
       vendorPayouts: Array.isArray(body.vendorPayouts) ? body.vendorPayouts : [],
+      subscriptionRevenueEntries,
       timestamp: body.timestamp || new Date().toISOString(),
       readModel: true,
     };
@@ -10228,7 +10264,8 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
   try {
     console.log("💰 Fetching financial analytics...");
 
-    const readModelBody = await jsonFinancesAnalyticsFromReadModel();
+    const subscriptionRevenueEntries = await listSubscriptionPlatformRevenueEntries();
+    const readModelBody = await jsonFinancesAnalyticsFromReadModel(subscriptionRevenueEntries);
     if (readModelBody) {
       return c.json(readModelBody);
     }
@@ -10534,6 +10571,7 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
       paymentMethods,
       revenueChartData,
       vendorPayouts,
+      subscriptionRevenueEntries,
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {

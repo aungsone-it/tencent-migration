@@ -205,6 +205,10 @@ export function Finances() {
     () => allTransactions.filter((t: any) => isFinanciallyAccruedTransaction(t)),
     [allTransactions]
   );
+  const subscriptionRevenueEntries = useMemo(
+    () => financialData?.subscriptionRevenueEntries || [],
+    [financialData?.subscriptionRevenueEntries]
+  );
   const vendorPayouts = financialData?.vendorPayouts || [];
 
   const scopedTransactions = useMemo(
@@ -214,6 +218,10 @@ export function Finances() {
   const scopedAllTransactions = useMemo(
     () => filterFinancesTransactionsByRange(allTransactions, pageDateRange),
     [allTransactions, pageDateRange]
+  );
+  const scopedSubscriptionRevenueEntries = useMemo(
+    () => filterFinancesTransactionsByRange(subscriptionRevenueEntries, pageDateRange),
+    [subscriptionRevenueEntries, pageDateRange]
   );
 
   const dashboardSummary = useMemo(() => {
@@ -228,16 +236,34 @@ export function Finances() {
 
   const { totalCommission, totalVendorPayout } = dashboardSummary;
 
-  const revenueStatTotal = useMemo(
-    () => scopedTransactions.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0),
-    [scopedTransactions]
-  );
-  const totalRevenueStatTotal = useMemo(
-    () => scopedAllTransactions.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0),
-    [scopedAllTransactions]
+  const subscriptionCardTotals = useMemo(
+    () =>
+      scopedSubscriptionRevenueEntries.reduce(
+        (totals: { gross: number; vendorPayout: number; platformRevenue: number }, entry: any) => ({
+          gross: totals.gross + (Number(entry.grossAmount) || 0),
+          vendorPayout: totals.vendorPayout + (Number(entry.vendorPayout) || 0),
+          platformRevenue: totals.platformRevenue + (Number(entry.platformRevenue) || 0),
+        }),
+        { gross: 0, vendorPayout: 0, platformRevenue: 0 }
+      ),
+    [scopedSubscriptionRevenueEntries]
   );
 
-  const commissionPayoutStatTotal = totalCommission;
+  const revenueStatTotal = useMemo(
+    () =>
+      scopedTransactions.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0) +
+      subscriptionCardTotals.platformRevenue,
+    [scopedTransactions, subscriptionCardTotals.platformRevenue]
+  );
+  const totalRevenueStatTotal = useMemo(
+    () =>
+      scopedAllTransactions.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0) +
+      subscriptionCardTotals.gross,
+    [scopedAllTransactions, subscriptionCardTotals.gross]
+  );
+
+  const commissionPayoutStatTotal =
+    totalCommission + subscriptionCardTotals.vendorPayout;
 
   const periodDays = chartPeriod === "7days" ? 7 : chartPeriod === "30days" ? 30 : 90;
 

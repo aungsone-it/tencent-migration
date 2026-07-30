@@ -2962,18 +2962,6 @@ async function businessPayViaVpsProxy(params: {
         "VPS business pay is not configured (KBZ_VPS_BUSINESS_PAY_URL or refund.php sibling + KBZ_VPS_API_SECRET).",
     };
   }
-  if (/business[_-]?pay[_-]?validate/i.test(vpsUrl)) {
-    return {
-      ok: false,
-      success: false,
-      pending: false,
-      merchantOrderId: params.merchantOrderId,
-      endpointUsed: vpsUrl,
-      providerMessage:
-        "The configured Business Pay URL is validation-only and cannot transfer money. Set KPAY_BUSINESS_PAY_URL to the production businesspay.php relay.",
-    };
-  }
-
   const amount = normalizeAmountMMK(params.amountMmk);
   const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 15_000), 45_000);
   const headers = buildRefundProviderHeaders(cfg);

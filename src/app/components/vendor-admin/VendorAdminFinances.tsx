@@ -440,6 +440,20 @@ export function VendorAdminFinances({
           (withdrawRes.status === 502
             ? "Payout server returned 502 — redeploy make-server-16010b6f with the latest code."
             : withdrawRes.statusText || "Withdrawal failed");
+        const isLocalMockSuccess =
+          import.meta.env.DEV &&
+          /payout simulation succeeded/i.test(serverMsg);
+        if (isLocalMockSuccess) {
+          setWallet((current) => {
+            const mockWallet = payload.wallet ?? current;
+            return mockWallet
+              ? { ...mockWallet, availableBalance: 0 }
+              : mockWallet;
+          });
+          toast.success("Commission withdrawal successful");
+          setWithdrawOpen(false);
+          return;
+        }
         throw new Error(serverMsg);
       }
 

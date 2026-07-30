@@ -304,9 +304,23 @@ function withdrawnTotal(rows: VendorWithdrawalRecord[]): number {
     .filter(
       (r) =>
         (r.status === "paid" || r.status === "processing" || r.status === "pending") &&
-        text(r.kbz?.endpointUsed).toLowerCase() !== "mock",
+        (text(r.kbz?.endpointUsed).toLowerCase() !== "mock" ||
+          r.kbz?.countsAsWithdrawal === true),
     )
     .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+}
+
+function paidWithdrawalCountsTowardBalance(row: VendorWithdrawalRecord): boolean {
+  return (
+    row.status === "paid" &&
+    (text(row.kbz?.endpointUsed).toLowerCase() !== "mock" ||
+      row.kbz?.countsAsWithdrawal === true)
+  );
+}
+
+/** KBZPay transfers integer MMK; fractional earnings carry forward but are not withdrawable. */
+function withdrawableMmk(totalEarned: number, reserved: number): number {
+  return Math.max(0, Math.floor(totalEarned - reserved + Number.EPSILON));
 }
 
 function minWithdrawAmountMmk(): number {
@@ -347,7 +361,7 @@ async function computeVendorWallet(vendorId: string) {
   );
   const totalEarned = Math.round((orderPayout + subscriptionPayout) * 100) / 100;
   const reserved = withdrawnTotal(withdrawals);
-  const availableBalance = Math.max(0, Math.round((totalEarned - reserved) * 100) / 100);
+  const availableBalance = withdrawableMmk(totalEarned, reserved);
 
   return {
     vendorId,
@@ -355,11 +369,7 @@ async function computeVendorWallet(vendorId: string) {
     kpayPhone: text(vendor.kpayPhone) || text(vendor.kpayAccount) || "",
     totalEarned,
     totalWithdrawn: withdrawals
-      .filter(
-        (w) =>
-          w.status === "paid" &&
-          text(w.kbz?.endpointUsed).toLowerCase() !== "mock",
-      )
+      .filter(paidWithdrawalCountsTowardBalance)
       .reduce((s, w) => s + w.amount, 0),
     reservedBalance: reserved,
     availableBalance,
@@ -541,6 +551,8 @@ export async function postVendorCommissionWithdraw(c: Context) {
           tradeStatus: payout.tradeStatus,
           endpointUsed: payout.endpointUsed,
           rawResponse: payout.rawResponse,
+          // New mock payouts intentionally consume demo balance; old mock history remains ignored.
+          countsAsWithdrawal: true,
         },
       };
     } else if (payout.pending) {
@@ -583,13 +595,9 @@ export async function postVendorCommissionWithdraw(c: Context) {
     const refreshed = {
       ...wallet,
       reservedBalance: reservedAfter,
-      availableBalance: Math.max(0, Math.round((wallet.totalEarned - reservedAfter) * 100) / 100),
+      availableBalance: withdrawableMmk(wallet.totalEarned, reservedAfter),
       totalWithdrawn: withdrawals
-        .filter(
-          (w) =>
-            w.status === "paid" &&
-            text(w.kbz?.endpointUsed).toLowerCase() !== "mock",
-        )
+        .filter(paidWithdrawalCountsTowardBalance)
         .reduce((s, w) => s + w.amount, 0),
       withdrawals: sortedWithdrawals,
       kpayPhone,

@@ -22,7 +22,7 @@ import { usePlatformBranding } from "../hooks/usePlatformBranding";
 import { buildSuperAdminDocumentTitle } from "../utils/superAdminDocumentTitle";
 import { formatLogisticsPartnerSlugLabel } from "../utils/logisticsPartnerSlug";
 import { SmartCache } from "../../utils/cache";
-import { moduleCache, CACHE_KEYS } from "../utils/module-cache";
+import { moduleCache, CACHE_KEYS, ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT } from "../utils/module-cache";
 import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
 import {
   peekPendingOrdersDigestSourceMs,
@@ -230,13 +230,16 @@ export function AdminPage() {
       onOrdersUpdated();
     };
     const onVendorPrimed = () => setDigestTimesTick((n) => n + 1);
+    const onVendorAppsUpdated = () => setDigestTimesTick((n) => n + 1);
     window.addEventListener("adminOrdersUpdated", onOrdersUpdated);
     window.addEventListener("storage", onStorage);
     window.addEventListener("adminVendorApplicationsPrimed", onVendorPrimed);
+    window.addEventListener(ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT, onVendorAppsUpdated);
     return () => {
       window.removeEventListener("adminOrdersUpdated", onOrdersUpdated);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("adminVendorApplicationsPrimed", onVendorPrimed);
+      window.removeEventListener(ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT, onVendorAppsUpdated);
     };
   }, [loadBadgeCounts]);
 
@@ -251,7 +254,6 @@ export function AdminPage() {
 
   const handleVendorApplicationsMutated = useCallback(() => {
     moduleCache.invalidate(CACHE_KEYS.ADMIN_VENDORS);
-    SmartCache.delete("badge_counts");
     void loadBadgeCounts(true);
   }, [loadBadgeCounts]);
 
@@ -326,6 +328,18 @@ export function AdminPage() {
     [ADMIN_PAGES.SETTINGS]: "settings",
     [ADMIN_PAGES.GLOBAL_SEARCH]: "search",
   };
+
+  const navigateToAdminSection = useCallback(
+    (page: AdminPage) => {
+      setVendorSearchPrefill(null);
+      setOrdersSearchPrefill(null);
+      setCurrentPage(page);
+      setSidebarOpen(false);
+      const section = pageToSection[page];
+      navigate(section ? `/admin/${section}` : "/admin", { replace: false });
+    },
+    [navigate],
+  );
 
   // 🔗 URL → currentPage: Initialize from URL
   useEffect(() => {
@@ -927,6 +941,15 @@ export function AdminPage() {
                   replace: false,
                 });
               }}
+              onNavigateToOrders={() => navigateToAdminSection(ADMIN_PAGES.ORDERS)}
+              onNavigateToVendorApplications={() =>
+                navigateToAdminSection(ADMIN_PAGES.VENDOR_APPLICATIONS)
+              }
+              onNavigateToChat={() => navigateToAdminSection(ADMIN_PAGES.CHAT)}
+              onNavigateToProducts={() => navigateToAdminSection(ADMIN_PAGES.PRODUCT)}
+              onNavigateToBlog={() => navigateToAdminSection(ADMIN_PAGES.BLOG_POST)}
+              onNavigateToCustomers={() => navigateToAdminSection(ADMIN_PAGES.CUSTOMERS)}
+              onNavigateToSettings={() => navigateToAdminSection(ADMIN_PAGES.SETTINGS)}
             />
             
             <main className="flex-1 overflow-auto pt-16 scrollbar-custom">

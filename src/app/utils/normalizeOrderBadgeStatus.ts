@@ -27,7 +27,18 @@ export function normalizeAdminOrderStatusForBadge(raw: unknown): AdminOrderBadge
   if (s === "processing" || s === "in-progress") return "processing";
   if (s === "fulfilled") return "fulfilled";
   if (s === "pending-payment" || s === "pending") return "pending";
-  return "pending";
+  if (s === "confirmed") return "processing";
+  return "processing";
+}
+
+/** Strict pending check for sidebar/bell badges — only brand-new orders count. */
+export function isPendingOrderForBadge(raw: unknown): boolean {
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/_/g, "-");
+  return s === "pending" || s === "pending-payment";
 }
 
 export function normalizePaymentBadgeStatus(raw: unknown): AdminPaymentBadgeStatus {

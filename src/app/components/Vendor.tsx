@@ -1047,7 +1047,6 @@ export function Vendor({
           setReviewingApplication(null);
         }}
         onApplicationsMutated={() => {
-          invalidateAdminVendorApplicationsCache();
           dropPendingApplicationRow(reviewingApplication.id);
           void loadPendingApplications(true);
           onVendorApplicationsMutated?.();
@@ -1070,7 +1069,6 @@ export function Vendor({
           void loadPendingApplications(true);
         }}
         onApplicationsMutated={(applicationId) => {
-          invalidateAdminVendorApplicationsCache();
           if (applicationId) dropPendingApplicationRow(applicationId);
           void loadPendingApplications(true);
           onVendorApplicationsMutated?.();

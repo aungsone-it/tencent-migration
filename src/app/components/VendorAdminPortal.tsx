@@ -54,7 +54,8 @@ import { isRenderableImageSrc, pickStoreLogo } from "../utils/renderableImageSrc
 import { UserProfile } from "./UserProfile";
 import { useVendorAuth, type VendorUser } from "../contexts/VendorAuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
-import { ADMIN_NOTIFICATIONS_UPDATED_EVENT } from "../utils/adminNotificationsRealtime";
+import { ADMIN_NOTIFICATIONS_UPDATED_EVENT, normalizeAdminInboxNotification, type AdminInboxNotification } from "../utils/adminNotificationsRealtime";
+import { adminOrdersUpdatedStorageKey, readAdminOrdersUpdatedStorageEvent } from "../utils/adminOrdersRealtime";
 
 interface Vendor {
   id: string;
@@ -116,15 +117,7 @@ interface NavItem {
   subItems?: SubNavItem[];
 }
 
-interface Notification {
-  id: string;
-  type: "order" | "product" | "review" | "system";
-  title: string;
-  message: string;
-  timestamp: string;
-  createdAt?: string;
-  isRead: boolean;
-}
+interface Notification extends AdminInboxNotification {}
 
 interface StorefrontSnapshotCache {
   storeName?: string;
@@ -185,6 +178,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState<VendorPage[]>(["products"]); // Auto-expand Products
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [vendorLogo, setVendorLogo] = useState<string>(() =>
     pickStoreLogo(initialStorefrontCache?.logo, "")
@@ -466,37 +460,56 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
     setExpandedItems((prev) => (prev.includes("subscriptions") ? prev : [...prev, "subscriptions"]));
   }, [currentPage]);
 
+  const refreshPendingOrderNotifications = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/vendor/orders/${encodeURIComponent(vendor.id)}`,
+        {
+          headers: {
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+          },
+        }
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      const orders = Array.isArray(data?.orders) ? data.orders : [];
+      const pendingCount = orders.filter((order: any) =>
+        PENDING_ORDER_STATUSES.includes(String(order?.status || "").trim().toLowerCase())
+      ).length;
+      setUnreadNotifications(pendingCount);
+    } catch (error) {
+      console.error("Error fetching vendor order badge count:", error);
+    }
+  }, [vendor.id]);
+
   // Poll vendor pending orders on a long interval (same badge behavior as super admin orders)
   useEffect(() => {
-    const fetchPendingOrders = async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/vendor/orders/${encodeURIComponent(vendor.id)}`,
-          {
-            headers: {
-              ...getCloudBaseRequestHeaders(),
-
-              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-            },
-          }
-        );
-        if (!response.ok) return;
-        const data = await response.json();
-        const orders = Array.isArray(data?.orders) ? data.orders : [];
-        const pendingCount = orders.filter((order: any) =>
-          PENDING_ORDER_STATUSES.includes(String(order?.status || "").trim().toLowerCase())
-        ).length;
-        setUnreadNotifications(pendingCount);
-      } catch (error) {
-        console.error("Error fetching vendor order badge count:", error);
-      }
-    };
-
-    fetchPendingOrders();
-    const interval = setInterval(fetchPendingOrders, POLLING_INTERVALS_MS.VENDOR_PORTAL_NOTIFICATIONS);
+    void refreshPendingOrderNotifications();
+    const interval = setInterval(
+      refreshPendingOrderNotifications,
+      POLLING_INTERVALS_MS.VENDOR_PORTAL_NOTIFICATIONS,
+    );
 
     return () => clearInterval(interval);
-  }, [vendor.id]);
+  }, [refreshPendingOrderNotifications]);
+
+  useEffect(() => {
+    const onOrdersUpdated = () => {
+      void refreshPendingOrderNotifications();
+    };
+    window.addEventListener("adminOrdersUpdated", onOrdersUpdated);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== adminOrdersUpdatedStorageKey() || !e.newValue) return;
+      const payload = readAdminOrdersUpdatedStorageEvent(e.newValue);
+      if (payload) onOrdersUpdated();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("adminOrdersUpdated", onOrdersUpdated);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refreshPendingOrderNotifications]);
 
   useEffect(() => {
     const loadNotifications = async () => {
@@ -507,13 +520,12 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
           ? ((response as { data: Notification[] }).data)
           : [];
         const incoming = Array.isArray(raw) ? raw : fromData;
-        setNotifications(
-          incoming.map((n: any) => ({
-            ...n,
-            isRead: n.isRead ?? n.read ?? false,
-            timestamp: n.timestamp || n.createdAt || new Date().toISOString(),
-          }))
-        );
+        setNotifications((prev) => {
+          const prevById = new Map(prev.map((p) => [p.id, p]));
+          return incoming.map((n) =>
+            normalizeAdminInboxNotification(n as Record<string, unknown>, prevById.get(String(n.id || ""))),
+          );
+        });
       } catch {
         // Keep the last successful inbox during transient API failures.
       }
@@ -533,7 +545,40 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
   }, []);
 
   const unreadApiNotifications = notifications.filter((n) => !n.isRead).length;
+  const unreadInboxNotifications = notifications.filter((n) => !n.isRead);
   const bellCount = unreadNotifications + unreadApiNotifications;
+
+  const navigateFromNotification = (page: VendorPage) => {
+    setNotificationsOpen(false);
+    setCurrentPage(page);
+    setSidebarOpen(false);
+  };
+
+  const handleVendorInboxNotificationClick = (notification: Notification) => {
+    if (!notification.isRead) {
+      void markNotificationAsRead(notification.id);
+    }
+    switch (notification.type) {
+      case "order":
+        navigateFromNotification("orders");
+        return;
+      case "product":
+        navigateFromNotification("products");
+        return;
+      case "review":
+        navigateFromNotification("products");
+        return;
+      case "comment":
+        navigateFromNotification("products");
+        return;
+      case "system":
+        navigateFromNotification("settings");
+        return;
+      default:
+        setNotificationsOpen(false);
+        break;
+    }
+  };
 
   const markNotificationAsRead = async (id: string) => {
     try {
@@ -934,7 +979,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
             {/* Right Actions - Notification & Profile */}
             <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
               {/* Notification Bell */}
-              <Popover>
+              <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="ghost" size="icon" className="relative">
                     <Bell className="w-5 h-5" />
@@ -960,7 +1005,24 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
                   <ScrollArea className="h-[360px]">
                     <div className="p-2 space-y-2">
                       {unreadNotifications > 0 && (
-                        <div className="p-3 rounded-lg bg-amber-50 border border-amber-100">
+                        <div
+                          className="p-3 rounded-lg bg-amber-50 border border-amber-100 cursor-pointer hover:bg-amber-100/70 transition-colors"
+                          onClick={() => {
+                            setNotificationsOpen(false);
+                            setCurrentPage("orders");
+                            setSidebarOpen(false);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setNotificationsOpen(false);
+                              setCurrentPage("orders");
+                              setSidebarOpen(false);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
                           <div className="flex items-start gap-2">
                             <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
                               <ShoppingCart className="w-4 h-4 text-amber-700" />
@@ -977,23 +1039,17 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
                           </div>
                         </div>
                       )}
-                      {notifications.length > 0 ? (
-                        notifications.map((notification) => (
+                      {unreadInboxNotifications.length > 0 ? (
+                        unreadInboxNotifications.map((notification) => (
                           <div
                             key={notification.id}
-                            className={`p-3 rounded-lg border transition-colors ${
-                              notification.isRead ? "bg-white border-slate-100" : "bg-blue-50 border-blue-100"
-                            }`}
-                            onClick={() => !notification.isRead && markNotificationAsRead(notification.id)}
+                            className="p-3 rounded-lg border transition-colors cursor-pointer bg-blue-50 border-blue-100 hover:bg-blue-100/70"
+                            onClick={() => handleVendorInboxNotificationClick(notification)}
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-start gap-2 min-w-0">
                                 <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
-                                  {notification.isRead ? (
-                                    <Check className="w-4 h-4 text-slate-500" />
-                                  ) : (
-                                    <AlertCircle className="w-4 h-4 text-blue-600" />
-                                  )}
+                                  <AlertCircle className="w-4 h-4 text-blue-600" />
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold text-slate-900 truncate">{notification.title}</p>
@@ -1014,7 +1070,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
                             </div>
                           </div>
                         ))
-                      ) : unreadNotifications === 0 ? (
+                      ) : unreadNotifications === 0 && unreadInboxNotifications.length === 0 ? (
                         <div className="p-10 text-center text-slate-500 text-sm">{t("vendorAdmin.noNotifications")}</div>
                       ) : null}
                     </div>

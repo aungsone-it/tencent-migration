@@ -23,7 +23,7 @@ import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
 import { notifyAdminOrdersUpdated, isSuperAdminFinancesSessionStale } from "./adminOrdersRealtime";
-import { normalizeAdminOrderStatusForBadge } from "./normalizeOrderBadgeStatus";
+import { isPendingOrderForBadge, normalizeAdminOrderStatusForBadge } from "./normalizeOrderBadgeStatus";
 import {
   isVendorUncategorizedFilter,
   VENDOR_STORE_UNCATEGORIZED_SLUG,
@@ -1021,9 +1021,12 @@ export const ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT = "adminVendorApplicationsU
 export const ADMIN_VENDOR_APPLICATIONS_UPDATED_STORAGE_KEY =
   "migoo-admin-vendor-applications-updated-v1";
 
-export function notifyAdminVendorApplicationsUpdated(reason?: string): void {
+export function notifyAdminVendorApplicationsUpdated(
+  reason?: string,
+  extra?: Record<string, unknown>,
+): void {
   if (typeof window === "undefined") return;
-  const payload = { at: Date.now(), reason: reason || "mutation" };
+  const payload = { at: Date.now(), reason: reason || "mutation", ...extra };
   try {
     window.dispatchEvent(
       new CustomEvent(ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT, { detail: payload })
@@ -1042,6 +1045,39 @@ export function notifyAdminVendorApplicationsUpdated(reason?: string): void {
     bc.close();
   } catch {
     /* ignore */
+  }
+}
+
+/** Recompute pending vendor-application badge from session cache (no network). */
+export function syncPendingVendorApplicationsBadgeFromCache(): number | null {
+  const apps = moduleCache.peek<Record<string, unknown>[]>(CACHE_KEYS.ADMIN_VENDOR_APPLICATIONS);
+  if (!apps || !Array.isArray(apps)) return null;
+  return apps.filter(
+    (app) => String(app?.status ?? "").trim().toLowerCase() === "pending",
+  ).length;
+}
+
+/** Optimistically patch one vendor application status and refresh the sidebar badge. */
+export function patchAdminVendorApplicationStatus(
+  applicationId: string,
+  status: string,
+): void {
+  if (!applicationId) return;
+  const apps = moduleCache.peek<Record<string, unknown>[]>(CACHE_KEYS.ADMIN_VENDOR_APPLICATIONS);
+  if (apps && Array.isArray(apps)) {
+    moduleCache.prime(
+      CACHE_KEYS.ADMIN_VENDOR_APPLICATIONS,
+      apps.map((app) =>
+        String(app?.id ?? "") === applicationId ? { ...app, status } : app,
+      ),
+    );
+  }
+  SmartCache.delete("badge_counts");
+  const pending = syncPendingVendorApplicationsBadgeFromCache();
+  if (typeof window !== "undefined") {
+    notifyAdminVendorApplicationsUpdated("patch-vendor-application-status", {
+      pendingApplications: pending ?? undefined,
+    });
   }
 }
 
@@ -2671,9 +2707,33 @@ export function patchAdminOrdersCacheStatuses(
     if (!key.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
     const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(key);
     if (!pagePayload?.orders || !Array.isArray(pagePayload.orders)) continue;
+
+    let nextBreakdown = pagePayload.aggregates?.statusBreakdown;
+    const nextOrders = pagePayload.orders.map((raw) => {
+      const o = raw as Record<string, unknown>;
+      const patch = resolvePatch(o);
+      if (!patch) return raw;
+      if (nextBreakdown) {
+        nextBreakdown = adjustStatusBreakdownForTransition(nextBreakdown, o.status, patch.status);
+      }
+      return {
+        ...o,
+        status: patch.status,
+        ...(patch.paymentStatus ? { paymentStatus: patch.paymentStatus } : {}),
+        ...(patch.shippingStatus ? { shippingStatus: patch.shippingStatus } : {}),
+        updatedAt: now,
+      };
+    });
+
     moduleCache.prime(key, {
       ...pagePayload,
-      orders: patchOrderRows(pagePayload.orders),
+      orders: nextOrders,
+      aggregates: pagePayload.aggregates
+        ? {
+            ...pagePayload.aggregates,
+            statusBreakdown: nextBreakdown ?? pagePayload.aggregates.statusBreakdown,
+          }
+        : pagePayload.aggregates,
     });
   }
 
@@ -2702,16 +2762,57 @@ function bumpStatusBreakdownDrop(
   else if (st === "cancelled") breakdown.cancelled += 1;
 }
 
+type OrderStatusBreakdownBucket = "pending" | "processing" | "fulfilled" | "cancelled";
+
+function orderStatusBreakdownBucket(status: unknown): OrderStatusBreakdownBucket | null {
+  const st = String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/_/g, "-");
+  if (st === "pending" || st === "pending-payment") return "pending";
+  if (st === "processing" || st === "ready-to-ship") return "processing";
+  if (st === "fulfilled" || st === "shipped" || st === "delivered") return "fulfilled";
+  if (st === "cancelled") return "cancelled";
+  return null;
+}
+
+function adjustStatusBreakdownForTransition(
+  breakdown: { pending: number; processing: number; fulfilled: number; cancelled: number },
+  fromStatus: unknown,
+  toStatus: unknown,
+): typeof breakdown {
+  const from = orderStatusBreakdownBucket(fromStatus);
+  const to = orderStatusBreakdownBucket(toStatus);
+  if (!from || !to || from === to) return breakdown;
+  return {
+    ...breakdown,
+    [from]: Math.max(0, (breakdown[from] ?? 0) - 1),
+    [to]: (breakdown[to] ?? 0) + 1,
+  };
+}
+
 /** Recompute pending-order badge from the patched admin orders cache (no network). */
 export function syncPendingOrdersBadgeFromAdminCache(): number | null {
   const payload = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
-  if (!payload?.orders || !Array.isArray(payload.orders)) return null;
-  return payload.orders.filter(
-    (order) =>
-      normalizeAdminOrderStatusForBadge(
-        (order as { status?: unknown })?.status
-      ) === "pending"
-  ).length;
+  if (payload?.orders && Array.isArray(payload.orders)) {
+    return payload.orders.filter((order) =>
+      isPendingOrderForBadge((order as { status?: unknown })?.status),
+    ).length;
+  }
+
+  let fallbackPending: number | null = null;
+  for (const key of moduleCache.getStats().keys) {
+    if (!key.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
+    const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(key);
+    const pending = pagePayload?.aggregates?.statusBreakdown?.pending;
+    if (typeof pending !== "number") continue;
+    if (key.includes("-st-all-") && key.includes("-p1-")) {
+      return pending;
+    }
+    if (fallbackPending == null) fallbackPending = pending;
+  }
+  return fallbackPending;
 }
 
 /** Remove deleted orders from session caches without a full refetch (prevents SQL ghost rows flashing back). */
@@ -2722,7 +2823,7 @@ export function removeAdminOrdersFromCaches(
 
   let pendingRemoved = 0;
   for (const row of removed) {
-    if (normalizeAdminOrderStatusForBadge(row.status) === "pending") pendingRemoved += 1;
+    if (isPendingOrderForBadge(row.status)) pendingRemoved += 1;
   }
 
   const byId = new Set(removed.map((r) => String(r.orderId)));

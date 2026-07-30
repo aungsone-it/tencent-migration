@@ -26,7 +26,7 @@ import { vendorApplicationsApi } from "../../utils/api";
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
-import { invalidateStaffActivitiesCache } from "../utils/module-cache";
+import { invalidateStaffActivitiesCache, patchAdminVendorApplicationStatus } from "../utils/module-cache";
 import { VendorOnlinePresenceDisplay } from "./VendorOnlinePresenceFields";
 import { hasOnlinePresenceLinks, pickOnlinePresenceLinks } from "../utils/vendorOnlinePresence";
 
@@ -141,6 +141,7 @@ export function VendorApplicationReview({
       );
       if (response.success) {
         invalidateStaffActivitiesCache();
+        patchAdminVendorApplicationStatus(application.id, newStatus);
         // Update the application status locally to prevent further clicks
         application.status = newStatus;
 

@@ -16,7 +16,7 @@ import {
   refreshAdminInventoryAfterOrderStatusPut,
   normalizeOrderLineParentProductId,
 } from "../utils/orderInventoryCacheSync";
-import { invalidateAdminOrdersCache } from "../utils/module-cache";
+import { invalidateAdminOrdersCache, patchAdminOrdersCacheStatuses } from "../utils/module-cache";
 import {
   isKPayPaidOrderLike,
   pollKPayRefundAfterCancel,
@@ -243,7 +243,28 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
         sku: p.sku,
       })),
     };
+    const previousStatus = orderStatus;
+    const previousPaymentStatus = paymentStatus;
+    const previousShippingStatus = shippingStatus;
     setStatusSaving(true);
+    setOrderStatus(newStatus);
+    if (isNowCancelled) {
+      setPaymentStatus(paymentStatus === "refunded" ? "refunded" : "pending_refund");
+      setShippingStatus("cancelled");
+    }
+    patchAdminOrdersCacheStatuses([
+      {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: newStatus,
+        ...(isNowCancelled
+          ? {
+              paymentStatus: paymentStatus === "refunded" ? "refunded" : "pending_refund",
+              shippingStatus: "cancelled" as ShippingStatus,
+            }
+          : {}),
+      },
+    ]);
     try {
       const result = (await ordersApi.update(order.id, { status: newStatus })) as {
         order?: {
@@ -296,6 +317,18 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
       }
       onOrderUpdated?.();
     } catch (e) {
+      setOrderStatus(previousStatus);
+      setPaymentStatus(normalizePaymentStatus(previousPaymentStatus) as PaymentStatus);
+      setShippingStatus(normalizeShippingBadgeStatus(previousShippingStatus) as ShippingStatus);
+      patchAdminOrdersCacheStatuses([
+        {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: previousStatus,
+          paymentStatus: previousPaymentStatus,
+          shippingStatus: previousShippingStatus,
+        },
+      ]);
       console.error(e);
       const detail =
         e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Unknown error";

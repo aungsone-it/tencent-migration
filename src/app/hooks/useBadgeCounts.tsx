@@ -9,6 +9,7 @@ import {
   moduleCache,
   CACHE_KEYS,
   syncPendingOrdersBadgeFromAdminCache,
+  syncPendingVendorApplicationsBadgeFromCache,
   ADMIN_VENDOR_APPLICATIONS_UPDATED_EVENT,
   ADMIN_VENDOR_APPLICATIONS_UPDATED_STORAGE_KEY,
 } from '../utils/module-cache';
@@ -48,6 +49,15 @@ export function useBadgeCounts() {
     setBadgeCounts((prev) => {
       if (prev.orders === pendingOrdersCount) return prev;
       const updated = { ...prev, orders: pendingOrdersCount };
+      SmartCache.set('badge_counts', updated);
+      return updated;
+    });
+  }, []);
+
+  const applyVendorApplicationsBadgeCount = useCallback((pendingApplicationsCount: number) => {
+    setBadgeCounts((prev) => {
+      if (prev.vendor === pendingApplicationsCount) return prev;
+      const updated = { ...prev, vendor: pendingApplicationsCount };
       SmartCache.set('badge_counts', updated);
       return updated;
     });
@@ -417,7 +427,16 @@ export function useBadgeCounts() {
   /** Vendor applications — fast refresh on Realtime pulse / cross-tab signals. */
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const queueRefresh = () => {
+    const queueRefresh = (ev?: Event) => {
+      const detail = (ev as CustomEvent<{ pendingApplications?: number; reason?: string }> | undefined)?.detail;
+      if (typeof detail?.pendingApplications === "number") {
+        applyVendorApplicationsBadgeCount(detail.pendingApplications);
+      } else {
+        const cached = syncPendingVendorApplicationsBadgeFromCache();
+        if (cached != null) {
+          applyVendorApplicationsBadgeCount(cached);
+        }
+      }
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         void refreshVendorApplicationsBadgeOnly();
@@ -450,7 +469,7 @@ export function useBadgeCounts() {
         /* ignore */
       }
     };
-  }, [refreshVendorApplicationsBadgeOnly]);
+  }, [refreshVendorApplicationsBadgeOnly, applyVendorApplicationsBadgeCount]);
 
   /**
    * Safety-net poll when Realtime pulse is unavailable (cross-device / migration not applied yet).

@@ -1,4 +1,4 @@
-import { PENDING_ORDER_STATUSES } from "../../constants";
+import { isPendingOrderForBadge } from "./normalizeOrderBadgeStatus";
 import { moduleCache, CACHE_KEYS } from "./module-cache";
 
 function parseTimeMs(v: unknown): number | null {
@@ -27,8 +27,7 @@ function orderActivityMs(o: Record<string, unknown>): number | null {
 }
 
 function orderIsPendingForBadge(o: unknown): boolean {
-  const st = (o as { status?: unknown })?.status;
-  return (PENDING_ORDER_STATUSES as readonly string[]).includes(st as string);
+  return isPendingOrderForBadge((o as { status?: unknown })?.status);
 }
 
 /**

@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
-import { ADMIN_NOTIFICATIONS_UPDATED_EVENT } from "../utils/adminNotificationsRealtime";
+import { ADMIN_NOTIFICATIONS_UPDATED_EVENT, normalizeAdminInboxNotification, type AdminInboxNotification } from "../utils/adminNotificationsRealtime";
 
 interface TopNavProps {
   currentUser: any;
@@ -41,21 +41,19 @@ interface TopNavProps {
   vendorApplicationsDigestSourceMs?: number | null;
   /** Staff roles without global search (e.g. warehouse / data entry). */
   showAdminGlobalSearch?: boolean;
+  /** Navigate from digest notifications to the matching admin section. */
+  onNavigateToOrders?: () => void;
+  onNavigateToVendorApplications?: () => void;
+  onNavigateToChat?: () => void;
+  onNavigateToProducts?: () => void;
+  onNavigateToBlog?: () => void;
+  onNavigateToCustomers?: () => void;
+  onNavigateToSettings?: () => void;
 }
 
-interface Notification {
-  id: string;
-  type: "order" | "product" | "review" | "system" | "comment";
-  title: string;
-  message: string;
-  timestamp: string;
-  /** Some API payloads use `createdAt` instead of `timestamp`. */
-  createdAt?: string;
-  isRead: boolean;
-}
+interface Notification extends AdminInboxNotification {}
 
-// Icon mapping for notification types
-const iconMap = {
+const iconMap: Record<Notification["type"], typeof ShoppingCart> = {
   order: ShoppingCart,
   product: Package,
   review: Star,
@@ -63,7 +61,7 @@ const iconMap = {
   comment: MessageSquare,
 };
 
-const iconColorMap = {
+const iconColorMap: Record<Notification["type"], string> = {
   order: "bg-blue-500",
   product: "bg-green-500",
   review: "bg-yellow-500",
@@ -130,9 +128,17 @@ export function TopNav({
   pendingOrdersDigestSourceMs = null,
   vendorApplicationsDigestSourceMs = null,
   showAdminGlobalSearch = true,
+  onNavigateToOrders,
+  onNavigateToVendorApplications,
+  onNavigateToChat,
+  onNavigateToProducts,
+  onNavigateToBlog,
+  onNavigateToCustomers,
+  onNavigateToSettings,
 }: TopNavProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -144,18 +150,9 @@ export function TopNav({
       const incoming = Array.isArray(raw) ? raw : fromData;
       setNotifications((prev) => {
         const prevById = new Map(prev.map((p) => [p.id, p]));
-        return incoming.map((n) => {
-          const old = prevById.get(n.id);
-          const ts =
-            n.timestamp ||
-            (n as { createdAt?: string }).createdAt ||
-            old?.timestamp;
-          return {
-            ...n,
-            isRead: n.isRead ?? (n as { read?: boolean }).read ?? false,
-            timestamp: ts || new Date().toISOString(),
-          };
-        });
+        return incoming.map((n) =>
+          normalizeAdminInboxNotification(n as Record<string, unknown>, prevById.get(String(n.id || ""))),
+        );
       });
     } catch {
       // Preserve the last successful inbox; a transient failure is not an empty inbox.
@@ -180,6 +177,7 @@ export function TopNav({
   }, [loadNotifications]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadInboxNotifications = notifications.filter((n) => !n.isRead);
 
   const pendingOrdersN = Number(pendingOrdersCount) || 0;
   const vendorAppsN = Number(vendorApplicationsCount) || 0;
@@ -213,6 +211,37 @@ export function TopNav({
     } catch (error) {
       // Silently fail - don't show error to user
       console.log("Failed to mark all as read (optional feature)");
+    }
+  };
+
+  const handleNotificationNavigate = (action?: () => void) => {
+    setNotificationsOpen(false);
+    action?.();
+  };
+
+  const handleInboxNotificationClick = (notification: Notification) => {
+    if (!notification.isRead) {
+      void markNotificationAsRead(notification.id);
+    }
+    switch (notification.type) {
+      case "order":
+        handleNotificationNavigate(onNavigateToOrders);
+        return;
+      case "product":
+        handleNotificationNavigate(onNavigateToProducts);
+        return;
+      case "review":
+        handleNotificationNavigate(onNavigateToCustomers);
+        return;
+      case "comment":
+        handleNotificationNavigate(onNavigateToBlog);
+        return;
+      case "system":
+        handleNotificationNavigate(onNavigateToSettings);
+        return;
+      default:
+        setNotificationsOpen(false);
+        break;
     }
   };
 
@@ -345,7 +374,7 @@ export function TopNav({
         {/* Right Actions - Notification & Profile */}
         <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
           
-          <Popover>
+          <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="icon" className="relative">
                 <Bell className="w-5 h-5" />
@@ -384,13 +413,28 @@ export function TopNav({
               </div>
 
               {/* Notification List */}
-              {notifications.length > 0 || digestAttentionCount > 0 ? (
+              {loading ? (
+                <div className="flex flex-col gap-3 p-4">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="h-16 animate-pulse rounded-lg bg-slate-100" />
+                  ))}
+                </div>
+              ) : unreadInboxNotifications.length > 0 || digestAttentionCount > 0 ? (
                 <ScrollArea className="h-[420px]">
                   <div className="divide-y divide-slate-100">
                     {/* Badge-based notifications from sidebar */}
                     {pendingOrdersN > 0 && (
                       <div
                         className="group relative p-4 hover:bg-slate-50 transition-colors cursor-pointer bg-blue-50/30"
+                        onClick={() => handleNotificationNavigate(onNavigateToOrders)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleNotificationNavigate(onNavigateToOrders);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
                       >
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
@@ -424,6 +468,15 @@ export function TopNav({
                     {vendorAppsN > 0 && (
                       <div
                         className="group relative p-4 hover:bg-slate-50 transition-colors cursor-pointer bg-green-50/30"
+                        onClick={() => handleNotificationNavigate(onNavigateToVendorApplications)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleNotificationNavigate(onNavigateToVendorApplications);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
                       >
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center flex-shrink-0">
@@ -455,7 +508,18 @@ export function TopNav({
                     )}
 
                     {chatUnreadN > 0 && (
-                      <div className="group relative p-4 hover:bg-slate-50 transition-colors cursor-pointer bg-indigo-50/30">
+                      <div
+                        className="group relative p-4 hover:bg-slate-50 transition-colors cursor-pointer bg-indigo-50/30"
+                        onClick={() => handleNotificationNavigate(onNavigateToChat)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleNotificationNavigate(onNavigateToChat);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 rounded-lg bg-indigo-500 flex items-center justify-center flex-shrink-0">
                             <MessageSquare className="w-5 h-5 text-white" />
@@ -478,9 +542,9 @@ export function TopNav({
                       </div>
                     )}
                     
-                    {notifications.length > 0 && notifications.map((notification) => {
-                      const Icon = iconMap[notification.type];
-                      const iconColor = iconColorMap[notification.type];
+                    {unreadInboxNotifications.map((notification) => {
+                      const Icon = iconMap[notification.type] ?? AlertCircle;
+                      const iconColor = iconColorMap[notification.type] ?? "bg-slate-500";
                       
                       return (
                         <div
@@ -488,7 +552,7 @@ export function TopNav({
                           className={`group relative p-4 hover:bg-slate-50 transition-colors cursor-pointer ${
                             !notification.isRead ? "bg-purple-50/30" : ""
                           }`}
-                          onClick={() => markNotificationAsRead(notification.id)}
+                          onClick={() => handleInboxNotificationClick(notification)}
                         >
                           <div className="flex items-start gap-3">
                             {/* Icon */}

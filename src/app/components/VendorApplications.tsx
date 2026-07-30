@@ -231,7 +231,6 @@ export function VendorApplications({
         onUpdate={() => void loadApplications(true)}
         onNavigateToVendorList={onNavigateToVendorList}
         onApplicationsMutated={() => {
-          invalidateAdminVendorApplicationsCache();
           notifyAdminVendorApplicationsUpdated("reviewed");
           onApplicationsMutated?.(reviewingApplication.id);
         }}

@@ -8,7 +8,13 @@ import {
 
 type AnyRecord = Record<string, unknown>;
 
-const WITHDRAWABLE_STATUSES = new Set(["ready-to-ship", "fulfilled", "shipped", "delivered"]);
+const WITHDRAWABLE_STATUSES = new Set([
+  "processing",
+  "ready-to-ship",
+  "fulfilled",
+  "shipped",
+  "delivered",
+]);
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -108,18 +114,27 @@ function buildVendorCatalogKeys(products: AnyRecord[]): { ids: Set<string>; skus
 function lineItemBelongsToVendor(
   item: AnyRecord,
   vendorId: string,
+  vendorIds: Set<string>,
   catalog: { ids: Set<string>; skus: Set<string> },
 ): boolean {
   const vid = String(vendorId ?? "").trim();
   if (!vid || item == null) return false;
+  const normalizedVendorIds = new Set(
+    [...vendorIds, vid].map((value) => String(value).trim().toLowerCase()).filter(Boolean),
+  );
 
   const idCandidates = [item.vendorId, item.vendor, (item.product as AnyRecord | undefined)?.vendorId].filter(
     (x) => x != null && String(x).trim() !== "",
   );
-  if (idCandidates.some((x) => String(x).trim() === vid)) return true;
+  if (idCandidates.some((x) => normalizedVendorIds.has(String(x).trim().toLowerCase()))) return true;
 
   const sel = (item.product as AnyRecord | undefined)?.selectedVendors ?? item.selectedVendors;
-  if (Array.isArray(sel) && sel.some((x: unknown) => String(x).trim() === vid)) return true;
+  if (
+    Array.isArray(sel) &&
+    sel.some((x: unknown) => normalizedVendorIds.has(String(x).trim().toLowerCase()))
+  ) {
+    return true;
+  }
 
   if (catalog.ids.size > 0 || catalog.skus.size > 0) {
     const pid = item.productId != null ? String(item.productId).trim() : "";
@@ -212,12 +227,13 @@ function computeVendorAccruedPayout(
   for (const order of orders) {
     if (!order || typeof order !== "object") continue;
     if (!isOrderWithdrawable(order)) continue;
+    if (order.inventoryDeducted === false) continue;
 
     const items = Array.isArray(order.items) ? order.items : [];
     let matchedAnyLine = false;
 
     for (const item of items) {
-      if (!lineItemBelongsToVendor(item as AnyRecord, vendorId, catalog)) continue;
+      if (!lineItemBelongsToVendor(item as AnyRecord, vendorId, vendorIds, catalog)) continue;
       matchedAnyLine = true;
       const gross = orderLineGross(item as AnyRecord);
       const net = orderLineNetAfterDiscount(gross, order);
@@ -285,7 +301,11 @@ async function saveVendorWithdrawals(vendorId: string, rows: VendorWithdrawalRec
 
 function withdrawnTotal(rows: VendorWithdrawalRecord[]): number {
   return rows
-    .filter((r) => r.status === "paid" || r.status === "processing" || r.status === "pending")
+    .filter(
+      (r) =>
+        (r.status === "paid" || r.status === "processing" || r.status === "pending") &&
+        text(r.kbz?.endpointUsed).toLowerCase() !== "mock",
+    )
     .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 }
 
@@ -334,7 +354,13 @@ async function computeVendorWallet(vendorId: string) {
     vendorName: text(vendor.businessName) || text(vendor.name) || vendorId,
     kpayPhone: text(vendor.kpayPhone) || text(vendor.kpayAccount) || "",
     totalEarned,
-    totalWithdrawn: withdrawals.filter((w) => w.status === "paid").reduce((s, w) => s + w.amount, 0),
+    totalWithdrawn: withdrawals
+      .filter(
+        (w) =>
+          w.status === "paid" &&
+          text(w.kbz?.endpointUsed).toLowerCase() !== "mock",
+      )
+      .reduce((s, w) => s + w.amount, 0),
     reservedBalance: reserved,
     availableBalance,
     minWithdrawAmount: minWithdrawAmountMmk(),
@@ -559,7 +585,11 @@ export async function postVendorCommissionWithdraw(c: Context) {
       reservedBalance: reservedAfter,
       availableBalance: Math.max(0, Math.round((wallet.totalEarned - reservedAfter) * 100) / 100),
       totalWithdrawn: withdrawals
-        .filter((w) => w.status === "paid")
+        .filter(
+          (w) =>
+            w.status === "paid" &&
+            text(w.kbz?.endpointUsed).toLowerCase() !== "mock",
+        )
         .reduce((s, w) => s + w.amount, 0),
       withdrawals: sortedWithdrawals,
       kpayPhone,

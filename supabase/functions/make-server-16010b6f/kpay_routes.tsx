@@ -2962,6 +2962,17 @@ async function businessPayViaVpsProxy(params: {
         "VPS business pay is not configured (KBZ_VPS_BUSINESS_PAY_URL or refund.php sibling + KBZ_VPS_API_SECRET).",
     };
   }
+  if (/business[_-]?pay[_-]?validate/i.test(vpsUrl)) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      endpointUsed: vpsUrl,
+      providerMessage:
+        "The configured Business Pay URL is validation-only and cannot transfer money. Set KPAY_BUSINESS_PAY_URL to the production businesspay.php relay.",
+    };
+  }
 
   const amount = normalizeAmountMMK(params.amountMmk);
   const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 15_000), 45_000);
@@ -3038,6 +3049,17 @@ export async function invokeKPayBusinessPay(params: {
   note?: string;
 }): Promise<KPayBusinessPayResult> {
   if (resolveEnv("KPAY_BUSINESS_PAY_MOCK") === "1") {
+    const environment = text(resolveEnv("KPAY_ENV")).toLowerCase();
+    if (environment === "prod" || environment === "production") {
+      return {
+        ok: false,
+        success: false,
+        pending: false,
+        merchantOrderId: params.merchantOrderId,
+        providerMessage:
+          "KPAY_BUSINESS_PAY_MOCK cannot be used in production. Disable it and configure the VPS Business Pay relay.",
+      };
+    }
     return {
       ok: true,
       success: true,

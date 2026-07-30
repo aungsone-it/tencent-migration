@@ -801,6 +801,76 @@ async function realtimePulseSummary(): Promise<Record<string, unknown>> {
   return summary;
 }
 
+/**
+ * Public-safe change counters used by CloudBase admin clients.
+ * TencentDB does not provide Supabase postgres_changes WebSockets, so visible
+ * admin tabs poll this tiny response and only refetch domain data when a
+ * counter changes.
+ */
+app.get("/make-server-16010b6f/realtime/pulses", async (c) => {
+  try {
+    const [orderResult, vendorApplicationResult, domainResult] = await Promise.all([
+      supabase
+        .from("app_order_pulse")
+        .select("bump,updated_at")
+        .eq("id", 1)
+        .maybeSingle(),
+      supabase
+        .from("app_vendor_application_pulse")
+        .select("bump,updated_at")
+        .eq("id", 1)
+        .maybeSingle(),
+      supabase
+        .from("app_kv_domain_pulse")
+        .select("domain,bump,detail,updated_at"),
+    ]);
+
+    const domains: Record<
+      string,
+      { bump: number; detail?: Record<string, unknown>; updatedAt: string | null }
+    > = {};
+    if (!domainResult.error && Array.isArray(domainResult.data)) {
+      for (const row of domainResult.data as Array<Record<string, unknown>>) {
+        const domain = String(row.domain || "").trim();
+        if (!domain) continue;
+        domains[domain] = {
+          bump: Number(row.bump) || 0,
+          ...(row.detail && typeof row.detail === "object"
+            ? { detail: row.detail as Record<string, unknown> }
+            : {}),
+          updatedAt: row.updated_at ? String(row.updated_at) : null,
+        };
+      }
+    }
+
+    return c.json(
+      {
+        success: true,
+        orders: orderResult.error
+          ? null
+          : {
+              bump: Number(orderResult.data?.bump) || 0,
+              updatedAt: orderResult.data?.updated_at || null,
+            },
+        vendorApplications: vendorApplicationResult.error
+          ? null
+          : {
+              bump: Number(vendorApplicationResult.data?.bump) || 0,
+              updatedAt: vendorApplicationResult.data?.updated_at || null,
+            },
+        domains,
+      },
+      200,
+      {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    );
+  } catch (error) {
+    console.warn("[realtime-pulses] unavailable:", error);
+    return c.json({ success: false, error: "Realtime pulse counters unavailable" }, 503);
+  }
+});
+
 app.get("/make-server-16010b6f/monitoring/summary", async (c) => {
   const denied = assertAdminMonitoringAllowed(c);
   if (denied) return denied;
@@ -9927,15 +9997,24 @@ app.get("/make-server-16010b6f/notifications", async (c) => {
     console.log("📬 Fetching notifications...");
     
     // Get all notification keys
-    const notificationKeys = await withTimeout(kv.getByPrefix("notification:"), 8000);
+    const notificationRows = await withTimeout(
+      kv.getByPrefixWithKeys("notification:"),
+      8000,
+    );
     
     // Sort by timestamp (newest first)
-    const sortedNotifications = notificationKeys
-      .map(item => ({
-        id: item.key.replace("notification:", ""),
-        ...item.value
+    const sortedNotifications = notificationRows
+      .map((item) => ({
+        ...item.value,
+        id:
+          item.value?.id ||
+          item.key.replace("notification:", ""),
       }))
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp || b.createdAt || 0).getTime() -
+          new Date(a.timestamp || a.createdAt || 0).getTime(),
+      );
     
     console.log(`✅ Found ${sortedNotifications.length} notifications`);
     
@@ -9945,7 +10024,7 @@ app.get("/make-server-16010b6f/notifications", async (c) => {
     });
   } catch (error) {
     console.error("❌ Error fetching notifications:", error);
-    return c.json({ notifications: [], total: 0 }, 200);
+    return c.json({ error: "Failed to fetch notifications" }, 503);
   }
 });
 
@@ -9998,18 +10077,21 @@ app.put("/make-server-16010b6f/notifications/mark-all-read", async (c) => {
   try {
     console.log("📬 Marking all notifications as read...");
     
-    const notificationKeys = await withTimeout(kv.getByPrefix("notification:"), 8000);
+    const notificationRows = await withTimeout(
+      kv.getByPrefixWithKeys("notification:"),
+      8000,
+    );
     
     // Update all to read
-    const updatePromises = notificationKeys.map(item => {
+    const updatePromises = notificationRows.map((item) => {
       const updatedData = { ...item.value, isRead: true };
       return kv.set(item.key, updatedData);
     });
     
     await Promise.all(updatePromises);
     
-    console.log(`✅ Marked ${notificationKeys.length} notifications as read`);
-    return c.json({ success: true, count: notificationKeys.length });
+    console.log(`✅ Marked ${notificationRows.length} notifications as read`);
+    return c.json({ success: true, count: notificationRows.length });
   } catch (error) {
     console.error("❌ Error marking all as read:", error);
     return c.json({ error: "Failed to mark all as read" }, 500);

@@ -2301,12 +2301,18 @@ COMMENT ON FUNCTION public.rpc_finances_analytics IS 'Finance analytics backed b
 
 CREATE TABLE IF NOT EXISTS public.app_kv_domain_pulse (
   domain text PRIMARY KEY CHECK (
-    domain IN ('products', 'categories', 'customers', 'vendors', 'marketing')
+    domain IN ('products', 'categories', 'customers', 'vendors', 'marketing', 'notifications')
   ),
   bump bigint NOT NULL DEFAULT 0,
   detail jsonb NOT NULL DEFAULT '{}'::jsonb,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.app_kv_domain_pulse
+  DROP CONSTRAINT IF EXISTS app_kv_domain_pulse_domain_check;
+ALTER TABLE public.app_kv_domain_pulse
+  ADD CONSTRAINT app_kv_domain_pulse_domain_check
+  CHECK (domain IN ('products', 'categories', 'customers', 'vendors', 'marketing', 'notifications'));
 
 INSERT INTO public.app_kv_domain_pulse (domain, bump, detail, updated_at)
 VALUES
@@ -2314,7 +2320,8 @@ VALUES
   ('categories', 0, '{}'::jsonb, now()),
   ('customers', 0, '{}'::jsonb, now()),
   ('vendors', 0, '{}'::jsonb, now()),
-  ('marketing', 0, '{}'::jsonb, now())
+  ('marketing', 0, '{}'::jsonb, now()),
+  ('notifications', 0, '{}'::jsonb, now())
 ON CONFLICT (domain) DO NOTHING;
 
 CREATE OR REPLACE FUNCTION public.bump_app_kv_domain_pulse()
@@ -2337,6 +2344,8 @@ BEGIN
     kv_domain := 'products';
   ELSIF kv_key LIKE 'category:%' THEN
     kv_domain := 'categories';
+  ELSIF kv_key LIKE 'notification:%' THEN
+    kv_domain := 'notifications';
   ELSIF kv_key LIKE 'vendor:audience:%' THEN
     kv_domain := 'customers';
     audience_vendor_id := btrim(substr(kv_key, length('vendor:audience:') + 1));

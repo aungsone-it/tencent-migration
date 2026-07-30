@@ -54,6 +54,7 @@ import { isRenderableImageSrc, pickStoreLogo } from "../utils/renderableImageSrc
 import { UserProfile } from "./UserProfile";
 import { useVendorAuth, type VendorUser } from "../contexts/VendorAuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { ADMIN_NOTIFICATIONS_UPDATED_EVENT } from "../utils/adminNotificationsRealtime";
 
 interface Vendor {
   id: string;
@@ -514,13 +515,21 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
           }))
         );
       } catch {
-        setNotifications([]);
+        // Keep the last successful inbox during transient API failures.
       }
     };
 
-    loadNotifications();
-    const interval = setInterval(loadNotifications, POLLING_INTERVALS_MS.TOP_NAV_NOTIFICATIONS);
-    return () => clearInterval(interval);
+    void loadNotifications();
+    const onUpdated = () => void loadNotifications();
+    window.addEventListener(ADMIN_NOTIFICATIONS_UPDATED_EVENT, onUpdated);
+    const interval = setInterval(
+      () => void loadNotifications(),
+      POLLING_INTERVALS_MS.TOP_NAV_NOTIFICATIONS,
+    );
+    return () => {
+      window.removeEventListener(ADMIN_NOTIFICATIONS_UPDATED_EVENT, onUpdated);
+      clearInterval(interval);
+    };
   }, []);
 
   const unreadApiNotifications = notifications.filter((n) => !n.isRead).length;

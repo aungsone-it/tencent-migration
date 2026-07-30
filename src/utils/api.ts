@@ -862,7 +862,7 @@ export const notificationsApi = {
    * Mark all notifications as read
    */
   markAllAsRead: async (): Promise<ApiResponse> => {
-    return apiClient.put<ApiResponse>('/notifications/read-all', {});
+    return apiClient.put<ApiResponse>('/notifications/mark-all-read', {});
   },
 
   /**

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { POLLING_INTERVALS_MS } from "../../constants";
 import { Bell, Menu, Check, Clock, Store, Package, Star, ShoppingCart, AlertCircle, User, Edit, Trash2, LogOut, MessageSquare } from "lucide-react";
 import { Button } from "./ui/button";
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
+import { ADMIN_NOTIFICATIONS_UPDATED_EVENT } from "../utils/adminNotificationsRealtime";
 
 interface TopNavProps {
   currentUser: any;
@@ -44,7 +45,7 @@ interface TopNavProps {
 
 interface Notification {
   id: string;
-  type: "order" | "product" | "review" | "system";
+  type: "order" | "product" | "review" | "system" | "comment";
   title: string;
   message: string;
   timestamp: string;
@@ -59,6 +60,7 @@ const iconMap = {
   product: Package,
   review: Star,
   system: AlertCircle,
+  comment: MessageSquare,
 };
 
 const iconColorMap = {
@@ -66,6 +68,7 @@ const iconColorMap = {
   product: "bg-green-500",
   review: "bg-yellow-500",
   system: "bg-red-500",
+  comment: "bg-purple-500",
 };
 
 const DIGEST_TS_STORAGE_KEY = "migoo-admin-topnav-digest-ts-v1";
@@ -131,15 +134,7 @@ export function TopNav({
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch notifications from database
-  useEffect(() => {
-    loadNotifications();
-    
-    const interval = setInterval(loadNotifications, POLLING_INTERVALS_MS.TOP_NAV_NOTIFICATIONS);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
     try {
       const response = await notificationsApi.getAll();
       const raw = (response as { notifications?: Notification[]; data?: unknown }).notifications;
@@ -162,13 +157,27 @@ export function TopNav({
           };
         });
       });
-    } catch (error) {
-      // Silently fail - notifications are optional feature
-      setNotifications([]); // Set empty array so UI still works
+    } catch {
+      // Preserve the last successful inbox; a transient failure is not an empty inbox.
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Initial load, low-frequency safety poll, and fast pulse-driven refresh.
+  useEffect(() => {
+    void loadNotifications();
+    const onUpdated = () => void loadNotifications();
+    window.addEventListener(ADMIN_NOTIFICATIONS_UPDATED_EVENT, onUpdated);
+    const interval = setInterval(
+      () => void loadNotifications(),
+      POLLING_INTERVALS_MS.TOP_NAV_NOTIFICATIONS,
+    );
+    return () => {
+      window.removeEventListener(ADMIN_NOTIFICATIONS_UPDATED_EVENT, onUpdated);
+      clearInterval(interval);
+    };
+  }, [loadNotifications]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 

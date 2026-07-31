@@ -364,6 +364,68 @@ function dedupeKeysForContact(opts: { userId?: string; email?: string; phone?: s
   return keys;
 }
 
+/** Collapse duplicate KV/audience rows that share the same phone, userId, or email. */
+function dedupeUnifiedCustomersByContact(rows: any[]): any[] {
+  const result: any[] = [];
+  const aliasToIdx = new Map<string, number>();
+
+  const keysFor = (c: any) =>
+    dedupeKeysForContact({
+      userId: c.userId,
+      email: c.email,
+      phone: c.phone,
+    });
+
+  const linkRow = (idx: number) => {
+    for (const k of keysFor(result[idx])) aliasToIdx.set(k, idx);
+  };
+
+  const mergeRows = (keep: any, drop: any): any => {
+    const tags = new Set([
+      ...(Array.isArray(keep.tags) ? keep.tags : []),
+      ...(Array.isArray(drop.tags) ? drop.tags : []),
+    ]);
+    const totalOrders = (Number(keep.totalOrders) || 0) + (Number(drop.totalOrders) || 0);
+    const totalSpent = (Number(keep.totalSpent) || 0) + (Number(drop.totalSpent) || 0);
+    return {
+      ...drop,
+      ...keep,
+      id: keep.id || drop.id,
+      userId: keep.userId || drop.userId,
+      name: keep.name || drop.name,
+      email: keep.email || drop.email,
+      phone: keep.phone || drop.phone,
+      avatar: keep.avatar || drop.avatar,
+      totalOrders,
+      totalSpent,
+      lifetimeValue: totalSpent,
+      avgOrderValue: totalOrders > 0 ? totalSpent / totalOrders : Number(keep.avgOrderValue) || 0,
+      tags: [...tags],
+    };
+  };
+
+  for (const c of rows) {
+    let targetIdx: number | undefined;
+    for (const k of keysFor(c)) {
+      const idx = aliasToIdx.get(k);
+      if (idx !== undefined) {
+        targetIdx = idx;
+        break;
+      }
+    }
+
+    if (targetIdx !== undefined) {
+      result[targetIdx] = mergeRows(result[targetIdx], c);
+      linkRow(targetIdx);
+    } else {
+      result.push({ ...c });
+      linkRow(result.length - 1);
+    }
+  }
+
+  return result;
+}
+
 /** Super admin: KV customers + registered storefront audience (userId only). No guest order-only rows. */
 function mergeSystemCustomerSources(
   kvCustomers: any[],
@@ -441,8 +503,10 @@ function mergeSystemCustomerSources(
     linkRow(rows.length - 1);
   }
 
-  return rows.map((cust) =>
-    mergeOrderMetricsIntoCustomer(cust, spendByEmail, countByEmail, spendByUserId, countByUserId)
+  return dedupeUnifiedCustomersByContact(
+    rows.map((cust) =>
+      mergeOrderMetricsIntoCustomer(cust, spendByEmail, countByEmail, spendByUserId, countByUserId)
+    )
   );
 }
 

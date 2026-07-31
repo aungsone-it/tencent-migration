@@ -31,6 +31,76 @@ export function normalizeAdminOrderStatusForBadge(raw: unknown): AdminOrderBadge
   return "processing";
 }
 
+/** Collapse duplicate KV order rows before badge / digest / list counts. */
+export function dedupeOrdersByCanonicalForBadge(rows: unknown[]): unknown[] {
+  type OrderRow = {
+    id?: unknown;
+    orderNumber?: unknown;
+    updatedAt?: unknown;
+    createdAt?: unknown;
+    date?: unknown;
+  };
+
+  const score = (o: OrderRow) =>
+    Math.max(
+      new Date(String(o?.updatedAt || "")).getTime() || 0,
+      new Date(String(o?.createdAt || o?.date || "")).getTime() || 0,
+    );
+
+  const aliasKeys = (o: OrderRow): string[] => {
+    const num = String(o.orderNumber || "").trim().toLowerCase();
+    const id = String(o.id || "").trim().toLowerCase();
+    const keys = new Set<string>();
+    if (num) keys.add(`n:${num}`);
+    if (id) keys.add(`i:${id}`);
+    if (num) keys.add(`i:${num}`);
+    if (id) keys.add(`n:${id}`);
+    return [...keys];
+  };
+
+  const merged: OrderRow[] = [];
+  const aliasToIdx = new Map<string, number>();
+
+  const linkRow = (idx: number, o: OrderRow) => {
+    for (const k of aliasKeys(o)) aliasToIdx.set(k, idx);
+  };
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as OrderRow;
+
+    let targetIdx: number | undefined;
+    for (const k of aliasKeys(o)) {
+      const idx = aliasToIdx.get(k);
+      if (idx !== undefined) {
+        targetIdx = idx;
+        break;
+      }
+    }
+
+    if (targetIdx !== undefined) {
+      const prev = merged[targetIdx];
+      if (score(o) >= score(prev)) merged[targetIdx] = o;
+      linkRow(targetIdx, merged[targetIdx]);
+    } else {
+      merged.push(o);
+      linkRow(merged.length - 1, o);
+    }
+  }
+
+  return merged;
+}
+
+/** Stable React key + selection id for admin order rows. */
+export function getOrderListRowKey(order: {
+  id?: unknown;
+  orderNumber?: unknown;
+}): string {
+  const num = String(order.orderNumber || "").trim();
+  const id = String(order.id || "").trim();
+  return (num || id || "unknown-order").toLowerCase();
+}
+
 /** Strict pending check for sidebar/bell badges — only brand-new orders count. */
 export function isPendingOrderForBadge(raw: unknown): boolean {
   const s = String(raw ?? "")

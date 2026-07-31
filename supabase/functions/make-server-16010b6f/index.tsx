@@ -83,6 +83,10 @@ import {
   queueChatMessageReadModelSync,
 } from "./read_model.ts";
 import { getCached, setCache, clearCache } from "./server_cache.ts";
+import {
+  orderMatchesUserPhone,
+  resolveCustomerPhoneByUserId,
+} from "./guest_order_linking.ts";
 
 // FIRST: Override console.error to filter out HTTP connection errors from Deno runtime
 const originalConsoleError = console.error;
@@ -5449,12 +5453,20 @@ async function jsonAdminOrdersPageFromReadModel(
   }
 }
 
+function orderAliasKeys(order: any): string[] {
+  const num = String(order?.orderNumber || "").trim().toLowerCase();
+  const id = String(order?.id || "").trim().toLowerCase();
+  const keys = new Set<string>();
+  if (num) keys.add(`n:${num}`);
+  if (id) keys.add(`i:${id}`);
+  if (num) keys.add(`i:${num}`);
+  if (id) keys.add(`n:${id}`);
+  return [...keys];
+}
+
 function orderCanonicalKey(order: any): string {
-  const byNumber = String(order?.orderNumber || "").trim();
-  if (byNumber) return `num:${byNumber.toLowerCase()}`;
-  const byId = String(order?.id || "").trim();
-  if (byId) return `id:${byId}`;
-  return "";
+  const keys = orderAliasKeys(order);
+  return keys[0] || "";
 }
 
 function orderFreshness(order: any): number {
@@ -5465,16 +5477,36 @@ function orderFreshness(order: any): number {
 }
 
 function dedupeOrdersByCanonical(rows: any[]): any[] {
-  const out = new Map<string, any>();
+  const merged: any[] = [];
+  const aliasToIdx = new Map<string, number>();
+
+  const linkRow = (idx: number, row: any) => {
+    for (const k of orderAliasKeys(row)) aliasToIdx.set(k, idx);
+  };
+
   for (const row of Array.isArray(rows) ? rows : []) {
-    const key = orderCanonicalKey(row);
-    if (!key) continue;
-    const prev = out.get(key);
-    if (!prev || orderFreshness(row) >= orderFreshness(prev)) {
-      out.set(key, row);
+    if (!row || typeof row !== "object") continue;
+
+    let targetIdx: number | undefined;
+    for (const k of orderAliasKeys(row)) {
+      const idx = aliasToIdx.get(k);
+      if (idx !== undefined) {
+        targetIdx = idx;
+        break;
+      }
+    }
+
+    if (targetIdx !== undefined) {
+      const prev = merged[targetIdx];
+      if (orderFreshness(row) >= orderFreshness(prev)) merged[targetIdx] = row;
+      linkRow(targetIdx, merged[targetIdx]);
+    } else {
+      merged.push(row);
+      linkRow(merged.length - 1, row);
     }
   }
-  return [...out.values()];
+
+  return merged;
 }
 
 app.get("/make-server-16010b6f/orders", async (c) => {
@@ -5500,26 +5532,30 @@ app.get("/make-server-16010b6f/orders", async (c) => {
     const cached = getCached('orders_minimal', 30000);
     if (cached && Array.isArray(cached.orders)) {
       console.log("⚡ Returning cached orders");
+      const dedupedCachedOrders = dedupeOrdersByCanonical(cached.orders);
       if (pageOpts) {
-        const body = jsonAdminOrdersPage(cached.orders, c, { cached: false, warning: cached.warning });
+        const body = jsonAdminOrdersPage(dedupedCachedOrders, c, { cached: false, warning: cached.warning });
         if (body) return c.json(body);
       }
-      return c.json(cached);
+      return c.json({ ...cached, orders: dedupedCachedOrders, total: dedupedCachedOrders.length });
     }
     
     // Check for stale cache (up to 10min old)
     const staleCache = getCached('orders_minimal', 600000);
     if (staleCache && Array.isArray(staleCache.orders)) {
       console.log("⚡ Returning stale cache");
+      const dedupedStaleOrders = dedupeOrdersByCanonical(staleCache.orders);
       if (pageOpts) {
-        const body = jsonAdminOrdersPage(staleCache.orders, c, {
+        const body = jsonAdminOrdersPage(dedupedStaleOrders, c, {
           cached: true,
           warning: staleCache.warning,
         });
         if (body) return c.json(body);
       }
       return c.json({ 
-        ...staleCache, 
+        ...staleCache,
+        orders: dedupedStaleOrders,
+        total: dedupedStaleOrders.length,
         cached: true 
       });
     }
@@ -5753,6 +5789,9 @@ app.get("/make-server-16010b6f/user/:userId/orders", async (c) => {
     }
 
     console.log(`👤 User email for lookup: ${userEmail || "None found"}`);
+
+    const userPhone = await resolveCustomerPhoneByUserId(userId);
+    console.log(`📱 User phone for lookup: ${userPhone || "None found"}`);
     
     // Fetch all orders
     const allOrders = await withTimeout(kv.getByPrefix("order:"), 10000);
@@ -5760,7 +5799,7 @@ app.get("/make-server-16010b6f/user/:userId/orders", async (c) => {
     
     console.log(`📊 Total orders in DB: ${validOrders.length}`);
     
-    // Filter orders by userId OR email
+    // Filter orders by userId, email, or exact phone match (guest orders placed before signup)
     const userOrders = validOrders.filter((order: any) => {
       const matchesUserId = order.userId === userId;
       const matchesEmail = userEmail && order.email?.toLowerCase() === userEmail.toLowerCase();
@@ -5768,8 +5807,11 @@ app.get("/make-server-16010b6f/user/:userId/orders", async (c) => {
       // Also check nested customer object just in case
       const matchesCustomerUserId = order.customer?.userId === userId;
       const matchesCustomerEmail = userEmail && order.customer?.email?.toLowerCase() === userEmail.toLowerCase();
+      const matchesPhone =
+        userPhone &&
+        orderMatchesUserPhone(order as Record<string, unknown>, userId, userPhone);
       
-      return matchesUserId || matchesEmail || matchesCustomerUserId || matchesCustomerEmail;
+      return matchesUserId || matchesEmail || matchesCustomerUserId || matchesCustomerEmail || matchesPhone;
     });
     
     console.log(`✅ Found ${userOrders.length} orders for user ${userId}`);
@@ -10841,6 +10883,10 @@ function canonicalConversationIdFor(email: unknown, vendorId: unknown, vendorSou
 
 function conversationBucketKeyFor(conv: any): string {
   const vendorToken = normalizeChatVendorThreadToken(conv?.vendorId, conv?.vendorSource);
+  const normalizedPhone = normalizeChatCustomerPhone(conv?.customerPhone);
+  if (normalizedPhone) {
+    return `phone:${normalizedPhone}::${vendorToken || "secure"}`;
+  }
   const normalizedEmail = normalizeChatEmail(conv?.customerEmail);
   const nameToken = sanitizeChatToken(conv?.customerName);
   if (nameToken && vendorToken && vendorToken !== "secure") {
@@ -10849,6 +10895,14 @@ function conversationBucketKeyFor(conv: any): string {
   if (normalizedEmail) return `${normalizedEmail}::${vendorToken || "secure"}`;
   if (nameToken && vendorToken) return `name:${nameToken}::${vendorToken}`;
   return `conv-id:${String(conv?.id || "")}`;
+}
+
+function normalizeChatCustomerPhone(raw: unknown): string {
+  const normalized = String(raw || "").replace(/[\s\-]/g, "");
+  if (!normalized) return "";
+  if (/^09\d{9}$/.test(normalized)) return `+95${normalized.slice(1)}`;
+  if (/^\+959\d{9}$/.test(normalized)) return normalized;
+  return "";
 }
 
 function mergeConversationsByCustomerVendor(conversations: any[]): any[] {

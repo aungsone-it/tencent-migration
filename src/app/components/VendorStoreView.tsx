@@ -2501,13 +2501,23 @@ export function VendorStoreView({
       setUser(sessionUser);
       persistMigooUserSession(sessionUser);
       notifyMigooUserSessionChanged();
+      if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
 
       toast.success(t("storefront.account.welcomeBack").replace("{name}", userData.name || userData.email || ""));
       setShowAuthModal(false);
       setAuthForm({ email: '', password: '', name: '', phone: '' });
     } catch (error) {
       console.error("Login failed:", error);
-      toast.error(error instanceof Error ? error.message : t("storefront.account.loginFailed"));
+      const phoneTaken =
+        error instanceof Error &&
+        /phone number already exists/i.test(error.message);
+      toast.error(
+        phoneTaken
+          ? t("storefront.account.phoneAlreadyRegistered")
+          : error instanceof Error
+            ? error.message
+            : t("storefront.account.loginFailed")
+      );
     } finally {
       setIsAuthLoading(false);
     }
@@ -2541,6 +2551,7 @@ export function VendorStoreView({
       setUser(sessionUser);
       persistMigooUserSession(sessionUser);
       notifyMigooUserSessionChanged();
+      if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
 
       toast.success(
         t("storefront.account.welcomeToStore")
@@ -2551,7 +2562,16 @@ export function VendorStoreView({
       setAuthForm({ email: '', password: '', name: '', phone: '' });
     } catch (error) {
       console.error("Registration failed:", error);
-      toast.error(error instanceof Error ? error.message : t("storefront.account.registrationFailed"));
+      const phoneTaken =
+        error instanceof Error &&
+        /phone number already exists/i.test(error.message);
+      toast.error(
+        phoneTaken
+          ? t("storefront.account.phoneAlreadyRegistered")
+          : error instanceof Error
+            ? error.message
+            : t("storefront.account.registrationFailed")
+      );
     } finally {
       setIsAuthLoading(false);
     }

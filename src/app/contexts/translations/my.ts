@@ -218,6 +218,7 @@ export const myTranslations: Record<string, string> = {
     'storefront.account.registerRequiredFields': 'အမည်၊ ဖုန်းနံပါတ်နှင့် စကားဝှက် ထည့်ပါ',
     'storefront.account.loginFailed': 'အကောင့်ဝင်၍မရပါ',
     'storefront.account.registrationFailed': 'စာရင်းသွင်း၍မရပါ',
+    'storefront.account.phoneAlreadyRegistered': 'ဤဖုန်းနံပါတ်ဖြင့် အကောင့်ရှိပြီးဖြစ်သည်။ အကောင့်ဝင်ပါ။',
     'storefront.account.welcomeBack': 'ပြန်လည်ကြိုဆိုပါသည်၊ {name}!',
     'storefront.account.welcomeToStore': '{storeName} မှ ကြိုဆိုပါသည်၊ {name}!',
     'storefront.account.compressingImage': 'ဓာတ်ပုံချုံ့နေသည်...',

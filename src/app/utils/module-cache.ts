@@ -23,7 +23,7 @@ import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
 import { notifyAdminOrdersUpdated, isSuperAdminFinancesSessionStale } from "./adminOrdersRealtime";
-import { isPendingOrderForBadge, normalizeAdminOrderStatusForBadge } from "./normalizeOrderBadgeStatus";
+import { isPendingOrderForBadge, normalizeAdminOrderStatusForBadge, dedupeOrdersByCanonicalForBadge } from "./normalizeOrderBadgeStatus";
 import {
   isVendorUncategorizedFilter,
   VENDOR_STORE_UNCATEGORIZED_SLUG,
@@ -1198,7 +1198,7 @@ export async function fetchAdminOrdersPage(
   const data = await response.json();
   const agg = data.aggregates && typeof data.aggregates === "object" ? data.aggregates : undefined;
   return {
-    orders: Array.isArray(data.orders) ? data.orders : [],
+    orders: dedupeOrdersByCanonicalForBadge(Array.isArray(data.orders) ? data.orders : []) as any[],
     total: Number(data.total ?? 0),
     page: Number(data.page ?? params.page),
     pageSize: Number(data.pageSize ?? pageSize),
@@ -2796,7 +2796,8 @@ function adjustStatusBreakdownForTransition(
 export function syncPendingOrdersBadgeFromAdminCache(): number | null {
   const payload = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
   if (payload?.orders && Array.isArray(payload.orders)) {
-    return payload.orders.filter((order) =>
+    const deduped = dedupeOrdersByCanonicalForBadge(payload.orders);
+    return deduped.filter((order) =>
       isPendingOrderForBadge((order as { status?: unknown })?.status),
     ).length;
   }

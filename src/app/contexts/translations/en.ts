@@ -2041,6 +2041,7 @@ export const enTranslations: Record<string, string> = {
     'storefront.account.registerRequiredFields': 'Please enter your name, phone number, and password',
     'storefront.account.loginFailed': 'Login failed',
     'storefront.account.registrationFailed': 'Registration failed',
+    'storefront.account.phoneAlreadyRegistered': 'An account with this phone number already exists. Please sign in instead.',
     'storefront.account.welcomeBack': 'Welcome back, {name}!',
     'storefront.account.welcomeToStore': 'Welcome to {storeName}, {name}!',
     'storefront.account.compressingImage': 'Compressing image...',

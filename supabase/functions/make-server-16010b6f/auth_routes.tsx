@@ -12,6 +12,7 @@ import {
   isValidStaffActorId,
 } from "./staff_activity_helpers.tsx";
 import { queueCustomerReadModelSync, queueVendorReadModelSync } from "./read_model.ts";
+import { linkGuestOrdersToUser } from "./guest_order_linking.ts";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import {
   buildSesFromAddress,
@@ -187,6 +188,40 @@ async function persistCustomerAuthRecord(record: CustomerAuthRecord): Promise<vo
   if (emailLower) {
     await kv.set(`customer_auth_email:${emailLower}`, { userId: record.id });
   }
+  const normalizedPhone = normalizeMyanmarPhone(record.phone);
+  if (normalizedPhone) {
+    await kv.set(`customer_auth_phone:${normalizedPhone}`, { userId: record.id });
+  }
+}
+
+async function findCustomerAuthByPhone(normalizedPhone: string): Promise<CustomerAuthRecord | null> {
+  const phone = normalizeMyanmarPhone(normalizedPhone);
+  if (!phone) return null;
+
+  const idx = await kv.get(`customer_auth_phone:${phone}`);
+  const indexedUserId =
+    idx && typeof idx === "object" && typeof (idx as { userId?: string }).userId === "string"
+      ? String((idx as { userId: string }).userId).trim()
+      : "";
+  if (indexedUserId) {
+    const indexed = await findCustomerAuthByUserId(indexedUserId);
+    if (indexed && normalizeMyanmarPhone(indexed.phone) === phone) return indexed;
+  }
+
+  const rows = await withTimeout(kv.getByPrefixWithKeys("customer_auth:"), 30000);
+  for (const { key, value } of Array.isArray(rows) ? rows : []) {
+    if (
+      !key.startsWith("customer_auth:") ||
+      key.startsWith("customer_auth_email:") ||
+      key.startsWith("customer_auth_phone:")
+    ) {
+      continue;
+    }
+    if (!value || typeof value !== "object") continue;
+    const rec = value as CustomerAuthRecord;
+    if (normalizeMyanmarPhone(rec.phone) === phone) return rec;
+  }
+  return null;
 }
 
 async function findCustomerAuthByEmail(authEmail: string): Promise<CustomerAuthRecord | null> {
@@ -603,13 +638,26 @@ async function findCustomerByPhone(normalizedPhone: string): Promise<any | null>
   }
 
   const allCustomers = await withTimeout(kv.getByPrefix("customer:"), 30000);
-  if (!Array.isArray(allCustomers)) return null;
-  return (
-    allCustomers.find((c: any) => {
+  if (Array.isArray(allCustomers)) {
+    const fromKv = allCustomers.find((c: any) => {
       if (!c?.phone) return false;
       return normalizeMyanmarPhone(c.phone) === normalizedPhone;
-    }) ?? null
-  );
+    });
+    if (fromKv) return fromKv;
+  }
+
+  const authRec = await findCustomerAuthByPhone(normalizedPhone);
+  if (authRec) {
+    return {
+      id: authRec.id,
+      userId: authRec.id,
+      name: authRec.name,
+      email: authRec.email,
+      phone: authRec.phone,
+    };
+  }
+
+  return null;
 }
 
 async function findCustomerByEmail(email: string): Promise<any | null> {
@@ -2272,9 +2320,10 @@ authApp.post("/login", async (c) => {
         
         if (duplicatePhoneConflict) {
           console.error(`❌ Phone number ${userPhone} is already registered to another customer: ${duplicatePhoneConflict.id}`);
-          return c.json({ 
-            error: "This phone number is already registered to another account.",
-            details: `Phone ${userPhone} is already in use.`
+          return c.json({
+            error: "An account with this phone number already exists. Please sign in instead.",
+            code: "PHONE_ALREADY_REGISTERED",
+            details: `Phone ${userPhone} is already in use.`,
           }, 409);
         }
       }
@@ -2322,6 +2371,15 @@ authApp.post("/login", async (c) => {
       await withTimeout(kv.set(`customer:${customer.id}`, customer), 5000);
       queueCustomerReadModelSync(String(customer.id), customer);
       console.log(`✅ Customer record updated: ${customer.id}`);
+    }
+
+    const mergePhone =
+      normalizeMyanmarPhone(String(customer?.phone || "")) ||
+      normalizeMyanmarPhone(String(email || ""));
+    if (mergePhone) {
+      await linkGuestOrdersToUser(authUser.id, mergePhone).catch((err) => {
+        console.warn("[auth] guest order merge on login failed:", err);
+      });
     }
 
     // Prepare user object for frontend - IMPORTANT: Ensure id is the Supabase userId (UUID)
@@ -2456,11 +2514,21 @@ authApp.post("/register", async (c) => {
 
     const allCustomers = await withTimeout(kv.getByPrefix("customer:"), 30000);
 
+    const existingAuthByPhone = await findCustomerAuthByPhone(normalizedPhone);
+    if (existingAuthByPhone) {
+      console.log(`❌ Auth account already exists for phone: ${normalizedPhone}`);
+      return c.json({
+        error: "An account with this phone number already exists. Please sign in instead.",
+        code: "PHONE_ALREADY_REGISTERED",
+      }, 409);
+    }
+
     const duplicatePhone = await findCustomerByPhone(normalizedPhone);
     if (duplicatePhone) {
       console.log(`❌ Phone number already registered: ${normalizedPhone}`);
       return c.json({
-        error: "This phone number is already registered. Please sign in or use a different number.",
+        error: "An account with this phone number already exists. Please sign in instead.",
+        code: "PHONE_ALREADY_REGISTERED",
       }, 409);
     }
 
@@ -2490,7 +2558,8 @@ authApp.post("/register", async (c) => {
       }
     } else if (await authUserExistsByEmail(authEmail)) {
       return c.json({
-        error: "This phone number is already registered. Please sign in instead.",
+        error: "An account with this phone number already exists. Please sign in instead.",
+        code: "PHONE_ALREADY_REGISTERED",
       }, 409);
     }
 
@@ -2560,6 +2629,10 @@ authApp.post("/register", async (c) => {
     await withTimeout(kv.set(`customer:${customerId}`, customer), 5000);
     queueCustomerReadModelSync(customerId, customer);
     console.log(`✅ Customer record created: ${customerId}`);
+
+    await linkGuestOrdersToUser(authAccount.userId, normalizedPhone).catch((err) => {
+      console.warn("[auth] guest order merge on register failed:", err);
+    });
 
     // Prepare user object for frontend - IMPORTANT: Ensure id is the Supabase userId (UUID)
     // so profile fetching works correctly. Store the customerId separately.

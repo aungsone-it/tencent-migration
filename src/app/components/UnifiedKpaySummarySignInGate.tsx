@@ -15,6 +15,7 @@ import {
 } from "../utils/customerAuthIdentity";
 import { MIGOO_USER_SESSION_CHANGED_EVENT, notifyMigooUserSessionChanged } from "../../constants";
 import { hasKpaySummaryReturnContext } from "../utils/vendorCheckoutPaths";
+import { invalidateCustomerOrdersCache } from "../utils/module-cache";
 
 function readMigooCustomer(): { id: string } | null {
   const user = readNormalizedMigooUserFromStorage();
@@ -88,11 +89,21 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
       localStorage.setItem("migoo-user", JSON.stringify(sessionUser));
       notifyMigooUserSessionChanged();
       setMigooUser(readMigooCustomer());
+      if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
       toast.success(`Welcome back, ${response.user.name || response.user.email}!`);
       setShowAuthModal(false);
       setAuthForm({ email: "", password: "", name: "", phone: "" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Login failed");
+      const phoneTaken =
+        error instanceof Error &&
+        /phone number already exists/i.test(error.message);
+      toast.error(
+        phoneTaken
+          ? "An account with this phone number already exists. Please sign in instead."
+          : error instanceof Error
+            ? error.message
+            : "Login failed"
+      );
     } finally {
       setIsAuthLoading(false);
     }
@@ -122,11 +133,21 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
       localStorage.setItem("migoo-user", JSON.stringify(sessionUser));
       notifyMigooUserSessionChanged();
       setMigooUser(readMigooCustomer());
+      if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
       toast.success("Account created successfully!");
       setShowAuthModal(false);
       setAuthForm({ email: "", password: "", name: "", phone: "" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Registration failed");
+      const phoneTaken =
+        error instanceof Error &&
+        /phone number already exists/i.test(error.message);
+      toast.error(
+        phoneTaken
+          ? "An account with this phone number already exists. Please sign in instead."
+          : error instanceof Error
+            ? error.message
+            : "Registration failed"
+      );
     } finally {
       setIsAuthLoading(false);
     }

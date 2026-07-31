@@ -1,4 +1,4 @@
-import { isPendingOrderForBadge } from "./normalizeOrderBadgeStatus";
+import { isPendingOrderForBadge, dedupeOrdersByCanonicalForBadge } from "./normalizeOrderBadgeStatus";
 import { moduleCache, CACHE_KEYS } from "./module-cache";
 
 function parseTimeMs(v: unknown): number | null {
@@ -39,7 +39,7 @@ export function peekPendingOrdersDigestSourceMs(): number | null {
   const orders = payload?.orders;
   if (!Array.isArray(orders) || orders.length === 0) return null;
   let max: number | null = null;
-  for (const raw of orders) {
+  for (const raw of dedupeOrdersByCanonicalForBadge(orders)) {
     if (!orderIsPendingForBadge(raw)) continue;
     const m = orderActivityMs(raw as Record<string, unknown>);
     if (m != null && (max == null || m > max)) max = m;

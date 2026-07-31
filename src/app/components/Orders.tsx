@@ -79,6 +79,8 @@ import {
   normalizeShippingBadgeStatus,
   derivePaymentStatusFromOrder,
   deriveShippingStatusFromOrder,
+  dedupeOrdersByCanonicalForBadge,
+  getOrderListRowKey,
 } from "../utils/normalizeOrderBadgeStatus";
 import { deriveOrderPaymentMethodKey } from "../utils/orderPaymentMethod";
 import {
@@ -111,20 +113,15 @@ function normalizeOrderListStatus(status: string | undefined): string {
 }
 
 function dedupeOrderItemsByOrderNumber(rows: OrderItem[]): OrderItem[] {
-  const byKey = new Map<string, OrderItem>();
-  for (const row of rows) {
-    const key = (row.orderNumber || row.id || "").trim().toLowerCase();
-    if (!key) continue;
-    const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, row);
-      continue;
-    }
-    const prevAt = new Date(prev.createdAt || prev.date || 0).getTime();
-    const nextAt = new Date(row.createdAt || row.date || 0).getTime();
-    if (nextAt >= prevAt) byKey.set(key, row);
-  }
-  return [...byKey.values()];
+  return dedupeOrdersByCanonicalForBadge(rows) as OrderItem[];
+}
+
+function orderMatchesRowKey(order: Pick<OrderItem, "id" | "orderNumber">, rowKey: string): boolean {
+  return getOrderListRowKey(order) === rowKey;
+}
+
+function findOrderByRowKey(rows: OrderItem[], rowKey: string): OrderItem | undefined {
+  return rows.find((order) => orderMatchesRowKey(order, rowKey));
 }
 
 function countOrderStatusBreakdown(rows: OrderItem[]) {
@@ -1104,8 +1101,11 @@ export function Orders({
       ordersAggregates.uniqueVendors
     : Array.from(new Set(orders.map((order) => order.vendor || "SECURE Store"))).sort();
 
-  /** Server already filters by debounced search — avoid double-filtering paginated rows. */
-  const displayOrders = orders;
+  /** Server already filters by debounced search — dedupe again so duplicate KV rows never render twice. */
+  const displayOrders = useMemo(
+    () => applyPendingStatusDrafts(dedupeOrderItemsByOrderNumber(orders)),
+    [orders]
+  );
 
   const filteredTotalRevenue =
     displayOrders
@@ -1121,7 +1121,7 @@ export function Orders({
     if (selectedOrders.length === displayOrders.length) {
       setSelectedOrders([]);
     } else {
-      setSelectedOrders(displayOrders.map((order) => order.id));
+      setSelectedOrders(displayOrders.map((order) => getOrderListRowKey(order)));
     }
   };
 
@@ -1143,7 +1143,7 @@ export function Orders({
     setIsPrintDialogOpen(false);
     setShowBulkInvoices(true);
 
-    const ordersToPrint = orders.filter((order) => selectedOrders.includes(order.id));
+    const ordersToPrint = orders.filter((order) => selectedOrders.includes(getOrderListRowKey(order)));
     if (ordersToPrint.length === 0) {
       setShowBulkInvoices(false);
       return;
@@ -1163,26 +1163,36 @@ export function Orders({
     
     setOrders(prevOrders =>
       prevOrders.map(order =>
-        selectedOrders.includes(order.id) ? { ...order, status: bulkStatus } : order
+        selectedOrders.includes(getOrderListRowKey(order)) ? { ...order, status: bulkStatus } : order
       )
     );
 
-    const orderIds = [...selectedOrders];
+    const orderIds = selectedOrders
+      .map((rowKey) => {
+        const row = findOrderByRowKey(previousOrders, rowKey);
+        return row ? resolveOrderMutationId(row) : rowKey;
+      })
+      .filter(Boolean);
     patchAdminOrdersCacheStatuses(orderIds.map((id) => ({ orderId: id, status: bulkStatus })));
     
     // Close dialog and clear selection immediately
     setIsStatusDialogOpen(false);
-    const updatedCount = orderIds.length;
+    const selectedRowKeys = [...selectedOrders];
+    const updatedCount = selectedRowKeys.length;
     setSelectedOrders([]);
-    for (const id of orderIds) pendingOrderStatusDrafts.set(id, { status: bulkStatus, at: Date.now() });
-    clearOrderSaveState(orderIds);
+    for (const rowKey of selectedRowKeys) {
+      const row = previousOrders.find((o) => orderMatchesRowKey(o, rowKey));
+      const mutationId = row ? resolveOrderMutationId(row) : rowKey;
+      pendingOrderStatusDrafts.set(mutationId, { status: bulkStatus, at: Date.now() });
+    }
+    clearOrderSaveState(selectedRowKeys);
 
     toast.success(`${updatedCount} order${updatedCount === 1 ? "" : "s"} updated to ${bulkStatus}`);
     onOrderUpdate?.();
 
     // Instant inventory / Products + Inventory pages — mirror stock before network completes
-    for (const oid of orderIds) {
-      const o = previousOrders.find((x) => x.id === oid);
+    for (const rowKey of selectedRowKeys) {
+      const o = findOrderByRowKey(previousOrders, rowKey);
       if (o) {
         syncAdminInventoryCacheAfterOrderStatusChange(toInventorySyncSnapshot(o), bulkStatus, {
           skipDispatch: true,
@@ -1195,11 +1205,7 @@ export function Orders({
     void (async () => {
     try {
       await Promise.all(
-        orderIds.map((orderId) => {
-          const row = previousOrders.find((o) => o.id === orderId);
-          const mutationId = row ? resolveOrderMutationId(row) : orderId;
-          return ordersApi.update(mutationId, { status: bulkStatus });
-        }),
+        orderIds.map((mutationId) => ordersApi.update(mutationId, { status: bulkStatus })),
       );
       console.log(`✅ ${updatedCount} orders synced to server: ${bulkStatus}`);
       for (const orderId of orderIds) {
@@ -1209,8 +1215,8 @@ export function Orders({
           updatedAt: new Date().toISOString(),
         });
       }
-      const bulkSnapshots = orderIds
-        .map((id) => previousOrders.find((x) => x.id === id))
+      const bulkSnapshots = selectedRowKeys
+        .map((rowKey) => findOrderByRowKey(previousOrders, rowKey))
         .filter((row): row is (typeof previousOrders)[number] => row != null)
         .map((row) => toInventorySyncSnapshot(row));
       void reconcileInventoryAfterBulkOrderStatusSave(bulkSnapshots).catch((e) =>
@@ -1246,9 +1252,10 @@ export function Orders({
   };
 
   // Handle status change for single order
-  const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
+  const handleStatusChange = (rowKey: string, newStatus: OrderStatus) => {
     // Find the order being updated
-    const orderBeingUpdated = orders.find(o => o.id === orderId);
+    const orderBeingUpdated = findOrderByRowKey(orders, rowKey);
+    const orderId = orderBeingUpdated?.id || rowKey;
     const wasNotCancelled = orderBeingUpdated?.status !== 'cancelled';
     const isNowCancelled = newStatus === 'cancelled';
     
@@ -1257,7 +1264,7 @@ export function Orders({
     
     setOrders(prevOrders =>
       prevOrders.map(order =>
-        order.id === orderId
+        orderMatchesRowKey(order, rowKey)
           ? {
               ...order,
               status: newStatus,
@@ -1301,7 +1308,7 @@ export function Orders({
           }
         : {}),
     });
-    clearOrderSaveState([orderId]);
+    clearOrderSaveState([rowKey]);
 
     if (wasNotCancelled && isNowCancelled) {
       toast.message("Order cancelled", {
@@ -1615,7 +1622,7 @@ export function Orders({
       return;
     }
 
-    const rowsToDelete = orders.filter((order) => selectedOrders.includes(order.id));
+    const rowsToDelete = orders.filter((order) => selectedOrders.includes(getOrderListRowKey(order)));
     const count = rowsToDelete.length;
     const confirmMsg =
       t("orders.bulkDeleteConfirm")?.replace("{count}", String(count)) ||
@@ -1970,12 +1977,14 @@ export function Orders({
                       </td>
                     </tr>
                   ) : (
-                    displayOrders.map((order) => (
-                    <tr key={order.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    displayOrders.map((order) => {
+                    const rowKey = getOrderListRowKey(order);
+                    return (
+                    <tr key={rowKey} className="border-b border-slate-100 hover:bg-slate-50">
                       <td className="py-3 px-4">
                         <Checkbox
-                          checked={selectedOrders.includes(order.id)}
-                          onCheckedChange={() => toggleSelectOrder(order.id)}
+                          checked={selectedOrders.includes(rowKey)}
+                          onCheckedChange={() => toggleSelectOrder(rowKey)}
                         />
                       </td>
                       <td className="py-3 px-4">
@@ -2001,10 +2010,10 @@ export function Orders({
                       <td className="py-3 px-4">
                         <div className="flex flex-col gap-1">
                           {getStatusBadge(order.status, t)}
-                          {orderSaveState[order.id] === "saving" && (
+                          {orderSaveState[rowKey] === "saving" && (
                             <span className="text-[11px] text-amber-600">{t("common.saving")}</span>
                           )}
-                          {orderSaveState[order.id] === "saved" && (
+                          {orderSaveState[rowKey] === "saved" && (
                             <span className="text-[11px] text-emerald-600">{t("common.saved")}</span>
                           )}
                         </div>
@@ -2028,19 +2037,19 @@ export function Orders({
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleStatusChange(order.id, "pending")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(rowKey, "pending")}>
                                 {t("orders.markAsPending")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleStatusChange(order.id, "processing")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(rowKey, "processing")}>
                                 {t("orders.markAsProcessing")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleStatusChange(order.id, "fulfilled")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(rowKey, "fulfilled")}>
                                 {t("orders.markAsFulfilled")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleStatusChange(order.id, "ready-to-ship")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(rowKey, "ready-to-ship")}>
                                 {t("orders.markAsReadyToShip")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleStatusChange(order.id, "cancelled")}>
+                              <DropdownMenuItem onClick={() => handleStatusChange(rowKey, "cancelled")}>
                                 {t("orders.markAsCancelled")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -2048,7 +2057,9 @@ export function Orders({
                         </div>
                       </td>
                     </tr>
-                  )))}
+                    );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -2424,7 +2435,7 @@ export function Orders({
       {/* Hidden Bulk Invoice Printing Component */}
       {showBulkInvoices && (
         <PrintInvoice 
-          orders={orders.filter(order => selectedOrders.includes(order.id))} 
+          orders={orders.filter((order) => selectedOrders.includes(getOrderListRowKey(order)))} 
         />
       )}
     </div>

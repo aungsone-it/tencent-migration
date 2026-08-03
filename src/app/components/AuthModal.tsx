@@ -1,14 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useStorefrontPolicyPaths } from "../hooks/useStorefrontPolicyPaths";
-import { X, Upload, User, Phone, Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
+import { X, Upload, User, Phone, Mail, Lock, Loader2, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Checkbox } from "./ui/checkbox";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "./ui/input-otp";
 import { useLanguage } from "../contexts/LanguageContext";
 import { compressImage } from "../../utils/imageCompression";
+import { authApi } from "../../utils/api";
+import { toast } from "sonner";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -23,7 +26,7 @@ interface AuthModalProps {
   };
   onFormChange: (field: string, value: string) => void;
   onLogin: () => Promise<void>;
-  onRegister: (profileImage?: string) => Promise<void>;
+  onRegister: (profileImage?: string, phoneVerificationToken?: string) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -47,6 +50,59 @@ export function AuthModal({
   const [keepSignedIn, setKeepSignedIn] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [registerStep, setRegisterStep] = useState<'form' | 'otp'>('form');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  const resetRegisterFlow = useCallback(() => {
+    setRegisterStep('form');
+    setOtpCode('');
+    setOtpSending(false);
+    setIsVerifying(false);
+    setResendCooldown(0);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || mode !== 'register') {
+      resetRegisterFlow();
+    }
+  }, [isOpen, mode, resetRegisterFlow]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
+
+  const sendPhoneOtp = async (): Promise<boolean> => {
+    if (!formData.phone.trim()) {
+      toast.error(t("storefront.auth.phoneRequired"));
+      return false;
+    }
+
+    setOtpSending(true);
+    try {
+      const result = await authApi.sendRegisterPhoneOtp(formData.phone.trim());
+      setResendCooldown(60);
+      toast.success(result.message || t("storefront.auth.otpSent"));
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t("storefront.auth.otpSendFailed");
+      toast.error(message);
+      return false;
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || otpSending) return;
+    await sendPhoneOtp();
+  };
 
   const getResetPasswordPath = (): string => {
     const parts = location.pathname.split("/").filter(Boolean);
@@ -95,8 +151,39 @@ export function AuthModal({
     e.preventDefault();
     if (mode === 'login') {
       await onLogin();
-    } else {
-      await onRegister(profileImage);
+      return;
+    }
+
+    if (registerStep === 'form') {
+      if (!formData.password || !formData.name || !formData.phone.trim()) {
+        toast.error(t("storefront.account.registerRequiredFields"));
+        return;
+      }
+      const sent = await sendPhoneOtp();
+      if (sent) {
+        setRegisterStep('otp');
+      }
+      return;
+    }
+
+    if (otpCode.trim().length !== 6) {
+      toast.error(t("storefront.auth.otpRequired"));
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const verifyResult = await authApi.verifyRegisterPhoneOtp(formData.phone.trim(), otpCode.trim());
+      const token = verifyResult.phoneVerificationToken;
+      if (!token) {
+        throw new Error(t("storefront.auth.otpVerifyFailed"));
+      }
+      await onRegister(profileImage ?? undefined, token);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t("storefront.auth.otpVerifyFailed");
+      toast.error(message);
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -112,18 +199,81 @@ export function AuthModal({
 
         <CardHeader className="pt-8 text-center">
           <CardTitle className="text-xl sm:text-2xl font-extrabold text-slate-900 mb-1">
-            {mode === 'login' ? t("storefront.auth.welcome") : t("storefront.auth.createAccount")}
+            {mode === 'login'
+              ? t("storefront.auth.welcome")
+              : registerStep === 'otp'
+                ? t("storefront.auth.verifyPhone")
+                : t("storefront.auth.createAccount")}
           </CardTitle>
           <p className="text-xs sm:text-sm text-slate-500">
             {mode === 'login'
               ? t("storefront.auth.signInSubtitle")
-              : t("storefront.auth.registerSubtitle").replace("{storeName}", "MIGOO")}
+              : registerStep === 'otp'
+                ? t("storefront.auth.verifyPhoneSubtitle").replace("{phone}", formData.phone.trim())
+                : t("storefront.auth.registerSubtitle").replace("{storeName}", "MIGOO")}
           </p>
         </CardHeader>
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
-            {mode === 'register' && (
+            {mode === 'register' && registerStep === 'otp' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegisterStep('form');
+                    setOtpCode('');
+                  }}
+                  className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  {t("storefront.auth.backToDetails")}
+                </button>
+
+                <div className="space-y-3">
+                  <Label className="text-slate-700 font-medium text-xs sm:text-sm">
+                    {t("storefront.auth.enterOtp")}
+                  </Label>
+                  <div className="flex justify-center">
+                    <InputOTP
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={setOtpCode}
+                      disabled={isLoading}
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} />
+                        <InputOTPSlot index={1} />
+                        <InputOTPSlot index={2} />
+                        <InputOTPSlot index={3} />
+                        <InputOTPSlot index={4} />
+                        <InputOTPSlot index={5} />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+                  <p className="text-[11px] text-slate-500 text-center">
+                    {t("storefront.auth.otpHint")}
+                  </p>
+                </div>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={resendCooldown > 0 || otpSending || isLoading}
+                    className="text-xs text-slate-600 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {otpSending
+                      ? t("storefront.auth.sendingOtp")
+                      : resendCooldown > 0
+                        ? t("storefront.auth.resendOtpIn").replace("{seconds}", String(resendCooldown))
+                        : t("storefront.auth.resendOtp")}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {mode === 'register' && registerStep === 'form' && (
               <>
                 {/* Profile Image Upload - Left Aligned Above Full Name */}
                 <div className="flex justify-start mb-4">
@@ -269,6 +419,7 @@ export function AuthModal({
             </div>
             )}
 
+            {(mode === 'login' || (mode === 'register' && registerStep === 'form')) && (
             <div className="space-y-2">
               <Label htmlFor="password" className="text-slate-700 font-medium text-xs sm:text-sm">
                 {t("storefront.auth.passwordRequired")}
@@ -293,6 +444,7 @@ export function AuthModal({
                 </button>
               </div>
             </div>
+            )}
 
             {mode === 'login' && (
               <div className="flex items-center justify-between">
@@ -325,15 +477,23 @@ export function AuthModal({
             <Button
               type="submit"
               className="w-full h-11 sm:h-12 bg-[#1a1d29] hover:bg-slate-900 text-white text-sm sm:text-base font-semibold rounded-full shadow-lg transition-colors"
-              disabled={isLoading}
+              disabled={isLoading || otpSending || isVerifying}
             >
-              {isLoading ? (
+              {isLoading || otpSending || isVerifying ? (
                 <>
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  {mode === 'login' ? t("storefront.auth.signingIn") : t("storefront.auth.creatingAccount")}
+                  {mode === 'login'
+                    ? t("storefront.auth.signingIn")
+                    : registerStep === 'otp'
+                      ? t("storefront.auth.creatingAccount")
+                      : t("storefront.auth.sendingOtp")}
                 </>
               ) : (
-                mode === 'login' ? t("auth.login.signIn") : t("storefront.auth.createAccount")
+                mode === 'login'
+                  ? t("auth.login.signIn")
+                  : registerStep === 'otp'
+                    ? t("storefront.auth.createAccount")
+                    : t("storefront.auth.continueToVerify")
               )}
             </Button>
           </form>
@@ -344,7 +504,10 @@ export function AuthModal({
               {' '}
               <button
                 type="button"
-                onClick={() => onModeChange(mode === 'login' ? 'register' : 'login')}
+                onClick={() => {
+                  resetRegisterFlow();
+                  onModeChange(mode === 'login' ? 'register' : 'login');
+                }}
                 className="text-xs sm:text-sm text-slate-900 hover:text-amber-600 font-bold transition-colors"
               >
                 {mode === 'login' ? t("storefront.auth.signUp") : t("auth.login.signIn")}
@@ -352,7 +515,7 @@ export function AuthModal({
             </p>
           </div>
 
-          {mode === 'register' && (
+          {mode === 'register' && registerStep === 'form' && (
             <p className="text-[10px] sm:text-xs text-slate-600 text-center mt-4 leading-relaxed">
               {t("storefront.auth.termsPrefix")}{' '}
               <Link

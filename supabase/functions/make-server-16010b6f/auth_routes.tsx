@@ -20,6 +20,7 @@ import {
   sendPasswordResetOtpEmail,
   validateSesConfig,
 } from "./tencent_ses.tsx";
+import { isSmsDevMode, readSmsConfig, sendRegistrationOtpSms } from "./phone_sms.tsx";
 
 const authApp = new Hono();
 
@@ -170,6 +171,41 @@ function phoneToAuthEmail(normalizedPhone: string): string {
 
 function isSyntheticAuthEmail(email: string): boolean {
   return String(email || "").toLowerCase().endsWith(`@${PHONE_AUTH_EMAIL_DOMAIN}`);
+}
+
+const PHONE_REGISTER_OTP_TTL_MS = 10 * 60 * 1000;
+const PHONE_REGISTER_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const PHONE_REGISTER_OTP_MAX_ATTEMPTS = 5;
+const PHONE_VERIFICATION_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+function phoneRegisterOtpKey(normalizedPhone: string): string {
+  return `otp:phone:register:${normalizedPhone}`;
+}
+
+function phoneVerificationTokenKey(token: string): string {
+  return `phone_verified:register:${token}`;
+}
+
+async function getPhoneRegistrationConflict(
+  normalizedPhone: string,
+): Promise<{ code: string; error: string } | null> {
+  const existingAuthByPhone = await findCustomerAuthByPhone(normalizedPhone);
+  if (existingAuthByPhone) {
+    return {
+      error: "An account with this phone number already exists. Please sign in instead.",
+      code: "PHONE_ALREADY_REGISTERED",
+    };
+  }
+
+  const duplicatePhone = await findCustomerByPhone(normalizedPhone);
+  if (duplicatePhone) {
+    return {
+      error: "An account with this phone number already exists. Please sign in instead.",
+      code: "PHONE_ALREADY_REGISTERED",
+    };
+  }
+
+  return null;
 }
 
 type CustomerAuthRecord = {
@@ -2479,14 +2515,193 @@ authApp.post("/customer/:userId/profile-image", async (c) => {
 });
 
 // ============================================
+// STOREFRONT: SEND PHONE OTP (registration)
+// ============================================
+authApp.post("/send-register-phone-otp", async (c) => {
+  try {
+    const { phone } = await c.req.json();
+
+    if (!phone?.trim()) {
+      return c.json({ error: "Phone number is required" }, 400);
+    }
+
+    const normalizedPhone = normalizeMyanmarPhone(phone);
+    if (!normalizedPhone) {
+      return c.json({
+        error: "Phone must be Myanmar format: +959XXXXXXXXX (12 digits) or 09XXXXXXXXX (11 digits)",
+        code: "INVALID_PHONE",
+      }, 400);
+    }
+
+    const phoneConflict = await getPhoneRegistrationConflict(normalizedPhone);
+    if (phoneConflict) {
+      return c.json(phoneConflict, 409);
+    }
+
+    const otpKey = phoneRegisterOtpKey(normalizedPhone);
+    const existingOtp = await kv.get(otpKey) as Record<string, unknown> | null;
+    const lastSentAt = Number(existingOtp?.lastSentAt || 0);
+    if (lastSentAt && Date.now() - lastSentAt < PHONE_REGISTER_OTP_RESEND_COOLDOWN_MS) {
+      const retryAfterSec = Math.ceil(
+        (PHONE_REGISTER_OTP_RESEND_COOLDOWN_MS - (Date.now() - lastSentAt)) / 1000,
+      );
+      return c.json({
+        error: `Please wait ${retryAfterSec} seconds before requesting a new code.`,
+        code: "OTP_COOLDOWN",
+        retryAfterSec,
+      }, 429);
+    }
+
+    const smsConfig = readSmsConfig();
+    if (!smsConfig && !isSmsDevMode()) {
+      return c.json({
+        error: "SMS verification is not configured. Please contact support.",
+        code: "SMS_NOT_CONFIGURED",
+        smsConfigured: false,
+      }, 503);
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + PHONE_REGISTER_OTP_TTL_MS;
+
+    await kv.set(otpKey, {
+      code: otp,
+      expiresAt,
+      attempts: 0,
+      lastSentAt: Date.now(),
+      phone: normalizedPhone,
+      createdAt: new Date().toISOString(),
+    });
+
+    try {
+      const sendResult = await sendRegistrationOtpSms(normalizedPhone, otp);
+      return c.json({
+        success: true,
+        smsSent: sendResult.sent,
+        smsConfigured: Boolean(smsConfig),
+        smsProvider: sendResult.provider || smsConfig?.provider,
+        devMode: sendResult.devMode === true,
+        message: "Verification code sent to your phone",
+        expiresInSec: PHONE_REGISTER_OTP_TTL_MS / 1000,
+      });
+    } catch (smsError: unknown) {
+      await kv.del(otpKey);
+      const message = smsError instanceof Error ? smsError.message : "Failed to send SMS";
+      return c.json({
+        error: message,
+        code: "SMS_SEND_FAILED",
+        smsConfigured: Boolean(smsConfig),
+      }, 502);
+    }
+  } catch (error: unknown) {
+    console.error("Send register phone OTP error:", error);
+    return c.json({
+      error: error instanceof Error ? error.message : "Failed to send verification code",
+    }, 500);
+  }
+});
+
+// ============================================
+// STOREFRONT: VERIFY PHONE OTP (registration)
+// ============================================
+authApp.post("/verify-register-phone-otp", async (c) => {
+  try {
+    const { phone, otp } = await c.req.json();
+
+    if (!phone?.trim() || !otp?.trim()) {
+      return c.json({ error: "Phone number and verification code are required" }, 400);
+    }
+
+    const normalizedPhone = normalizeMyanmarPhone(phone);
+    if (!normalizedPhone) {
+      return c.json({
+        error: "Phone must be Myanmar format: +959XXXXXXXXX (12 digits) or 09XXXXXXXXX (11 digits)",
+        code: "INVALID_PHONE",
+      }, 400);
+    }
+
+    const otpKey = phoneRegisterOtpKey(normalizedPhone);
+    const storedOtp = await kv.get(otpKey) as Record<string, unknown> | null;
+
+    if (!storedOtp) {
+      return c.json({
+        error: "Verification code not found or expired. Please request a new code.",
+        code: "OTP_NOT_FOUND",
+      }, 404);
+    }
+
+    const expiresAt = Number(storedOtp.expiresAt || 0);
+    if (!expiresAt || Date.now() > expiresAt) {
+      await kv.del(otpKey);
+      return c.json({
+        error: "Verification code expired. Please request a new code.",
+        code: "OTP_EXPIRED",
+      }, 410);
+    }
+
+    const attempts = Number(storedOtp.attempts || 0);
+    if (attempts >= PHONE_REGISTER_OTP_MAX_ATTEMPTS) {
+      await kv.del(otpKey);
+      return c.json({
+        error: "Too many incorrect attempts. Please request a new code.",
+        code: "OTP_MAX_ATTEMPTS",
+      }, 429);
+    }
+
+    const storedCode = String(storedOtp.code || "").trim();
+    const submittedCode = String(otp || "").trim();
+    if (storedCode !== submittedCode) {
+      await kv.set(otpKey, {
+        ...storedOtp,
+        attempts: attempts + 1,
+      });
+      return c.json({
+        error: "Incorrect verification code. Please try again.",
+        code: "OTP_INVALID",
+        attemptsRemaining: Math.max(0, PHONE_REGISTER_OTP_MAX_ATTEMPTS - attempts - 1),
+      }, 400);
+    }
+
+    await kv.del(otpKey);
+
+    const verificationToken = nodeCrypto.randomUUID();
+    const tokenExpiresAt = Date.now() + PHONE_VERIFICATION_TOKEN_TTL_MS;
+    await kv.set(phoneVerificationTokenKey(verificationToken), {
+      phone: normalizedPhone,
+      verifiedAt: new Date().toISOString(),
+      expiresAt: tokenExpiresAt,
+    });
+
+    return c.json({
+      success: true,
+      phoneVerificationToken: verificationToken,
+      expiresInSec: PHONE_VERIFICATION_TOKEN_TTL_MS / 1000,
+      message: "Phone number verified",
+    });
+  } catch (error: unknown) {
+    console.error("Verify register phone OTP error:", error);
+    return c.json({
+      error: error instanceof Error ? error.message : "Failed to verify code",
+    }, 500);
+  }
+});
+
+// ============================================
 // STOREFRONT: REGISTER (for customers)
 // ============================================
 authApp.post("/register", async (c) => {
   try {
-    const { email, password, name, phone, profileImage } = await c.req.json();
+    const { email, password, name, phone, profileImage, phoneVerificationToken } = await c.req.json();
 
     if (!password || !name || !phone?.trim()) {
       return c.json({ error: "Phone number, password, and name are required" }, 400);
+    }
+
+    if (!phoneVerificationToken?.trim()) {
+      return c.json({
+        error: "Phone verification is required. Please verify your phone number first.",
+        code: "PHONE_NOT_VERIFIED",
+      }, 400);
     }
 
     const normalizedPhone = normalizeMyanmarPhone(phone);
@@ -2495,6 +2710,23 @@ authApp.post("/register", async (c) => {
         error: "Phone must be Myanmar format: +959XXXXXXXXX (12 digits) or 09XXXXXXXXX (11 digits)",
       }, 400);
     }
+
+    const verifiedRecord = await kv.get(
+      phoneVerificationTokenKey(String(phoneVerificationToken).trim()),
+    ) as Record<string, unknown> | null;
+
+    if (
+      !verifiedRecord ||
+      String(verifiedRecord.phone || "") !== normalizedPhone ||
+      Number(verifiedRecord.expiresAt || 0) < Date.now()
+    ) {
+      return c.json({
+        error: "Phone verification expired or invalid. Please verify your phone again.",
+        code: "PHONE_NOT_VERIFIED",
+      }, 400);
+    }
+
+    await kv.del(phoneVerificationTokenKey(String(phoneVerificationToken).trim()));
 
     const emailTrimmed = String(email || "").trim();
     let authEmail = emailTrimmed;

@@ -1076,6 +1076,38 @@ async function uploadCustomerProfileImageDataUrl(
 
 export const authApi = {
   /**
+   * Send OTP to phone for registration verification
+   */
+  sendRegisterPhoneOtp: async (phone: string): Promise<{
+    success?: boolean;
+    message?: string;
+    retryAfterSec?: number;
+    code?: string;
+    smsConfigured?: boolean;
+  }> => {
+    return apiClient.post('/auth/send-register-phone-otp', { phone: phone.trim() });
+  },
+
+  /**
+   * Verify phone OTP and receive a one-time registration token
+   */
+  verifyRegisterPhoneOtp: async (
+    phone: string,
+    otp: string,
+  ): Promise<{
+    success?: boolean;
+    phoneVerificationToken?: string;
+    message?: string;
+    code?: string;
+    attemptsRemaining?: number;
+  }> => {
+    return apiClient.post('/auth/verify-register-phone-otp', {
+      phone: phone.trim(),
+      otp: otp.trim(),
+    });
+  },
+
+  /**
    * Register a new user
    */
   register: async (
@@ -1083,13 +1115,15 @@ export const authApi = {
     password: string,
     name?: string,
     phone?: string,
-    profileImage?: string
+    profileImage?: string,
+    phoneVerificationToken?: string,
   ): Promise<AuthResponse> => {
     const response = await apiClient.post<AuthResponse>('/auth/register', {
       email: email?.trim() || "",
       password,
       name,
       phone,
+      phoneVerificationToken,
     });
 
     const userId = response.user?.id;

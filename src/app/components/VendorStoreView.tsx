@@ -2523,9 +2523,13 @@ export function VendorStoreView({
     }
   };
 
-  const handleRegister = async (profileImage?: string) => {
+  const handleRegister = async (profileImage?: string, phoneVerificationToken?: string) => {
     if (!authForm.password || !authForm.name || !authForm.phone.trim()) {
       toast.error(t("storefront.account.registerRequiredFields"));
+      return;
+    }
+    if (!phoneVerificationToken) {
+      toast.error(t("storefront.auth.phoneVerificationRequired"));
       return;
     }
 
@@ -2536,7 +2540,8 @@ export function VendorStoreView({
         authForm.password,
         authForm.name,
         authForm.phone.trim(),
-        profileImage
+        profileImage,
+        phoneVerificationToken,
       );
       const userData = response.user;
 

@@ -78,18 +78,20 @@ export async function finalizeSubscriptionPayment(
   }
 
   const syncRetries = Math.max(0, options?.syncRetries ?? 0);
-  if (options?.syncFromProvider) {
+  let txn = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
+  const txnPaid = txn && String(txn.status || "").toLowerCase() === "paid";
+
+  if (options?.syncFromProvider && !txnPaid) {
     for (let attempt = 0; attempt <= syncRetries; attempt++) {
       await syncKPayTxnStatusFromProvider(id);
-      const txn = await kv.get(`kpay_txn:${id}`);
+      txn = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
       if (txn && String(txn.status || "").toLowerCase() === "paid") break;
       if (attempt < syncRetries) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }
     }
   }
 
-  const txn = await kv.get(`kpay_txn:${id}`);
   if (!txn || String(txn.status || "").toLowerCase() !== "paid") {
     return {
       ok: false,
@@ -148,7 +150,16 @@ export async function finalizeSubscriptionPayment(
       p_period_days: PERIOD_DAYS,
     },
   );
-  if (persistError) throw new Error(persistError.message);
+  if (persistError) {
+    // Fast fallback when PostgREST/direct RPC path is unavailable.
+    await kv.set(key, subscription);
+    await kv.set(`subscription_payment:${id}`, paidPayment);
+    const persisted = await kv.get(key);
+    if (persisted && typeof persisted === "object") {
+      return { ok: true, subscription: persisted as Record<string, unknown> };
+    }
+    throw new Error(persistError.message);
+  }
   if (!persistedSubscription || typeof persistedSubscription !== "object") {
     throw new Error("Subscription confirmation did not return a subscription");
   }

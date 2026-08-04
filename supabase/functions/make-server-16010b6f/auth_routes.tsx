@@ -177,6 +177,8 @@ const PHONE_REGISTER_OTP_TTL_MS = 10 * 60 * 1000;
 const PHONE_REGISTER_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const PHONE_REGISTER_OTP_MAX_ATTEMPTS = 5;
 const PHONE_VERIFICATION_TOKEN_TTL_MS = 15 * 60 * 1000;
+// SMS OTP temporarily disabled — set true to re-enable phone verification at signup.
+const PHONE_OTP_ENABLED = false;
 
 function phoneRegisterOtpKey(normalizedPhone: string): string {
   return `otp:phone:register:${normalizedPhone}`;
@@ -2519,6 +2521,9 @@ authApp.post("/customer/:userId/profile-image", async (c) => {
 // ============================================
 authApp.post("/send-register-phone-otp", async (c) => {
   try {
+    if (!PHONE_OTP_ENABLED) {
+      return c.json({ error: "Phone SMS verification is temporarily disabled" }, 503);
+    }
     const { phone } = await c.req.json();
 
     if (!phone?.trim()) {
@@ -2606,6 +2611,9 @@ authApp.post("/send-register-phone-otp", async (c) => {
 // ============================================
 authApp.post("/verify-register-phone-otp", async (c) => {
   try {
+    if (!PHONE_OTP_ENABLED) {
+      return c.json({ error: "Phone SMS verification is temporarily disabled" }, 503);
+    }
     const { phone, otp } = await c.req.json();
 
     if (!phone?.trim() || !otp?.trim()) {
@@ -2697,13 +2705,6 @@ authApp.post("/register", async (c) => {
       return c.json({ error: "Phone number, password, and name are required" }, 400);
     }
 
-    if (!phoneVerificationToken?.trim()) {
-      return c.json({
-        error: "Phone verification is required. Please verify your phone number first.",
-        code: "PHONE_NOT_VERIFIED",
-      }, 400);
-    }
-
     const normalizedPhone = normalizeMyanmarPhone(phone);
     if (!normalizedPhone) {
       return c.json({
@@ -2711,22 +2712,31 @@ authApp.post("/register", async (c) => {
       }, 400);
     }
 
-    const verifiedRecord = await kv.get(
-      phoneVerificationTokenKey(String(phoneVerificationToken).trim()),
-    ) as Record<string, unknown> | null;
+    if (PHONE_OTP_ENABLED) {
+      if (!phoneVerificationToken?.trim()) {
+        return c.json({
+          error: "Phone verification is required. Please verify your phone number first.",
+          code: "PHONE_NOT_VERIFIED",
+        }, 400);
+      }
 
-    if (
-      !verifiedRecord ||
-      String(verifiedRecord.phone || "") !== normalizedPhone ||
-      Number(verifiedRecord.expiresAt || 0) < Date.now()
-    ) {
-      return c.json({
-        error: "Phone verification expired or invalid. Please verify your phone again.",
-        code: "PHONE_NOT_VERIFIED",
-      }, 400);
+      const verifiedRecord = await kv.get(
+        phoneVerificationTokenKey(String(phoneVerificationToken).trim()),
+      ) as Record<string, unknown> | null;
+
+      if (
+        !verifiedRecord ||
+        String(verifiedRecord.phone || "") !== normalizedPhone ||
+        Number(verifiedRecord.expiresAt || 0) < Date.now()
+      ) {
+        return c.json({
+          error: "Phone verification expired or invalid. Please verify your phone again.",
+          code: "PHONE_NOT_VERIFIED",
+        }, 400);
+      }
+
+      await kv.del(phoneVerificationTokenKey(String(phoneVerificationToken).trim()));
     }
-
-    await kv.del(phoneVerificationTokenKey(String(phoneVerificationToken).trim()));
 
     const emailTrimmed = String(email || "").trim();
     let authEmail = emailTrimmed;

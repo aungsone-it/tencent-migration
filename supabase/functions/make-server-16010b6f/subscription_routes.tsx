@@ -191,7 +191,7 @@ app.post("/subscriptions/payment/:merchantOrderId/confirm", async (c) => {
     const { finalizeSubscriptionPayment } = await import("./subscription_payment_confirm.ts");
     const result = await finalizeSubscriptionPayment(merchantOrderId, {
       syncFromProvider: true,
-      syncRetries: 3,
+      syncRetries: 1,
     });
     if (!result.ok) {
       if (result.status === "not_found") return c.json({ error: result.error }, 404);

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronRight, Crown, Info, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, CheckCircle, ChevronRight, Crown, Info, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { toast } from "sonner";
 import {
@@ -21,6 +21,7 @@ import {
   writeSubscriptionPwaPending,
 } from "../utils/subscriptionPwa";
 import type { AuthUser } from "../contexts/AuthContext";
+import { supabase } from "../contexts/AuthContext";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -72,7 +73,10 @@ export function StorefrontSubscriptions({
   const [session, setSession] = useState<KPaySession | null>(null);
   const [starting, setStarting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [kpayPaidConfirmed, setKpayPaidConfirmed] = useState(false);
   const [subscription, setSubscription] = useState<ActiveSubscription | null>(null);
+  const activationStartedRef = useRef(false);
+  const activatingRef = useRef(false);
 
   useEffect(() => {
     onOpenChange?.(open);
@@ -156,6 +160,8 @@ export function StorefrontSubscriptions({
     }
     setSelected(plan);
     setSession(null);
+    setKpayPaidConfirmed(false);
+    activationStartedRef.current = false;
     setStarting(true);
     try {
       const response = await fetch(`${cloudbaseApiBaseUrl}/subscriptions/start`, {
@@ -215,20 +221,11 @@ export function StorefrontSubscriptions({
     }
   };
 
-  const confirmPayment = useCallback(async (quiet = false) => {
-    if (!session?.merchantOrderId || confirming) return;
+  const activateSubscription = useCallback(async (quiet = false) => {
+    if (!session?.merchantOrderId || activatingRef.current) return false;
+    activatingRef.current = true;
     setConfirming(true);
     try {
-      try {
-        const latest = await fetchKPaySessionStatus({
-          projectId,
-          publicAnonKey,
-          merchantOrderId: session.merchantOrderId,
-        });
-        setSession((current) => current ? { ...current, ...latest } : latest);
-      } catch {
-        /* status refresh is best-effort; confirm syncs from KBZ server-side */
-      }
       const response = await fetch(
         `${cloudbaseApiBaseUrl}/subscriptions/payment/${encodeURIComponent(session.merchantOrderId)}/confirm`,
         { method: "POST", headers: headers(true), body: "{}" },
@@ -236,26 +233,127 @@ export function StorefrontSubscriptions({
       const data = await response.json().catch(() => ({}));
       if (response.status === 409 && data.status === "pending") {
         if (!quiet) toast.info("KBZPay has not confirmed this payment yet.");
-        return;
+        activationStartedRef.current = false;
+        return false;
       }
       if (!response.ok) throw new Error(data.error || "Could not activate subscription");
       setSubscription(data.subscription);
       clearSubscriptionPwaPending(session.merchantOrderId);
       toast.success(`You are now subscribed to ${storeName}`);
+      setOpen(false);
       setSelected(null);
       setSession(null);
+      setKpayPaidConfirmed(false);
+      activationStartedRef.current = false;
+      void loadSubscription();
+      return true;
     } catch (error) {
+      activationStartedRef.current = false;
       if (!quiet) toast.error(error instanceof Error ? error.message : "Could not verify payment");
+      return false;
     } finally {
+      activatingRef.current = false;
       setConfirming(false);
     }
-  }, [session?.merchantOrderId, confirming, storeName]);
+  }, [session?.merchantOrderId, storeName, loadSubscription]);
+
+  const confirmPayment = useCallback(async (quiet = false) => {
+    if (!session?.merchantOrderId) return;
+    const alreadyPaid = kpayPaidConfirmed || session.status === "paid";
+    if (!alreadyPaid) {
+      try {
+        const latest = await fetchKPaySessionStatus({
+          projectId,
+          publicAnonKey,
+          merchantOrderId: session.merchantOrderId,
+        });
+        setSession((current) => current ? { ...current, ...latest } : latest);
+        if (latest.status === "paid") {
+          setKpayPaidConfirmed(true);
+        } else {
+          if (!quiet) toast.info("KBZPay has not confirmed this payment yet.");
+          return;
+        }
+      } catch {
+        if (!quiet) toast.info("Could not refresh payment status. Try again in a moment.");
+        return;
+      }
+    }
+    await activateSubscription(quiet);
+  }, [session?.merchantOrderId, session?.status, kpayPaidConfirmed, activateSubscription]);
 
   useEffect(() => {
-    if (!session?.merchantOrderId) return;
-    const timer = window.setInterval(() => void confirmPayment(true), 4000);
-    return () => window.clearInterval(timer);
-  }, [session?.merchantOrderId, confirmPayment]);
+    const orderId = session?.merchantOrderId;
+    if (!orderId) {
+      setKpayPaidConfirmed(false);
+      activationStartedRef.current = false;
+      return;
+    }
+    const key = `kpay_txn:${orderId}`;
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    const markPaid = () => {
+      if (cancelled) return;
+      setKpayPaidConfirmed(true);
+      setSession((current) => (current ? { ...current, status: "paid" } : current));
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+    };
+
+    const refreshFromServer = async () => {
+      if (cancelled) return;
+      try {
+        const latest = await fetchKPaySessionStatus({
+          projectId,
+          publicAnonKey,
+          merchantOrderId: orderId,
+        });
+        if (cancelled) return;
+        setSession((current) => (current ? { ...current, ...latest } : latest));
+        if (latest.status === "paid") markPaid();
+      } catch {
+        /* next poll or realtime may still deliver */
+      }
+    };
+
+    void refreshFromServer();
+    pollTimer = setInterval(() => {
+      void refreshFromServer();
+    }, 1500);
+
+    const channel = supabase
+      .channel(`subscription-kpay-txn-${orderId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "kv_store_16010b6f",
+          filter: `key=eq.${key}`,
+        },
+        (payload: { new?: { value?: { status?: string } } }) => {
+          if (payload?.new?.value?.status === "paid") markPaid();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearInterval(pollTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [session?.merchantOrderId]);
+
+  useEffect(() => {
+    if (!session?.merchantOrderId || !kpayPaidConfirmed || activationStartedRef.current) return;
+    activationStartedRef.current = true;
+    void activateSubscription(true).then((ok) => {
+      if (!ok) activationStartedRef.current = false;
+    });
+  }, [session?.merchantOrderId, kpayPaidConfirmed, activateSubscription]);
 
   if (plans.length === 0) return null;
 
@@ -294,6 +392,8 @@ export function StorefrontSubscriptions({
         if (!value) {
           setSelected(null);
           setSession(null);
+          setKpayPaidConfirmed(false);
+          activationStartedRef.current = false;
         }
       }}>
         <DialogContent
@@ -357,18 +457,52 @@ export function StorefrontSubscriptions({
                         <img src="/kbzpay-logo.png" alt="" className="h-full w-full object-contain" />
                       </span>
                     )}
+                    {(kpayPaidConfirmed || session.status === "paid") && (
+                      <div
+                        className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-md bg-white/45 text-center ring-1 ring-emerald-500/35 backdrop-blur-[1px]"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <CheckCircle
+                          className="h-14 w-14 text-emerald-600/95 drop-shadow-sm"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                        <span className="mt-2 text-lg font-semibold tracking-wide text-emerald-900 drop-shadow-sm">
+                          Paid
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-4 font-medium">Scan with KBZPay to pay {formatMmk(selected.price)}</p>
+                  <p className="mt-4 font-medium">
+                    {kpayPaidConfirmed || session.status === "paid"
+                      ? "Payment received — activating your membership…"
+                      : `Scan with KBZPay to pay ${formatMmk(selected.price)}`}
+                  </p>
                   <p className="mt-1 text-sm text-slate-500">This membership does not auto-renew. Renew manually before it expires.</p>
-                  {session.payUrl && (
+                  {session.payUrl && !(kpayPaidConfirmed || session.status === "paid") && (
                     <Button className="mt-4 w-full" onClick={() => window.location.assign(session.payUrl!)}>Open KBZPay</Button>
                   )}
-                  <Button variant="outline" className="mt-3 w-full" disabled={confirming} onClick={() => void confirmPayment(false)}>
-                    {confirming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />} Check payment
-                  </Button>
+                  {kpayPaidConfirmed || session.status === "paid" ? (
+                    confirming ? (
+                      <div className="mt-3 flex items-center justify-center gap-2 text-sm text-slate-600">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Activating membership…
+                      </div>
+                    ) : null
+                  ) : (
+                    <Button variant="outline" className="mt-3 w-full" disabled={confirming} onClick={() => void confirmPayment(false)}>
+                      {confirming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />} Check payment
+                    </Button>
+                  )}
                 </div>
               ) : null}
-              <Button variant="ghost" onClick={() => { setSelected(null); setSession(null); }}>Choose another plan</Button>
+              <Button variant="ghost" onClick={() => {
+                setSelected(null);
+                setSession(null);
+                setKpayPaidConfirmed(false);
+                activationStartedRef.current = false;
+              }}>Choose another plan</Button>
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-7">

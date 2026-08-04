@@ -8,8 +8,8 @@ export type SubscriptionRevenueSplit = {
 };
 
 function positiveMmk(value: unknown): number {
-  const amount = Number(value);
-  return Number.isInteger(amount) && amount > 0 ? amount : 0;
+  const amount = Math.round(Number(value));
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
 function nonNegativeMoney(value: unknown): number {

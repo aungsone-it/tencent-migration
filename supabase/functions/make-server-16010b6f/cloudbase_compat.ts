@@ -459,6 +459,19 @@ export function createClient(_url?: string, _key?: string, options?: ClientOptio
               );
               return { data: result.rows[0]?.data ?? null, error: null };
             }
+            if (name === "rpc_confirm_subscription_payment") {
+              const result = await pool.query(
+                "SELECT public.rpc_confirm_subscription_payment($1,$2,$3::jsonb,$4::jsonb,$5) AS data",
+                [
+                  args?.p_payment_key,
+                  args?.p_subscription_key,
+                  JSON.stringify(args?.p_subscription_template ?? {}),
+                  JSON.stringify(args?.p_paid_payment ?? {}),
+                  args?.p_period_days ?? 30,
+                ],
+              );
+              return { data: result.rows[0]?.data ?? null, error: null };
+            }
             return errorResult(`Unsupported direct PostgreSQL RPC: ${name}`);
           } catch (error) {
             return errorResult(error instanceof Error ? error.message : String(error));

@@ -109,13 +109,9 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
     }
   };
 
-  const handleRegister = async (profileImage?: string, phoneVerificationToken?: string) => {
+  const handleRegister = async (profileImage?: string, _phoneVerificationToken?: string) => {
     if (!authForm.password || !authForm.name || !authForm.phone.trim()) {
       toast.error("Please enter your name, phone number, and password");
-      return;
-    }
-    if (!phoneVerificationToken) {
-      toast.error("Please verify your phone number first");
       return;
     }
     setIsAuthLoading(true);
@@ -126,7 +122,6 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
         authForm.name,
         authForm.phone.trim(),
         profileImage,
-        phoneVerificationToken,
       );
       const sessionUser = buildCustomerSessionFromAuthResponse(
         response.user as Record<string, unknown>,

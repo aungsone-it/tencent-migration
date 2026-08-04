@@ -159,10 +159,7 @@ export function AuthModal({
         toast.error(t("storefront.account.registerRequiredFields"));
         return;
       }
-      const sent = await sendPhoneOtp();
-      if (sent) {
-        setRegisterStep('otp');
-      }
+      await onRegister(profileImage ?? undefined);
       return;
     }
 

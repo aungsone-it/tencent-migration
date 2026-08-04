@@ -70,7 +70,8 @@ export function notifyAdminOrdersUpdated(
     reason === "storefront-checkout-order-created" ||
     reason === "invalidate-admin-orders-cache" ||
     reason === "realtime-order-pulse" ||
-    reason === "remove-admin-orders"
+    reason === "remove-admin-orders" ||
+    reason === "patch-admin-orders-status"
   ) {
     markSuperAdminFinancesSessionStale();
   }

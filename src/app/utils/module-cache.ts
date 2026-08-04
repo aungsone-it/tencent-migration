@@ -23,6 +23,11 @@ import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
 import { notifyAdminOrdersUpdated, isSuperAdminFinancesSessionStale } from "./adminOrdersRealtime";
+import {
+  financesTransactionMatchesOrder,
+  isAccruedFinancesOrder,
+  isCancelledFinancesOrder,
+} from "./financesOrderStatus";
 import { isPendingOrderForBadge, normalizeAdminOrderStatusForBadge, dedupeOrdersByCanonicalForBadge } from "./normalizeOrderBadgeStatus";
 import {
   isVendorUncategorizedFilter,
@@ -2756,7 +2761,11 @@ export function patchAdminOrdersCacheStatuses(
     moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING, pending);
   }
   if (typeof window !== "undefined") {
-    notifyAdminOrdersUpdated("patch-admin-orders-status", { pendingOrders: pending ?? undefined });
+    patchAdminFinancesCacheFromOrderUpdates(updates);
+    notifyAdminOrdersUpdated("patch-admin-orders-status", {
+      pendingOrders: pending ?? undefined,
+      orderStatusPatches: updates,
+    });
   }
 }
 
@@ -2916,10 +2925,12 @@ export function removeAdminOrdersFromCaches(
   SmartCache.delete("badge_counts");
   if (typeof window !== "undefined") {
     removePersistedKeysPrefix("migoo-ls-admin-orders-p1-");
+    removeOrdersFromAdminFinancesCache(removed);
     notifyAdminOrdersUpdated("remove-admin-orders", {
       removedCount: removed.length,
       pendingRemoved,
       pendingOrders: syncPendingOrdersBadgeFromAdminCache(),
+      removedOrders: removed,
     });
   }
 }
@@ -3012,7 +3023,7 @@ export function invalidateAdminOrdersCache(): void {
   moduleCache.invalidate(CACHE_KEYS.ADMIN_ORDERS);
   moduleCache.invalidate(CACHE_KEYS.ADMIN_ORDERS_BADGE_PENDING);
   moduleCache.invalidatePrefix(ADMIN_ORDERS_PAGE_CACHE_PREFIX);
-  moduleCache.invalidate(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS);
+  invalidateAdminFinancesCache();
   /** Vendor portals peek `vendor-orders-*`; clear so Finances/Dashboard refetch matches super-admin mutations. */
   moduleCache.invalidatePrefix("vendor-orders-");
   SmartCache.delete("badge_counts");
@@ -3021,6 +3032,116 @@ export function invalidateAdminOrdersCache(): void {
     // Keep last finances snapshot for instant paint; Finances view revalidates in background.
     notifyAdminOrdersUpdated("invalidate-admin-orders-cache");
   }
+}
+
+export type AdminFinancesOrderPatch = {
+  orderId: string;
+  orderNumber?: string;
+  status: string;
+  amount?: number;
+};
+
+type FinancesAnalyticsCache = {
+  transactions?: Array<Record<string, unknown>>;
+  summary?: Record<string, unknown>;
+  revenueChartData?: unknown[];
+  paymentMethods?: unknown[];
+  vendorPayouts?: unknown[];
+  subscriptionRevenueEntries?: unknown[];
+  timestamp?: string;
+};
+
+function recomputeFinancesSummaryFromTransactions(
+  transactions: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  let totalRevenue = 0;
+  let totalCommission = 0;
+  let totalVendorPayout = 0;
+  let pendingPayouts = 0;
+
+  for (const txn of transactions) {
+    if (isCancelledFinancesOrder(txn.status)) continue;
+    const amount = Number(txn.amount) || 0;
+    const commission = Number(txn.commission) || 0;
+    const vendorPayout = Number(txn.vendorPayout) || Math.max(0, amount - commission);
+    totalRevenue += amount;
+    totalCommission += commission;
+    totalVendorPayout += vendorPayout;
+    if (isAccruedFinancesOrder(txn.status)) {
+      pendingPayouts += vendorPayout;
+    }
+  }
+
+  return { totalRevenue, totalCommission, totalVendorPayout, pendingPayouts };
+}
+
+/** Instant Finances card update after optimistic order status patch (before network round-trip). */
+export function patchAdminFinancesCacheFromOrderUpdates(
+  updates: AdminFinancesOrderPatch[],
+): boolean {
+  if (updates.length === 0) return false;
+  const cached = moduleCache.peek<FinancesAnalyticsCache>(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS);
+  if (!cached || !Array.isArray(cached.transactions)) return false;
+
+  let changed = false;
+  const transactions = [...cached.transactions];
+
+  for (const patch of updates) {
+    const idx = transactions.findIndex((txn) => financesTransactionMatchesOrder(txn, patch));
+    if (idx < 0) continue;
+    changed = true;
+    if (isCancelledFinancesOrder(patch.status)) {
+      transactions.splice(idx, 1);
+      continue;
+    }
+    transactions[idx] = {
+      ...transactions[idx],
+      status: patch.status,
+      ...(typeof patch.amount === "number" ? { amount: patch.amount } : {}),
+    };
+  }
+
+  if (!changed) return false;
+
+  const next: FinancesAnalyticsCache = {
+    ...cached,
+    transactions,
+    summary: recomputeFinancesSummaryFromTransactions(transactions),
+    timestamp: new Date().toISOString(),
+  };
+  moduleCache.prime(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS, next);
+  writePersistedJson(LS_ADMIN_FINANCES_ANALYTICS, next);
+  return true;
+}
+
+/** Drop deleted orders from cached finances transactions immediately. */
+export function removeOrdersFromAdminFinancesCache(
+  removed: Array<{ orderId: string; orderNumber?: string }>,
+): boolean {
+  if (removed.length === 0) return false;
+  const cached = moduleCache.peek<FinancesAnalyticsCache>(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS);
+  if (!cached || !Array.isArray(cached.transactions)) return false;
+
+  const before = cached.transactions.length;
+  const transactions = cached.transactions.filter(
+    (txn) => !removed.some((row) => financesTransactionMatchesOrder(txn, row)),
+  );
+  if (transactions.length === before) return false;
+
+  const next: FinancesAnalyticsCache = {
+    ...cached,
+    transactions,
+    summary: recomputeFinancesSummaryFromTransactions(transactions),
+    timestamp: new Date().toISOString(),
+  };
+  moduleCache.prime(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS, next);
+  writePersistedJson(LS_ADMIN_FINANCES_ANALYTICS, next);
+  return true;
+}
+
+/** Bust session finances cache so the next fetch reflects order mutations. */
+export function invalidateAdminFinancesCache(): void {
+  moduleCache.invalidate(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS);
 }
 
 /** Hydrate finances UI from session module cache or localStorage (same TTL as catalog snapshots). */
@@ -3044,10 +3165,10 @@ export async function getCachedFinancialAnalytics(forceRefresh = false): Promise
   return moduleCache.get(
     CACHE_KEYS.ADMIN_FINANCES_ANALYTICS,
     async () => {
-      const data = await withNetworkRetry(() => fetchFinancialAnalyticsFromApi(), {
-        retries: 1,
-        delayMs: 500,
-      });
+      const data = await withNetworkRetry(
+        () => fetchFinancialAnalyticsFromApi(forceRefresh),
+        { retries: 1, delayMs: 500 },
+      );
       writePersistedJson(LS_ADMIN_FINANCES_ANALYTICS, data);
       return data;
     },
@@ -3055,12 +3176,13 @@ export async function getCachedFinancialAnalytics(forceRefresh = false): Promise
   );
 }
 
-export async function fetchFinancialAnalyticsFromApi(): Promise<Record<string, unknown>> {
+export async function fetchFinancialAnalyticsFromApi(bustCache = false): Promise<Record<string, unknown>> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 45000);
+  const cacheBust = bustCache ? `?_=${Date.now()}` : "";
   try {
     const response = await fetch(
-      `${API_ROOT}/finances/analytics`,
+      `${API_ROOT}/finances/analytics${cacheBust}`,
       {
         method: "GET",
         headers: {

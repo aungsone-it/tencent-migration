@@ -35,6 +35,10 @@ import {
   getCachedFinancialAnalytics,
 } from "../utils/module-cache";
 import {
+  isAccruedFinancesOrder,
+  isCancelledFinancesOrder,
+} from "../utils/financesOrderStatus";
+import {
   LS_ADMIN_FINANCES_ANALYTICS,
   readPersistedPayloadSavedAt,
 } from "../utils/persistedLocalCache";
@@ -61,14 +65,6 @@ const waveMoneyLogo = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/s
 const trueMoneyLogo = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23f97316' rx='8'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='sans-serif' font-size='14' font-weight='bold'%3ETRUE%3C/text%3E%3C/svg%3E";
 
 const COLORS = ['#3b82f6', '#facc15', '#ef4444', '#22c55e'];
-
-function isFinanciallyAccruedTransaction(transaction: any): boolean {
-  const status = String(transaction?.status || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-  return status === "processing" || status === "ready-to-ship" || status === "fulfilled";
-}
 
 function filterFinancesTransactionsByRange(transactions: any[], range: DateRange | undefined): any[] {
   if (!range?.from || !range?.to) return transactions;
@@ -113,6 +109,7 @@ export function Finances() {
   financialDataRef.current = financialData;
 
   const FINANCES_BACKGROUND_MAX_AGE_MS = 120_000;
+  const ordersRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cache-first: session module + localStorage via `getCachedFinancialAnalytics(false)` (no network when warm).
   // Forced refresh: session stale flag (storefront/admin orders), `adminOrdersUpdated`, cross-tab storage,
@@ -182,15 +179,30 @@ export function Finances() {
 
     void runInitial();
 
-    const onOrdersUpdated = () => void load(true);
+    const onOrdersUpdated = () => {
+      const optimistic = readFinancialAnalyticsHydrate();
+      if (optimistic) {
+        setFinancialData(optimistic);
+      }
+      if (ordersRefreshTimerRef.current) {
+        clearTimeout(ordersRefreshTimerRef.current);
+      }
+      ordersRefreshTimerRef.current = setTimeout(() => {
+        ordersRefreshTimerRef.current = null;
+        void load(true);
+      }, 250);
+    };
     const onStorage = (e: StorageEvent) => {
       if (e.key !== adminOrdersUpdatedStorageKey()) return;
-      void load(true);
+      onOrdersUpdated();
     };
     window.addEventListener("adminOrdersUpdated", onOrdersUpdated);
     window.addEventListener("storage", onStorage);
     return () => {
       cancelled = true;
+      if (ordersRefreshTimerRef.current) {
+        clearTimeout(ordersRefreshTimerRef.current);
+      }
       window.removeEventListener("adminOrdersUpdated", onOrdersUpdated);
       window.removeEventListener("storage", onStorage);
     };
@@ -198,12 +210,15 @@ export function Finances() {
 
   // Extract data from API response
   const allTransactions = useMemo(
-    () => financialData?.transactions || [],
-    [financialData?.transactions]
+    () =>
+      (financialData?.transactions || []).filter(
+        (t: any) => !isCancelledFinancesOrder(t.status),
+      ),
+    [financialData?.transactions],
   );
   const transactions = useMemo(
-    () => allTransactions.filter((t: any) => isFinanciallyAccruedTransaction(t)),
-    [allTransactions]
+    () => allTransactions.filter((t: any) => isAccruedFinancesOrder(t.status)),
+    [allTransactions],
   );
   const subscriptionRevenueEntries = useMemo(
     () => financialData?.subscriptionRevenueEntries || [],

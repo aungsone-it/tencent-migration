@@ -2438,6 +2438,22 @@ export async function handleKPayPwaReturn(c: Context) {
   return c.redirect(targetUrl, 302);
 }
 
+async function maybeFinalizeSubscriptionAfterPaid(merchantOrderId: string): Promise<void> {
+  const id = text(merchantOrderId);
+  if (!id.startsWith("SUB")) return;
+  try {
+    const { finalizeSubscriptionPayment } = await import("./subscription_payment_confirm.ts");
+    const result = await finalizeSubscriptionPayment(id);
+    if (result.ok) {
+      console.log(`✅ Subscription activated for ${id}`);
+    } else if (result.status !== "pending") {
+      console.warn(`Subscription finalize: ${id}`, result.error);
+    }
+  } catch (error) {
+    console.warn(`Subscription finalize: ${id}`, error);
+  }
+}
+
 async function maybeFinalizePwaOrderAfterPaid(merchantOrderId: string): Promise<void> {
   const fin = await finalizePwaCheckoutOrder(merchantOrderId);
   if (fin.ok && fin.created) {
@@ -2735,6 +2751,7 @@ export async function getKPayStatus(c: Context) {
 
     if (safeStatus === "paid") {
       await maybeFinalizePwaOrderAfterPaid(merchantOrderId);
+      edgeWaitUntil(maybeFinalizeSubscriptionAfterPaid(merchantOrderId));
     }
 
     return c.json({
@@ -3331,6 +3348,7 @@ export async function handleKPayWebhook(c: Context) {
       } else if (!fin.ok && fin.error !== "no_checkout_draft" && fin.error !== "payment_not_confirmed") {
         console.warn(`PWA webhook finalize: ${merchantOrderId}`, fin.error, fin.message);
       }
+      edgeWaitUntil(maybeFinalizeSubscriptionAfterPaid(merchantOrderId));
     }
 
     return c.json({ success: true });

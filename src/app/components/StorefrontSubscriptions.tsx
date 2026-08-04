@@ -219,21 +219,25 @@ export function StorefrontSubscriptions({
     if (!session?.merchantOrderId || confirming) return;
     setConfirming(true);
     try {
-      const latest = await fetchKPaySessionStatus({
-        projectId,
-        publicAnonKey,
-        merchantOrderId: session.merchantOrderId,
-      });
-      setSession((current) => current ? { ...current, ...latest } : latest);
-      if (latest.status !== "paid") {
-        if (!quiet) toast.info("KBZPay has not confirmed this payment yet.");
-        return;
+      try {
+        const latest = await fetchKPaySessionStatus({
+          projectId,
+          publicAnonKey,
+          merchantOrderId: session.merchantOrderId,
+        });
+        setSession((current) => current ? { ...current, ...latest } : latest);
+      } catch {
+        /* status refresh is best-effort; confirm syncs from KBZ server-side */
       }
       const response = await fetch(
         `${cloudbaseApiBaseUrl}/subscriptions/payment/${encodeURIComponent(session.merchantOrderId)}/confirm`,
         { method: "POST", headers: headers(true), body: "{}" },
       );
       const data = await response.json().catch(() => ({}));
+      if (response.status === 409 && data.status === "pending") {
+        if (!quiet) toast.info("KBZPay has not confirmed this payment yet.");
+        return;
+      }
       if (!response.ok) throw new Error(data.error || "Could not activate subscription");
       setSubscription(data.subscription);
       clearSubscriptionPwaPending(session.merchantOrderId);
@@ -248,10 +252,10 @@ export function StorefrontSubscriptions({
   }, [session?.merchantOrderId, confirming, storeName]);
 
   useEffect(() => {
-    if (!session?.merchantOrderId || session.status === "paid") return;
+    if (!session?.merchantOrderId) return;
     const timer = window.setInterval(() => void confirmPayment(true), 4000);
     return () => window.clearInterval(timer);
-  }, [session?.merchantOrderId, session?.status, confirmPayment]);
+  }, [session?.merchantOrderId, confirmPayment]);
 
   if (plans.length === 0) return null;
 

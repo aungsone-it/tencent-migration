@@ -2667,18 +2667,31 @@ export function patchAdminOrdersCacheStatuses(
   updates: Array<AdminOrderStatusPatch>
 ): void {
   if (updates.length === 0) return;
-  const byId = new Map(updates.map((u) => [String(u.orderId), u]));
-  const byOrderNumber = new Map(
-    updates
-      .filter((u) => String(u.orderNumber || "").trim())
-      .map((u) => [String(u.orderNumber).trim().toLowerCase(), u])
-  );
+  const byId = new Map<string, AdminOrderStatusPatch>();
+  const byOrderNumber = new Map<string, AdminOrderStatusPatch>();
+  for (const update of updates) {
+    const id = String(update.orderId || "").trim();
+    if (id) {
+      byId.set(id, update);
+      byId.set(id.toLowerCase(), update);
+    }
+    const onum = String(update.orderNumber || "").trim();
+    if (onum) {
+      byOrderNumber.set(onum.toLowerCase(), update);
+      byId.set(onum, update);
+      byId.set(onum.toLowerCase(), update);
+    }
+  }
   const now = new Date().toISOString();
 
   const resolvePatch = (raw: Record<string, unknown>) => {
-    const id = String(raw?.id ?? "");
+    const id = String(raw?.id ?? "").trim();
     const onum = String(raw?.orderNumber ?? "").trim().toLowerCase();
-    return byId.get(id) ?? (onum ? byOrderNumber.get(onum) : undefined);
+    return (
+      (id ? byId.get(id) ?? byId.get(id.toLowerCase()) : undefined) ??
+      (onum ? byOrderNumber.get(onum) : undefined) ??
+      (id ? byOrderNumber.get(id.toLowerCase()) : undefined)
+    );
   };
 
   const patchOrderRows = (orders: unknown[]): unknown[] =>
@@ -2794,6 +2807,15 @@ function adjustStatusBreakdownForTransition(
 
 /** Recompute pending-order badge from the patched admin orders cache (no network). */
 export function syncPendingOrdersBadgeFromAdminCache(): number | null {
+  // Prefer page-1 "all statuses" aggregates — updated by patchAdminOrdersCacheStatuses.
+  for (const key of moduleCache.getStats().keys) {
+    if (!key.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
+    if (!key.includes("-st-all-") || !key.includes("-p1-")) continue;
+    const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(key);
+    const pending = pagePayload?.aggregates?.statusBreakdown?.pending;
+    if (typeof pending === "number") return pending;
+  }
+
   const payload = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
   if (payload?.orders && Array.isArray(payload.orders)) {
     const deduped = dedupeOrdersByCanonicalForBadge(payload.orders);
@@ -2808,9 +2830,6 @@ export function syncPendingOrdersBadgeFromAdminCache(): number | null {
     const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(key);
     const pending = pagePayload?.aggregates?.statusBreakdown?.pending;
     if (typeof pending !== "number") continue;
-    if (key.includes("-st-all-") && key.includes("-p1-")) {
-      return pending;
-    }
     if (fallbackPending == null) fallbackPending = pending;
   }
   return fallbackPending;

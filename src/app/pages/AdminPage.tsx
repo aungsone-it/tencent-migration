@@ -216,7 +216,7 @@ export function AdminPage() {
       ? inventorySearchQuery
       : adminHeaderProductSearch;
 
-  const { badgeCounts, loadBadgeCounts, incrementOrdersBadge } = useBadgeCounts();
+  const { badgeCounts, loadBadgeCounts, incrementOrdersBadge, refreshOrdersBadgeOnly } = useBadgeCounts();
 
   const platformBranding = usePlatformBranding();
 
@@ -642,7 +642,9 @@ export function AdminPage() {
   };
 
   const handleOrderUpdate = () => {
-    void loadBadgeCounts(true);
+    // Optimistic badge is patched via patchAdminOrdersCacheStatuses; avoid immediate server
+    // refetch overwriting the count before aggregates catch up.
+    void refreshOrdersBadgeOnly(false);
   };
 
   /** ProductList refreshes its own data; remounting forced a refetch every visit — leave empty */

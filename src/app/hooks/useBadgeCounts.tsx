@@ -385,7 +385,10 @@ export function useBadgeCounts() {
         refreshOrdersBadgeFromCache();
       }
 
-      if (reason === "remove-admin-orders" && typeof detail?.pendingOrders === "number") {
+      if (
+        (reason === "remove-admin-orders" || reason === "patch-admin-orders-status") &&
+        typeof detail?.pendingOrders === "number"
+      ) {
         return;
       }
 

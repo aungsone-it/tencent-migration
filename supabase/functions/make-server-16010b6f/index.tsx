@@ -5304,7 +5304,10 @@ function buildAdminOrdersAggregates(filtered: any[]) {
     filteredAvgOrderValue:
       filtered.length > 0 ? filteredTotalRevenue / filtered.length : 0,
     statusBreakdown: {
-      pending: filtered.filter((o: any) => normalizeOrderStatus(o.status) === "pending").length,
+      pending: filtered.filter((o: any) => {
+        const st = normalizeOrderStatus(o.status);
+        return st === "pending" || st === "pending-payment";
+      }).length,
       processing: filtered.filter((o: any) => {
         const st = normalizeOrderStatus(o.status);
         return st === "processing" || st === "ready-to-ship";

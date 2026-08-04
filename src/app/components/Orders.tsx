@@ -1255,7 +1255,7 @@ export function Orders({
   const handleStatusChange = (rowKey: string, newStatus: OrderStatus) => {
     // Find the order being updated
     const orderBeingUpdated = findOrderByRowKey(orders, rowKey);
-    const orderId = orderBeingUpdated?.id || rowKey;
+    const orderId = orderBeingUpdated?.id || orderBeingUpdated?.orderNumber || rowKey;
     const wasNotCancelled = orderBeingUpdated?.status !== 'cancelled';
     const isNowCancelled = newStatus === 'cancelled';
     
@@ -1279,6 +1279,28 @@ export function Orders({
           : order
       )
     );
+    setOrdersAggregates((agg) => {
+      if (!agg?.statusBreakdown || !orderBeingUpdated) return agg;
+      const from = normalizeOrderListStatus(orderBeingUpdated.status);
+      const to = normalizeOrderListStatus(newStatus);
+      if (from === to) return agg;
+      const breakdown = { ...agg.statusBreakdown };
+      const drop = (bucket: keyof typeof breakdown) => {
+        breakdown[bucket] = Math.max(0, (breakdown[bucket] ?? 0) - 1);
+      };
+      const add = (bucket: keyof typeof breakdown) => {
+        breakdown[bucket] = (breakdown[bucket] ?? 0) + 1;
+      };
+      if (from === "pending") drop("pending");
+      else if (from === "processing" || from === "ready-to-ship") drop("processing");
+      else if (from === "fulfilled") drop("fulfilled");
+      else if (from === "cancelled") drop("cancelled");
+      if (to === "pending") add("pending");
+      else if (to === "processing" || to === "ready-to-ship") add("processing");
+      else if (to === "fulfilled") add("fulfilled");
+      else if (to === "cancelled") add("cancelled");
+      return { ...agg, statusBreakdown: breakdown };
+    });
     patchAdminOrdersCacheStatuses([
       {
         orderId,

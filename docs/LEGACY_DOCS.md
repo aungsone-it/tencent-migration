@@ -20,7 +20,9 @@ The following markdown files live in the **repository root** and are **historica
 | [docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md](./NEXA_SIMPLE_UI_INSTRUCTIONS.md) | Short non-technical quick reference |
 | [docs/CLIENT_MANUAL.md](./CLIENT_MANUAL.md) | Frontend client architecture manual (developers) |
 | [docs/VENDOR_ADD_TO_HOME.md](./VENDOR_ADD_TO_HOME.md) | Vendor storefront Add to Home / install shortcut |
-| [.env.example](../.env.example) | Environment variable reference |
+| [docs/FREE_SHIPPING.md](./FREE_SHIPPING.md) | Per-vendor free shipping |
+| [.env.example](../.env.example) | Frontend / script environment variable reference |
+| [cloudbase/function-env.template.env](../cloudbase/function-env.template.env) | Cloud Function env vars (SES, SMS, KBZPay, storage) |
 
 ## Superseded doc filenames
 

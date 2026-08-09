@@ -48,7 +48,7 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | Cloud Functions | Package with `setup:tcb-first` → upload `.cloudbase/dist/*.zip` to TCB console |
 | Frontend API | `VITE_CLOUDBASE_API_BASE_URL` + publishable key in `.env` / EdgeOne build |
 | KPay on TCB | Already live — do not re-import Supabase KPay KV |
-| Chat KV | Not migrated — chat remains on prior store until cutover |
+| Chat KV | Historical `chat:*` rows not imported — chat API runs on TCB KV (empty until backfill) |
 | Image uploads (new) | Stored in **TencentDB KV** + signed URLs; compress ~500KB on upload. Legacy Supabase Storage URLs in imported data may need re-upload |
 | CloudBase object storage | **Optional** — set `CLOUDBASE_STORAGE_API_BASE_URL` only if migrating off KV blobs later |
 | Auth users | Separate migration / password reset via SES OTP (staff, vendor KV, customer KV, CloudBase Auth) |
@@ -100,7 +100,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 
 - **Cash on Delivery**, **KBZPay QR**, and **KBZPay PWA** at vendor checkout — these are the active customer payment paths
 - Return landing: `/kpay/return`, `/summary`, `/checkout/success`, `/order-confirmation` (vendor-host or path-based)
-- Post-PWA summary consolidates on the **platform apex `/summary`** (e.g. `https://nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; Continue Shopping returns to the vendor where checkout started)
+- Post-PWA summary consolidates on the **platform apex `/summary`** (current: `https://nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; Continue Shopping returns to the vendor where checkout started)
 - KBZPay webhook + Realtime on `kpay_txn:{orderId}` (+ HTTP polling fallback during checkout)
 - Refund/cancel logic in code; production refund success depends on gateway mTLS/client certificate setup
 - **Stripe/Card/Bank transfer:** helper or legacy code may exist, but these are **not wired as live vendor checkout payment paths** — do not treat as production options
@@ -175,8 +175,8 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 Configure in `.env` (see `.env.example`):
 
 ```bash
-# Vendor subdomain suffix (no protocol), e.g. nexa-apex.online or nexa-mm.com
-VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN=nexa-apex.online
+# Vendor subdomain suffix (no protocol) — current production
+VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN=nexa-mm.com
 
 # Hostnames that show platform landing at / (comma-separated)
 VITE_PLATFORM_RESERVED_APEX_DOMAINS=nexa-mm.com,nexa-apex.online
@@ -185,18 +185,19 @@ VITE_PLATFORM_RESERVED_APEX_DOMAINS=nexa-mm.com,nexa-apex.online
 VITE_VENDOR_SUBDOMAIN_SLUG_MAP={"gogo":"go-go"}
 ```
 
-Each vendor gets `https://{label}.{baseDomain}` when subdomains are enabled. Custom domains override the default subdomain URL in vendor settings.
+Each vendor gets `https://{label}.{baseDomain}` when subdomains are enabled (e.g. `https://gogo.nexa-mm.com`). Custom domains override the default subdomain URL in vendor settings.
 
-Edge middleware (`middleware.ts`) maps vendor subdomains to the SPA; KBZ return query params on vendor hosts can redirect to the unified apex `/summary`.
+EdgeOne middleware (`middleware.ts` named export) serves domain-verify + SPA rewrite to `index.html`. KBZPay → unified apex `/summary` is handled **client-side** on EdgeOne (`kpayUnifiedSummaryRedirect.ts`, `index.html`, `KPayVendorReturnRedirect`). The Vercel `default` export in the same file can redirect KBZ return query params when hosted on Vercel.
 
 ## Architecture
 
 - **Frontend:** React 18 + TypeScript + Vite + Tailwind + Radix
 - **Customer storefront UI:** `VendorStorefrontPage`, `VendorStoreView`, `Checkout`
 - **Platform landing:** `LandingPage` (apex only)
-- **Backend:** CloudBase/Tencent HTTP Functions (`make-server-16010b6f`, `kpay-webhook`) + CloudBase Auth + Storage
+- **Backend:** CloudBase/Tencent HTTP Functions (`make-server-16010b6f`, `kpay-webhook`) + CloudBase Auth; **image uploads default to TencentDB KV** (optional CloudBase Storage via `CLOUDBASE_STORAGE_API_BASE_URL`)
 - **Database:** TencentDB for PostgreSQL — KV table `kv_store_16010b6f` + SQL read-model tables (`app_*`)
 - **API config:** `VITE_CLOUDBASE_API_BASE_URL` and `VITE_CLOUDBASE_PUBLISHABLE_KEY` in `.env` / EdgeOne (see `utils/tencent/cloudbase.ts`)
+- **Region:** Singapore / intl (`ap-singapore`) — CLI deploy needs `npx tcb config set isIntl true`
 - **Routing:** React Router — public vendor tree, super-admin, vendor-admin, vendor-host-specific routes
 - **Legacy note:** the old shared marketplace storefront components have been removed; customer shopping is only through `VendorStorefrontPage` / `VendorStoreView`
 
@@ -255,8 +256,8 @@ Copy `.env.example` → `.env`. Vite exposes only `VITE_*` variables.
 
 ```bash
 VITE_CLOUDBASE_ENV_ID=nexa-mm-i0goiaxufc1521e43
-VITE_CLOUDBASE_REGION=ap-shanghai
-VITE_CLOUDBASE_API_BASE_URL=https://<env>.api.tcloudbasegateway.com/v1/functions/make-server-16010b6f
+VITE_CLOUDBASE_REGION=ap-singapore
+VITE_CLOUDBASE_API_BASE_URL=https://nexa-mm-i0goiaxufc1521e43-1446771428.ap-singapore.app.tcloudbase.com/make-server-16010b6f
 VITE_CLOUDBASE_PUBLISHABLE_KEY=<Client Publishable Key>
 ```
 
@@ -265,19 +266,21 @@ Resolved in `utils/tencent/cloudbase.ts` and re-exported via `utils/supabase/inf
 **TencentDB migration (local scripts only):**
 
 ```bash
-TENCENT_DATABASE_URL=postgresql://user:PASSWORD@HOST:PORT/postgres
+TENCENT_DATABASE_URL=postgresql://user:PASSWORD@sg-postgres-jwchnpet.sql.tencentcdb.com:23100/postgres
 SOURCE_POSTGRES_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
 ```
 
-Use URL-encoded passwords for special characters. TencentDB managed instances often use a non-5432 port (e.g. `23100`).
+Use URL-encoded passwords for special characters. Linked instance: `postgres-jwchnpet` (managed host often uses port `23100`, not `5432`).
 
 **Optional `VITE_*`:**
 
-- `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN`, `VITE_VENDOR_SUBDOMAIN_SLUG_MAP`
+- `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN` (production: `nexa-mm.com`), `VITE_VENDOR_SUBDOMAIN_SLUG_MAP`
+- `VITE_PLATFORM_RESERVED_APEX_DOMAINS` (e.g. `nexa-mm.com,nexa-apex.online`)
 - `VITE_ADMIN_OPERATION_SECRET` — must match server `EDGE_ADMIN_OPERATION_SECRET`
-- `VITE_CLOUDBASE_THUMB_MAX` — image transform width
+- `VITE_CLOUDBASE_THUMB_MAX` — width for **legacy** CloudBase Storage render URLs only (KV signed URLs are not transformed)
+- `VITE_DEPLOYMENT_PLATFORM` — e.g. `tencent-cloudbase`
 
-**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, `CLOUDBASE_API_PUBLIC_BASE_URL`, **Tencent SES** (`TENCENT_SECRET_ID`, `TENCENT_SES_FROM_EMAIL`, `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID`), etc. Image uploads use **TencentDB KV by default** (`CLOUDBASE_STORAGE_API_BASE_URL` optional). Details: [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) and [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md).
+**CloudBase function secrets (TCB console):** see `cloudbase/function-env.template.env` — KBZPay, `EDGE_ADMIN_OPERATION_SECRET`, `CLOUDBASE_SERVICE_TOKEN`, `CLOUDBASE_API_PUBLIC_BASE_URL`, **Tencent SES**, optional **Tencent SMS** phone OTP, etc. Image uploads use **TencentDB KV by default** (`CLOUDBASE_STORAGE_API_BASE_URL` optional). Details: [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) and [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md).
 
 ## Deployment
 
@@ -302,6 +305,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/TCB_CONSOLE_SETUP.md](doc
 | [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) | Read-model deploy validation and monitoring |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |
 | [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md) | Per-vendor free shipping — data model, admin UI, checkout rules |
+| [cloudbase/function-env.template.env](cloudbase/function-env.template.env) | Cloud Function env vars (SES, SMS, KBZPay, storage) |
 | [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, deploy refresh, scroll restore, Realtime scale notes |
 | [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows |
 | [docs/CLIENT_INSTRUCTIONS.md](docs/CLIENT_INSTRUCTIONS.md) | **End-user manual** — how to shop, sell, and manage (presentation-style) |
@@ -313,11 +317,12 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/TCB_CONSOLE_SETUP.md](doc
 
 ## Performance (PageSpeed / LCP)
 
-Target vendor hosts (e.g. `https://gogo.nexa-apex.online` or a custom domain) should enable **CloudBase/Tencent Storage image transformations** so resized product images ship by default.
+Production images are stored in **TencentDB KV** and served via signed URLs (no CDN width transform on those URLs). LCP relies on **client-side compression (~500KB)** at upload. Legacy CloudBase Storage `/storage/v1/object/...` URLs (if any remain in imported data) are rewritten to the render endpoint with defaults **256 / 96 / 720** (`gridDisplayImageUrl` / logo / banner).
 
 | Optimization | Effect |
 |--------------|--------|
-| Auto image thumbs (480px grid, 128px logos, 960px banners) | Cuts mobile LCP from multi‑MB originals |
+| Client upload compression (~500KB) | Keeps KV-stored originals small for mobile LCP |
+| Legacy Storage render rewrite (256px grid, 96px logos, 720px banners) | Only applies to old `/storage/v1/object/{public\|sign}/` URLs |
 | Priority load on first 4 product cards + store logo | Faster above-the-fold paint |
 | `vendor-storefront-head.js` before React | Avoids wrong tab title / favicon flash on vendor refresh |
 | Non-blocking fonts + no global Quill CSS on storefront | Better FCP |

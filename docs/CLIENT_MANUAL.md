@@ -23,25 +23,25 @@ It does **not** own durable business state. All writes go to the server.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Browser (Frontend Client)                                      │
+│  Browser (Frontend Client)                                  │
 │  React 18 + Vite SPA                                        │
 │  ┌────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │ Pages/UI   │  │ module-cache│  │ OrderRealtimeBridge │  │
-│  │ CartContext│  │ localStorage│  │ (pulse → refetch)   │  │
+│  │ CartContext│  │ localStorage│  │ (admin routes only) │  │
 │  └─────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
 │        └────────────────┼─────────────────────┘             │
 │                         │ HTTPS                             │
 └─────────────────────────┼───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  CloudBase Edge Functions (Backend Server)                    │
+│  CloudBase HTTP Functions (Backend Server)                  │
 │  make-server-16010b6f (Hono)  │  kpay-webhook               │
 │  KV writes → SQL read-model sync → signed URLs → webhooks   │
 └─────────────────────────┼───────────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  TencentDB for PostgreSQL                                   │
-│  kv_store_16010b6f (write source of truth)                  │
+│  TencentDB for PostgreSQL (ap-singapore / postgres-jwchnpet)│
+│  kv_store_16010b6f (write source of truth + KV image blobs) │
 │  app_* tables (read models) + pulse tables (Realtime)       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -70,8 +70,8 @@ All three portals share the same SPA and the same thin-client rules.
 
 | Surface | URL pattern | Who uses it |
 |---------|-------------|-------------|
-| **Platform apex** | `www.nexa-mm.com/` | Landing, super-admin, onboarding, KPay `/summary` |
-| **Vendor storefront** | `{label}.nexa-mm.com/*` or custom domain | Customers shopping one vendor |
+| **Platform apex** | `www.nexa-mm.com/` (also `nexa-apex.online` when reserved) | Landing, super-admin, onboarding, KPay `/summary` |
+| **Vendor storefront** | `{label}.nexa-mm.com/*` (current subdomain base) or custom domain | Customers shopping one vendor |
 | **Vendor admin** | `{label}.nexa-mm.com/admin` or `/vendor/:slug/admin` | Store owners |
 
 There is **no shared marketplace catalog**. Customers always shop **one vendor at a time**.
@@ -305,7 +305,7 @@ Client: Realtime on kpay_txn:{orderId}  (primary)
         + poll ~1.5s                      (fallback)
               │
               ▼
-Redirect to apex `/summary` (e.g. `nexa-apex.online/summary`) → Continue Shopping → vendor store
+Redirect to apex `/summary` (current: `https://nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`) → Continue Shopping → vendor store
 ```
 
 **Client rule:** Client never marks an order as paid. It waits for server state.
@@ -358,7 +358,7 @@ KV row changes on server
 Postgres pulse table bumps (app_order_pulse, app_kv_domain_pulse, …)
         │
         ▼
-OrderRealtimeBridge (mounted once in ProvidersWrapper)
+OrderRealtimeBridge (mounted on super-admin routes via AdminRealtimeBridge)
         │
         ▼
 Debounce (~400ms) → notifyAdminOrdersUpdated()
@@ -423,8 +423,9 @@ Server stores bytes in KV: storage:obj:{bucket}:{path}
 Returns signed URL → stored in product/settings record (URL only, never base64 in JSON)
         │
         ▼
-Client displays via resolveCloudBaseMediaUrl() with thumb sizes:
-  grid 480px · logo 128px · banner 960px
+Client displays via resolveCloudBaseMediaUrl().
+  KV signed URLs: no CDN width transform (rely on ~500KB upload compression).
+  Legacy Storage URLs only: grid 256px · logo 96px · banner 720px
 ```
 
 **Client rule:** Client prepares the file; server stores and serves it.
@@ -487,12 +488,12 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 
 | File | Role in thin client |
 |------|---------------------|
-| `src/app/routes.tsx` | Route tree; mounts `OrderRealtimeBridge` |
+| `src/app/routes.tsx` | Route tree; mounts `OrderRealtimeBridge` on admin routes only |
 | `src/utils/api-client.ts` | HTTP layer: retries, timeouts, errors |
 | `src/utils/api.ts` | Typed API wrappers |
 | `src/app/utils/module-cache.ts` | Session cache + fetch coalescing |
 | `src/app/utils/persistedLocalCache.ts` | localStorage TTL cache |
-| `src/app/components/OrderRealtimeBridge.tsx` | Global pulse listener |
+| `src/app/components/OrderRealtimeBridge.tsx` | Admin pulse listener |
 | `src/app/components/CartContext.tsx` | Cart state (guest local / signed-in server) |
 | `src/app/components/VendorStoreView.tsx` | Storefront catalog + wishlist + scroll restore |
 | `src/app/utils/deployVersion.ts` | Post-deploy cache purge + hard reload |

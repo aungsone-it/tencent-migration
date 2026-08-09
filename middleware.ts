@@ -1,16 +1,21 @@
 /**
- * Vercel Edge Middleware: map vendor subdomains to existing store routes.
+ * Dual-host middleware:
+ * - **EdgeOne** (`export async function middleware`): domain-verify file + SPA rewrite to `/index.html`.
+ * - **Vercel** (`export default`): optional KBZPay query → apex `/summary` redirect + SPA `next()`.
  *
- * Subdomain = same string as the vendor’s store slug (`storeName` in /store/:storeName).
- * Vendor subdomains serve the SPA at / (clean URL). No redirect to /store/... — routing uses hostname + optional VENDOR_SUBDOMAIN_SLUG_MAP.
+ * Production hosting is **EdgeOne**. KBZPay → unified apex `/summary` is primarily handled
+ * client-side (`kpayUnifiedSummaryRedirect.ts`, `index.html`, `KPayVendorReturnRedirect`).
  *
- * Optional env VENDOR_SUBDOMAIN_SLUG_MAP: JSON object, short subdomain label → real store slug.
- * Example: {"gogo":"go-go","abcstore":"abc-store"} so gogo.nexa-mm.com → /store/go-go
+ * Vendor subdomains serve the SPA at host root (`/`). React Router resolves the vendor from
+ * hostname (+ optional `VENDOR_SUBDOMAIN_SLUG_MAP`). Path-based admin/dev uses `/vendor/:slug`.
  *
- * Apex / www (https://nexa-mm.com, https://www.nexa-mm.com) → no redirect (branding + marketplace paths).
+ * Optional env `VENDOR_SUBDOMAIN_SLUG_MAP`: JSON object, DNS label → store slug.
+ * Example: `{"gogo":"go-go"}` so `gogo.nexa-mm.com` resolves to store slug `go-go`.
  *
- * Set Vercel env: VENDOR_SUBDOMAIN_BASE_DOMAIN=your-primary.com (fallback only — host-derived apex wins)
- * DNS: for each marketplace apex, add apex + wildcard in Vercel Domains (e.g. bash2.online and *.bash2.online)
+ * Apex / www (`nexa-mm.com`, `www.nexa-mm.com`, and any host in
+ * `VITE_PLATFORM_RESERVED_APEX_DOMAINS`) → platform landing at `/` (no vendor rewrite).
+ *
+ * Set `VENDOR_SUBDOMAIN_BASE_DOMAIN` on edge hosts when needed (fallback — host-derived apex wins).
  */
 import { next } from "@vercel/edge";
 

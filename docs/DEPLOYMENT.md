@@ -48,9 +48,11 @@ Each build embeds a unique `buildId` in `dist/version.json`. Open tabs poll and 
 | `/version.json` | `no-cache` |
 | `/assets/*` | long cache OK (Vite content hashes) |
 
-This repo ships `public/_headers` with those rules. Mirror them in EdgeOne CDN if `_headers` is not applied automatically.
+This repo ships `public/_headers` and matching rules in `edgeone.json` (`no-cache` for `/index.html` + `/version.json`, long cache for `/assets/*`). Confirm the same CDN rules in EdgeOne if the JSON headers are not applied automatically.
 
 See [TCB_CONSOLE_SETUP.md § Phase 4](./TCB_CONSOLE_SETUP.md#phase-4--edgeone-frontend) for EdgeOne env vars (`VITE_CLOUDBASE_*`, subdomain apex, reserved domains).
+
+**Note:** `vercel.json` host redirects are for Vercel-style hosting only. Production EdgeOne relies on SPA `LegacyStoreRedirect` / client guards for legacy path cleanup.
 
 ### SPA fallback is mandatory
 
@@ -127,7 +129,7 @@ Copy [`.env.example`](../.env.example) → `.env` for local dev.
 | `VITE_CLOUDBASE_ENV_ID` | CloudBase env ID |
 | `VITE_CLOUDBASE_API_BASE_URL` | HTTP Gateway URL → `make-server-16010b6f` |
 | `VITE_CLOUDBASE_PUBLISHABLE_KEY` | Client publishable key (Bearer on API calls) |
-| `VITE_CLOUDBASE_REGION` | e.g. `ap-shanghai` or match your gateway region |
+| `VITE_CLOUDBASE_REGION` | `ap-singapore` (current NEXA / intl env) |
 
 Resolved in `utils/tencent/cloudbase.ts` (re-exported via `utils/supabase/info.tsx` compat shim).
 
@@ -135,14 +137,14 @@ Resolved in `utils/tencent/cloudbase.ts` (re-exported via `utils/supabase/info.t
 
 | Variable | Purpose |
 |----------|---------|
-| `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN` | Apex for vendor subdomains |
+| `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN` | Apex for vendor subdomains (production: `nexa-mm.com`) |
 | `VITE_VENDOR_SUBDOMAIN_SLUG_MAP` | DNS label → store slug JSON |
 | `VITE_PLATFORM_RESERVED_APEX_DOMAINS` | Hostnames that show platform landing at `/` |
 | `VITE_ADMIN_OPERATION_SECRET` | Must match server for destructive admin routes |
-| `VITE_CLOUDBASE_THUMB_MAX` | Image transform width |
-| `VITE_DEPLOYMENT_PLATFORM` | e.g. `edgeone` |
+| `VITE_CLOUDBASE_THUMB_MAX` | Width for **legacy** Storage render URLs only (defaults 256) |
+| `VITE_DEPLOYMENT_PLATFORM` | e.g. `tencent-cloudbase` |
 
-Edge middleware (`middleware.ts`): server env `VENDOR_SUBDOMAIN_BASE_DOMAIN`, `VENDOR_SUBDOMAIN_SLUG_MAP` when using Vercel-style edge hosting (optional).
+Edge middleware (`middleware.ts`): EdgeOne named export = SPA rewrite; Vercel default export = optional KBZ→`/summary` redirect. Server env `VENDOR_SUBDOMAIN_BASE_DOMAIN`, `VENDOR_SUBDOMAIN_SLUG_MAP` when using Vercel-style edge hosting (optional).
 
 ### Cloud Functions — minimum
 
@@ -152,8 +154,11 @@ Edge middleware (`middleware.ts`): server env `VENDOR_SUBDOMAIN_BASE_DOMAIN`, `V
 | `CLOUDBASE_SERVICE_TOKEN` | Server API key |
 | `CLOUDBASE_PUBLISHABLE_KEY` | Same as client key |
 | `CLOUDBASE_API_BASE_URL` | Gateway URL |
-| `CLOUDBASE_API_PUBLIC_BASE_URL` | Public URL for signed image links |
+| `CLOUDBASE_API_PUBLIC_BASE_URL` | Public URL for signed image links (same host as API base in production) |
+| `CLOUDBASE_REGION` | `ap-singapore` |
 | `EDGE_ADMIN_OPERATION_SECRET` | Admin ops + monitoring |
+
+Leave `CLOUDBASE_STORAGE_API_BASE_URL` **unset** for KV image storage (current production default).
 
 Full list: [`cloudbase/function-env.template.env`](../cloudbase/function-env.template.env).
 
@@ -184,9 +189,13 @@ Expect `"ok": true`, `"provider": "tencent-ses"`, and `"passwordResetTemplateId"
 
 Password reset UI: `/reset-password` with optional `?returnTo=/admin&account=vendor` for vendor admin.
 
+### Phone OTP (Tencent SMS, optional)
+
+Customer registration phone OTP uses `TENCENT_SMS_SDK_APP_ID`, `TENCENT_SMS_SIGN_NAME`, `TENCENT_SMS_REGISTER_TEMPLATE_ID`, `TENCENT_SMS_REGION=ap-singapore` on `make-server-16010b6f` (reuses CAM keys from SES). See `cloudbase/function-env.template.env`.
+
 ### KBZPay
 
-Set `KPAY_*` on `make-server-16010b6f` and `kpay-webhook`. Update `KPAY_NOTIFY_URL` to your public `kpay-webhook` gateway URL. Run `npm run kpay:urls` to verify.
+Set `KPAY_*` on `make-server-16010b6f` and `kpay-webhook`. Update `KPAY_NOTIFY_URL` to your public `kpay-webhook` URL. Set `KPAY_PWA_FRONTEND_RETURN_URL` to the unified apex summary (current: `https://nexa-apex.online/summary`). Run `npm run kpay:urls` to verify.
 
 ## 6) Domain and vendor host notes
 

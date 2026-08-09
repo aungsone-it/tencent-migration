@@ -15,7 +15,7 @@ Status document for the NEXA platform backend cutover. **Runtime target: Tencent
 | Auth cutover | **Partial** | CloudBase Auth enabled; user password migration may need reset flow |
 | Image uploads (runtime) | **Done** | New uploads → TencentDB KV storage backend (`kv_storage_backend.ts`); URLs in entity JSON. Client compress ~500KB |
 | Legacy Supabase Storage URLs | **Partial** | Imported KV may still reference old Supabase URLs — re-upload via admin or batch fix |
-| Chat KV | **Deferred** | Not imported; chat still on Supabase KV until separate cutover |
+| Chat KV | **Deferred** | Historical `chat:*` not imported; chat handlers run on TCB KV (empty until backfill) |
 | Supabase decommission | **Pending** | Only after production validation on TCB |
 
 ## Target architecture
@@ -84,7 +84,7 @@ SOURCE_POSTGRES_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
 |------|--------|
 | `kpay_txn:*` | KPay already running on TCB |
 | `kpay_pwa_draft:*` | Orphan drafts reconciled via admin recovery UI |
-| `chat:*` | Separate cutover planned |
+| `chat:*` | Separate backfill planned — API already on TCB |
 
 ## Remaining risks
 

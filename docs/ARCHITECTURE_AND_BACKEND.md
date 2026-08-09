@@ -16,7 +16,7 @@ For routing and host models, see [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_
 | **Database** | TencentDB for PostgreSQL — KV table `kv_store_16010b6f` + SQL read-model `app_*` tables |
 | **Auth** | CloudBase/Tencent Auth for customer accounts; KV-backed vendor/staff auth for admin portals |
 | **Storage (images/files)** | **Default:** TencentDB KV object backend (`storage:obj:{bucket}:{path}` in `kv_store_16010b6f`, served via signed URLs). **Optional:** CloudBase Storage HTTP API when `CLOUDBASE_STORAGE_API_BASE_URL` is set on the function |
-| **Realtime** | CloudBase/Tencent Realtime on `kv_store_16010b6f` + pulse tables (`app_order_pulse`, `app_vendor_application_pulse`) |
+| **Realtime** | CloudBase/Tencent Realtime on pulse tables (`app_order_pulse`, `app_kv_domain_pulse`, `app_vendor_application_pulse`); admin portal mounts the pulse bridge; storefront/checkout use scoped channels |
 
 ---
 
@@ -107,7 +107,7 @@ The KV layer remains the write source; SQL tables are additive and do not replac
 
 **Legacy Supabase Storage URLs** in imported KV rows may 404 until those assets are re-uploaded through the app or URLs are updated.
 
-**Capacity note:** TencentDB disk (e.g. 100GB on `postgres-jwrhnped`) holds **all** KV data, SQL read models, and KV-stored images. At ~500KB per compressed upload, image volume is manageable for typical catalog sizes; scale disk in TencentDB console when needed.
+**Capacity note:** Linked instance `postgres-jwchnpet` (host `sg-postgres-jwchnpet.sql.tencentcdb.com`) holds **all** KV data, SQL read models, and KV-stored images. Plan quotas (e.g. Pro included disk) differ from the **provisioned** instance disk — scale disk in the TencentDB console when needed. At ~500KB per compressed upload, image volume is manageable for typical catalog sizes.
 
 ---
 
@@ -176,17 +176,21 @@ Password reset is **server-only** via Tencent Cloud SES approved templates (not 
 | Client | `POST /auth/verify-otp-and-reset` with email, OTP, new password |
 | Health | `GET /auth/email-health` → `{ ok, provider: "tencent-ses", passwordResetTemplateId }` |
 
-**Function env (required):** `TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`, `TENCENT_SES_FROM_EMAIL`, `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID` (see `cloudbase/function-env.template.env`).
+**Function env (required):** `TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`, `TENCENT_SES_FROM_EMAIL`, `TENCENT_SES_PASSWORD_RESET_TEMPLATE_ID`, `TENCENT_SES_REGION=ap-singapore` (see `cloudbase/function-env.template.env`).
 
 **UI routes:** `/reset-password` — vendor admin uses `?returnTo=/admin&account=vendor` from storefront login **Forgot Password?**
 
 Redeploy the **function zip** after changing SES code or template env vars.
 
+### Phone OTP (customer registration SMS)
+
+Optional Tencent Cloud SMS on `make-server-16010b6f` (`TENCENT_SMS_*` in `cloudbase/function-env.template.env`). Myanmar numbers use Global SMS (`ap-singapore`). Twilio vars are a fallback only when Tencent SMS is unset. `SMS_DEV_MODE=1` logs OTP in function logs without sending.
+
 ---
 
 ## 6) Realtime (current behavior)
 
-Every SPA session mounts `OrderRealtimeBridge`. As of June 2026 it uses **small pulse tables** instead of an always-on global KV subscription:
+**Super-admin portal routes** mount `OrderRealtimeBridge` via `AdminRealtimeBridge` in `routes.tsx` (not every SPA session). Storefront and guest tabs do **not** open the pulse bridge. As of June 2026 the bridge uses **small pulse tables** instead of an always-on global KV subscription:
 
 | Channel | Table | Purpose |
 |---------|-------|---------|
@@ -206,7 +210,7 @@ KV writes bump the appropriate pulse row (via DB triggers in migrations). The br
 | Signed-in cart/wishlist | `customer:{uid}:cart`, etc. | Filtered ✓ |
 | `VendorStoreView` | Product/policy listeners | Scoped to vendor catalog where configured |
 
-**Scale impact:** Pulse-based Realtime uses far fewer messages than broadcasting every KV row to every tab. Realtime **connections** (~500 on Pro) and checkout/catalog filtered channels remain the main capacity constraints under flash traffic.
+**Scale impact:** Pulse-based Realtime uses far fewer messages than broadcasting every KV row to every admin tab. Realtime **connections** (~500 on Pro) are driven mainly by **admin** pulse bridges plus checkout/catalog filtered channels under flash traffic — not by every guest storefront tab.
 
 ---
 
@@ -217,8 +221,8 @@ KV writes bump the appropriate pulse row (via DB triggers in migrations). The br
 **Active customer payment choices** in `Checkout.tsx`:
 
 - Cash on Delivery (order is created immediately; customer pays on delivery)
-- QR and PWA flows
-- Webhook: `cloudbase/functions/kpay-webhook/index.ts`
+- KBZPay QR and PWA flows
+- Webhook source: `supabase/functions/kpay-webhook/` (packaged to `.cloudbase/dist/kpay-webhook.zip`)
 - Return/summary: apex `/summary`, vendor `/kpay/return`
 - Realtime on `kpay_txn:{merchantOrderId}` + HTTP polling fallback (~1.5s during checkout)
 
@@ -228,8 +232,8 @@ See [PAYMENTS.md](./PAYMENTS.md).
 
 Code exists but is **not wired** to the live vendor checkout flow:
 
-- `cloudbase/functions/make-server-16010b6f/stripe_routes.tsx`
-- `src/app/components/StripePayment.tsx` (uses `VITE_CLOUDBASE_API_BASE_URL` env — inconsistent with main app)
+- `supabase/functions/make-server-16010b6f/stripe_routes.tsx`
+- `src/app/components/StripePayment.tsx` (uses `cloudbaseApiBaseUrl` via `utils/supabase/info` shim — same client config as the main app)
 - `src/app/components/PaymentSettings.tsx` (admin UI stub)
 
 Do not document Stripe as a supported customer payment method unless it is integrated into `Checkout.tsx`.
@@ -243,9 +247,9 @@ Do not document Stripe as a supported customer payment method unless it is integ
 | **Client session cache** | `src/app/utils/module-cache.ts` | In-memory Map; coalesced fetches; localStorage for some page-1 slices |
 | **Edge in-memory cache** | `server_cache.ts` (`getCached` / `setCache` / `clearCache`) | Per-isolate Map; cleared on order mutations |
 | **Client orders cache** | `module-cache.ts` | Paginated `admin-orders-page-*` keys; optimistic patches on status/recover (no full refetch) |
-| **CDN / static** | EdgeOne / `public/_headers` | Long cache on `/assets/*`; `no-cache` on `index.html` and `/version.json` |
+| **CDN / static** | EdgeOne (`edgeone.json` + `public/_headers`) | Long cache on `/assets/*`; `no-cache` on `index.html` and `/version.json` |
 | **Deploy version** | `deployVersion.ts` + `dist/version.json` | Open tabs poll every 2 min; hard-reload once after EdgeOne deploy (preserves auth + KBZPay session keys) |
-| **Image transforms** | Client-side compression + optional `VITE_CLOUDBASE_THUMB_MAX` | Upload target ~500KB; grid thumbs via transform width when CDN/storage render URLs are available |
+| **Image delivery** | Client compression (~500KB) + KV signed URLs | Default production path has **no** CDN width transform; `VITE_CLOUDBASE_THUMB_MAX` / 256·96·720 defaults apply only to legacy Storage render URLs |
 
 See [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md).
 
@@ -253,16 +257,16 @@ See [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md).
 
 ## 9) CloudBase/Tencent Pro plan — what limits what
 
-**Pro ($25/mo) includes (typical):** 100k Auth MAU, 2M Edge Function invocations/mo, 500 Realtime peak connections, 5M Realtime messages/mo, 8 GB disk, Micro compute credit.
+**Pro ($25/mo) includes (typical):** 100k Auth MAU, 2M Cloud Function invocations/mo, 500 Realtime peak connections, 5M Realtime messages/mo, 8 GB **plan** disk, Micro compute credit. Provisioned TencentDB disk on `postgres-jwchnpet` may be larger than the plan included figure.
 
 | Traffic | Pro sufficient? | First limit hit |
 |---------|-----------------|-----------------|
 | ~1k MAU + guests | **Yes** | Headroom |
-| ~10k MAU + moderate guests | **Marginal** | Realtime messages (global KV fanout) |
-| ~100k MAU + heavy guests | **No** without changes | Realtime connections + KV scan latency + Edge overages |
+| ~10k MAU + moderate guests | **Marginal** | Realtime messages if pulse fallback to full KV activates often |
+| ~100k MAU + heavy guests | **No** without changes | Realtime connections + KV scan latency + function overages |
 | Millions total | **No** | Full rearchitecture (relational DB, filtered Realtime, CDN, cache) |
 
-**Concurrent tabs (not MAU):** Default Pro allows ~**500 simultaneous Realtime WebSocket connections**. Guest browsing still opens Realtime in `VendorStoreView` + global bridge — so flash sales with 1,000+ open tabs can hit limits before MAU does.
+**Concurrent tabs (not MAU):** Default Pro allows ~**500 simultaneous Realtime WebSocket connections**. The pulse bridge mounts on **admin** routes only; guest storefronts may open scoped catalog/policy listeners and checkout uses filtered `kpay_txn` channels — flash sales still matter for checkout Realtime, not for a global guest pulse bridge.
 
 **Recommended before scale:**
 

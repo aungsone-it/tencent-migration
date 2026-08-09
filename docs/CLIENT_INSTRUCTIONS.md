@@ -42,7 +42,7 @@ The main site shows platform information, a **vendor logo carousel** (click to o
 
 **To buy something:**
 
-1. Open a vendor’s store link (e.g. `https://gogo.nexa-apex.online/` or a custom domain), **or**
+1. Open a vendor’s store link (e.g. `https://gogo.nexa-mm.com/` or a custom domain), **or**
 2. Click a vendor logo on the main homepage carousel.
 
 Each store sells **only its own products**.
@@ -55,7 +55,7 @@ Each store sells **only its own products**.
 
 | Method | Example |
 |--------|---------|
-| Vendor subdomain | `https://gogo.nexa-apex.online/` (suffix depends on platform config) |
+| Vendor subdomain | `https://gogo.nexa-mm.com/` (suffix from `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN`) |
 | Custom domain | `https://yourstore.com/` |
 | Main site carousel | Click a vendor logo on the homepage |
 
@@ -192,7 +192,7 @@ Storefronts support **English** and **Burmese** via the language menu. Admin das
 
 | URL | Purpose |
 |-----|---------|
-| `https://yourstore.{subdomain-base}/` | Customer-facing shop (subdomain suffix from platform config, e.g. `nexa-mm.com` or `nexa-apex.online`) |
+| `https://yourstore.{subdomain-base}/` | Customer-facing shop (current subdomain base: `nexa-mm.com`) |
 | `https://yourstore.{subdomain-base}/admin` | Your management dashboard |
 
 New stores always come through the application form. There is no manual “Add vendor” button for applicants.
@@ -338,9 +338,9 @@ Platform URL: **https://www.nexa-mm.com/**
 | Super admin | `https://www.nexa-mm.com/admin` |
 | Apply to sell | `https://www.nexa-mm.com/vendor/application` |
 | Vendor login | `https://www.nexa-mm.com/vendor/login` |
-| Example shop | `https://gogo.nexa-apex.online/` |
-| Example vendor admin | `https://gogo.nexa-apex.online/admin` |
-| After KBZPay payment | `https://nexa-apex.online/summary` (platform apex; configured via `KPAY_PWA_FRONTEND_RETURN_URL`) |
+| Example shop | `https://gogo.nexa-mm.com/` |
+| Example vendor admin | `https://gogo.nexa-mm.com/admin` |
+| After KBZPay payment | `https://nexa-apex.online/summary` (configured via `KPAY_PWA_FRONTEND_RETURN_URL`) |
 | Password reset | `https://www.nexa-mm.com/reset-password` |
 
 ### 5.2 Do’s and don’ts

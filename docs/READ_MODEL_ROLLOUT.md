@@ -6,7 +6,7 @@ Use this when deploying the KV-to-SQL read-model changes.
 
 Set these before exposing monitoring endpoints:
 
-- CloudBase/Tencent Edge secret: `EDGE_ADMIN_OPERATION_SECRET`
+- CloudBase function secret: `EDGE_ADMIN_OPERATION_SECRET`
 - Frontend env, if using the admin diagnostics UI: `VITE_ADMIN_OPERATION_SECRET`
 
 The values must match. Monitoring endpoints reject requests without `x-admin-operation-secret`.
@@ -49,7 +49,7 @@ npm run validate:read-model
 After deployment, call:
 
 ```bash
-curl -H "Authorization: Bearer <anon-key>" \
+curl -H "Authorization: Bearer <publishable-key>" \
   -H "x-admin-operation-secret: <secret>" \
   "$CLOUDBASE_API_BASE_URL/read-model/validate"
 ```
@@ -63,7 +63,7 @@ Expected result:
 Then call:
 
 ```bash
-curl -H "Authorization: Bearer <anon-key>" \
+curl -H "Authorization: Bearer <publishable-key>" \
   -H "x-admin-operation-secret: <secret>" \
   "$CLOUDBASE_API_BASE_URL/monitoring/summary"
 ```
@@ -80,8 +80,8 @@ Check:
 
 Monitor these during the first production window:
 
-- Edge Function error count and p95 duration
-- Database CPU and memory
+- Cloud Function error count and p95 duration (TCB console)
+- Database CPU and memory (TencentDB / `postgres-jwchnpet`)
 - Slow queries
 - Realtime connections and messages
 - `kv_store_16010b6f` writes
@@ -91,4 +91,4 @@ Monitor these during the first production window:
 
 The API keeps KV fallbacks for SQL-first endpoints. If read models are unavailable or empty, the app should continue serving from KV.
 
-If needed, redeploy the prior Edge Function without rolling back the additive migrations. The new tables are additive and do not delete or replace KV data.
+If needed, redeploy the prior Cloud Function zip without rolling back the additive migrations. The new tables are additive and do not delete or replace KV data.

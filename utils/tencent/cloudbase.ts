@@ -23,7 +23,7 @@ function stripTrailingSlash(value: string): string {
 }
 
 export const cloudbaseEnvId = envValue("VITE_CLOUDBASE_ENV_ID", "VITE_TCB_ENV_ID");
-export const cloudbaseRegion = envValue("VITE_CLOUDBASE_REGION", "VITE_TCB_REGION") || "ap-shanghai";
+export const cloudbaseRegion = envValue("VITE_CLOUDBASE_REGION", "VITE_TCB_REGION") || "ap-singapore";
 export const cloudbasePublishableKey = envValue(
   "VITE_CLOUDBASE_PUBLISHABLE_KEY",
   "VITE_TCB_PUBLISHABLE_KEY",

@@ -7,7 +7,7 @@ Greenfield setup: empty TencentDB, deploy CloudBase functions, deploy EdgeOne fr
 ### 1. Link TencentDB to CloudBase
 
 1. TCB console → **Relational Database**
-2. Connect your TencentDB instance (`postgres-jwchnpct` or similar)
+2. Connect your TencentDB instance (`postgres-jwchnpet` or similar)
 3. Confirm PostgreSQL REST API is enabled for the environment
 
 ### 2. Apply schema only
@@ -19,7 +19,7 @@ TENCENT_DATABASE_URL="postgresql://USER:URL_ENCODED_PASSWORD@HOST:PORT/postgres"
 ```
 
 Examples:
-- Managed TencentDB: `sg-postgres-xxxx.sql.tencentcdb.com:23100`
+- Current linked host pattern: `sg-postgres-jwchnpet.sql.tencentcdb.com:23100`
 - URL-encode `$`, `%`, and other special characters in passwords
 
 Run:
@@ -68,12 +68,16 @@ Minimum:
 | Variable | Value |
 |----------|-------|
 | `CLOUDBASE_ENV_ID` | `nexa-mm-i0goiaxufc1521e43` |
+| `CLOUDBASE_REGION` | `ap-singapore` |
 | `CLOUDBASE_SERVICE_TOKEN` | Server API Key from TCB console |
 | `CLOUDBASE_PUBLISHABLE_KEY` | Client Publishable Key |
-| `CLOUDBASE_API_BASE_URL` | HTTP Gateway URL (see below) |
+| `CLOUDBASE_API_BASE_URL` | Public function URL ending in `/make-server-16010b6f` (see below) |
+| `CLOUDBASE_API_PUBLIC_BASE_URL` | Same as API base — required for KV image signed URLs |
 | `EDGE_ADMIN_OPERATION_SECRET` | Random secret for admin ops |
 
 `TENCENT_POSTGREST_URL` auto-defaults to `{envId}.api.tcloudbasegateway.com/v1/rdb/rest` when `CLOUDBASE_ENV_ID` is set on the function.
+
+Do **not** set `CLOUDBASE_STORAGE_API_BASE_URL` for the current NEXA deployment (uploads stay in TencentDB KV).
 
 ### Email (password reset OTP)
 
@@ -106,6 +110,10 @@ curl -sS "$VITE_CLOUDBASE_API_BASE_URL/auth/email-health" \
 ```
 
 Expect `"ok": true`, `"provider": "tencent-ses"`, and `"passwordResetTemplateId": <your-template-id>`. Password reset fails with a clear API error until SES domain, sender, template, and function env are all configured.
+
+### Phone OTP (optional — Tencent SMS)
+
+Customer registration phone OTP uses Global SMS (`TENCENT_SMS_*` in [`cloudbase/function-env.template.env`](../cloudbase/function-env.template.env)). Reuses `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`. Set `TENCENT_SMS_REGION=ap-singapore` for Myanmar numbers. Leave unset to disable SMS (or use `SMS_DEV_MODE=1` for log-only OTP in non-prod).
 
 **Common SES errors after deploy:**
 
@@ -165,7 +173,7 @@ Copy **`KPAY_*`** values from Supabase → **Project Settings → Edge Functions
 | Variable | TCB value |
 |----------|-----------|
 | `KPAY_NOTIFY_URL` | Public URL of the **`kpay-webhook`** function (see Phase 3 gateway route below). KBZ POSTs here with no JWT — signature is verified in the handler. |
-| `KPAY_PWA_FRONTEND_RETURN_URL` | Unified apex summary page, e.g. `https://nexa-apex.online/summary` |
+| `KPAY_PWA_FRONTEND_RETURN_URL` | Unified apex summary page (current: `https://nexa-apex.online/summary`) |
 
 **Minimum set on `make-server-16010b6f`:**
 
@@ -198,10 +206,16 @@ You should see non-empty `proxyBase`, `qrCreate`, and `orderQuery`. A checkout t
    - Must allow unauthenticated POST from KBZ (no Bearer token required)
 4. Copy the public URL for make-server; set `KPAY_NOTIFY_URL` to the kpay-webhook URL from step 3
 
-Your API base URL:
+Your API base URL (current production Singapore app host):
 
 ```bash
-VITE_CLOUDBASE_API_BASE_URL=https://nexa-mm-i0goiaxufc1521e43.api.tcloudbasegateway.com/v1/functions/make-server-16010b6f
+VITE_CLOUDBASE_API_BASE_URL=https://nexa-mm-i0goiaxufc1521e43-1446771428.ap-singapore.app.tcloudbase.com/make-server-16010b6f
+```
+
+Gateway-style alternate (also valid when configured):
+
+```bash
+# https://nexa-mm-i0goiaxufc1521e43.api.tcloudbasegateway.com/v1/functions/make-server-16010b6f
 ```
 
 Test:
@@ -219,7 +233,7 @@ Or manually:
 
 ```bash
 curl -H "Authorization: Bearer YOUR_PUBLISHABLE_KEY" \
-  "https://nexa-mm-i0goiaxufc1521e43.api.tcloudbasegateway.com/v1/functions/make-server-16010b6f/health"
+  "https://nexa-mm-i0goiaxufc1521e43-1446771428.ap-singapore.app.tcloudbase.com/make-server-16010b6f/health"
 ```
 
 ---
@@ -230,17 +244,17 @@ curl -H "Authorization: Bearer YOUR_PUBLISHABLE_KEY" \
 
 ```bash
 VITE_CLOUDBASE_ENV_ID=nexa-mm-i0goiaxufc1521e43
-VITE_CLOUDBASE_REGION=ap-shanghai
+VITE_CLOUDBASE_REGION=ap-singapore
 VITE_CLOUDBASE_PUBLISHABLE_KEY=<Client Publishable Key>
-VITE_CLOUDBASE_API_BASE_URL=<HTTP Gateway URL>
-VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN=nexa-apex.online
+VITE_CLOUDBASE_API_BASE_URL=https://nexa-mm-i0goiaxufc1521e43-1446771428.ap-singapore.app.tcloudbase.com/make-server-16010b6f
+VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN=nexa-mm.com
 VITE_PLATFORM_RESERVED_APEX_DOMAINS=nexa-mm.com,nexa-apex.online
-VITE_DEPLOYMENT_PLATFORM=edgeone
+VITE_DEPLOYMENT_PLATFORM=tencent-cloudbase
 ```
 
-`VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN` — apex used for vendor subdomains (`gogo.<apex>`).
+`VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN` — apex used for vendor subdomains (`gogo.<apex>`). Current production: `nexa-mm.com`.
 
-`VITE_PLATFORM_RESERVED_APEX_DOMAINS` — every hostname that should show the **platform branding landing** at `/` (not custom-domain vendor lookup). Include both apex and any extra branding domains (e.g. `nexa-mm.com` even when subdomains use `nexa-apex.online`).
+`VITE_PLATFORM_RESERVED_APEX_DOMAINS` — every hostname that should show the **platform branding landing** at `/` (not custom-domain vendor lookup). Include `nexa-mm.com` and any extra branding domains (e.g. `nexa-apex.online`).
 
 ### Platform apex DNS (nexa-mm.com, nexa-apex.online, …)
 
@@ -289,7 +303,7 @@ Ensure EdgeOne/CDN does **not** long-cache these files:
 | `/version.json` | `no-cache` |
 | `/assets/*` | long cache OK (Vite hashes filenames) |
 
-This repo ships `public/_headers` with those rules (Netlify-style). In EdgeOne Makers, mirror the same CDN cache rules if `_headers` is not applied automatically.
+This repo ships `public/_headers` and matching entries in `edgeone.json`. In EdgeOne Makers, confirm the same CDN cache rules if headers from the config file are not applied automatically.
 
 ---
 

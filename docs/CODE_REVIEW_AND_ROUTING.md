@@ -6,9 +6,9 @@ This file is the evergreen technical reference for the **current** app structure
 
 - React + TypeScript + Vite frontend
 - React Router route trees for public / admin / vendor paths
-- CloudBase Auth + Edge Functions + Storage
+- CloudBase Auth + HTTP Functions; images in TencentDB KV by default (optional CloudBase Storage)
 - **Primary datastore:** Postgres KV table `kv_store_16010b6f` (key + JSONB value) — see [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md)
-- CloudBase/Tencent project binding: `utils/tencent/cloudbase.ts` (`cloudbaseApiBaseUrl`, `cloudbasePublishableKey`)
+- CloudBase/Tencent project binding: `utils/tencent/cloudbase.ts` (`cloudbaseApiBaseUrl`, `cloudbasePublishableKey`); region `ap-singapore`
 - Shared API client in `src/utils/api-client.ts`
 
 ## 2) Runtime layout
@@ -32,8 +32,8 @@ This file is the evergreen technical reference for the **current** app structure
 
 | Host type | Example | `/` behavior |
 |-----------|---------|--------------|
-| Platform apex | `nexa-mm.com`, `nexa-apex.online` | `LandingPage` — stats, vendor carousel (logos, revenue-sorted), FloatingChat |
-| Vendor subdomain | `gogo.nexa-apex.online` (or `{label}.nexa-mm.com` per env) | `VendorStorefrontPage` (that vendor’s catalog) |
+| Platform apex | `nexa-mm.com`, `nexa-apex.online` (reserved) | `LandingPage` — stats, vendor carousel (logos, revenue-sorted), FloatingChat |
+| Vendor subdomain | `{label}.nexa-mm.com` (current `VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN`) | `VendorStorefrontPage` (that vendor’s catalog) |
 | Custom domain | `migoo.store` | `VendorStorefrontPage` (resolved slug) |
 | Localhost path dev | `localhost:5173` | `LandingPage` or `/vendor/:slug` |
 
@@ -55,15 +55,17 @@ Vendor identity is resolved from **hostname** (subdomain map, custom domain look
 
 ### Vendor storefront — path-based
 
-Under `/vendor/:storeName/`:
+Under `/vendor/:storeName/` (all paths keep the prefix):
 
 - Store home: `/vendor/:storeName`
 - Category: `/vendor/:storeName/:categorySlug`
 - Product: `/vendor/:storeName/product/:productSlug`
-- Checkout flow: `/checkout`, `/checkout/success`, `/summary`, `/kpay/return`
-- Account: `/profile/*`, `/saved`
-- Policies: `/terms`, `/privacy`
+- Checkout flow: `/vendor/:storeName/checkout`, `/vendor/:storeName/checkout/success`, `/vendor/:storeName/summary`, `/vendor/:storeName/kpay/return`
+- Account: `/vendor/:storeName/profile/*`, `/vendor/:storeName/saved`
+- Policies: `/vendor/:storeName/terms`, `/vendor/:storeName/privacy`
 - Admin: `/vendor/:storeName/admin/*`
+
+Bare `/checkout`, `/profile`, `/saved` are **host-root only** (vendor subdomain / custom domain).
 
 ### Vendor storefront — host-root (subdomain / custom domain)
 
@@ -110,7 +112,7 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 - Checkout starts on the **vendor storefront** host where the customer is shopping.
 - Active payment choices are **Cash on Delivery**, **KBZPay QR**, and **KBZPay PWA**. Card/bank/Stripe helpers are not production checkout paths.
 - **Free shipping:** when all cart items qualify, `Checkout.tsx` locks delivery-partner selection and charges 0 MMK shipping; see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
-- PWA return URL targets unified apex summary (e.g. `nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; see `vendorCheckoutPaths.ts`, `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, edge `middleware.ts`).
+- PWA return URL targets unified apex summary (current: `https://nexa-apex.online/summary` via `KPAY_PWA_FRONTEND_RETURN_URL`; see `vendorCheckoutPaths.ts`, `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect). On EdgeOne, redirect is **client-side**; Vercel `middleware.ts` default export can also rewrite KBZ query params to apex `/summary`.
 - `storefrontOrigin` on the checkout draft drives **Continue Shopping** back to the vendor host.
 
 ## 8) Data/API model
@@ -123,7 +125,7 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 
 ## 9) Realtime (summary)
 
-- **Pulse bridge:** `OrderRealtimeBridge` listens to `app_order_pulse`, `app_vendor_application_pulse`, and `app_kv_domain_pulse` — debounced domain invalidation instead of global KV fanout.
+- **Pulse bridge:** `OrderRealtimeBridge` (mounted only on super-admin routes via `AdminRealtimeBridge`) listens to `app_order_pulse`, `app_vendor_application_pulse`, and `app_kv_domain_pulse` — debounced domain invalidation instead of global KV fanout.
 - **KV fallback:** If domain pulse channel fails, temporary subscription on `kv_store_16010b6f` maps keys → domains client-side.
 - **Vendor storefront:** `VendorStoreView` + `storefrontPolicyRealtime.ts` for catalog/policy updates; `public/vendor-storefront-head.js` sets tab title before React.
 - **Checkout:** filtered `kpay-txn-{orderId}` channel + polling fallback.

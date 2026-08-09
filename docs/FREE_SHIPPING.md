@@ -95,7 +95,7 @@ Server validates on order create: `shippingFee === 0` is rejected unless every l
 
 ## 5) Backend API
 
-Base: `{CLOUDBASE_API_BASE_URL}` → `/make-server-16010b6f/...`
+Routes are relative to `{CLOUDBASE_API_BASE_URL}` / `{VITE_CLOUDBASE_API_BASE_URL}`, which **already ends with** `/make-server-16010b6f` (do not prepend the function name again).
 
 | Method | Route | Purpose |
 |--------|-------|---------|

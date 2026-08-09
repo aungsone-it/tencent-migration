@@ -11,11 +11,16 @@ This document summarizes active performance and cache behavior that should be ma
 
 ## Image delivery (LCP)
 
-- CloudBase/Tencent Storage public URLs are rewritten to the **render/image** endpoint with sensible defaults:
-  - Grid/product cards: **480px** (`gridDisplayImageUrl`)
-  - Header logos: **128px** (`logoDisplayImageUrl`)
-  - Hero banners: **960px** (`bannerDisplayImageUrl`)
-- Override all sizes with `VITE_CLOUDBASE_THUMB_MAX` in env (requires Storage image transformations on your CloudBase/COS plan).
+**Production default:** uploads are stored in **TencentDB KV** and served via signed `/storage/object?…` URLs. Those URLs are **not** rewritten through a CDN image transform — LCP depends on **client-side compression (~500KB)** at upload.
+
+**Legacy CloudBase Storage URLs** (`/storage/v1/object/{public|sign}/…`) are rewritten to the **render/image** endpoint with defaults:
+
+- Grid/product cards: **256px** (`gridDisplayImageUrl`)
+- Header logos: **96px** (`logoDisplayImageUrl`)
+- Hero banners: **720px** (`bannerDisplayImageUrl`)
+
+Override those legacy sizes with `VITE_CLOUDBASE_THUMB_MAX` when Storage image transformations are available. KV signed URLs ignore this env var.
+
 - First four product cards per grid use `priority` on `LazyImage` / `ProductCard` for faster above-the-fold paint.
 - Banner slides use `<img fetchPriority="high">` instead of CSS `background-image`.
 
@@ -30,7 +35,7 @@ Each production build writes a unique `buildId` to `dist/version.json` (via `vit
 | `applyDeployUpdateIfNeeded()` | Purges catalog/admin caches, unregisters SW, hard-reloads **once** per deploy |
 | Preserved session keys | Auth tokens, in-flight KBZPay pending order, summary storefront origin |
 
-Configure CDN so `/index.html` and `/version.json` are **no-cache** (`public/_headers`). Hashed `/assets/*` can stay long-lived.
+Configure CDN so `/index.html` and `/version.json` are **no-cache** (`public/_headers` and `edgeone.json`). Hashed `/assets/*` can stay long-lived.
 
 Files: `src/app/utils/deployVersion.ts`, `src/app/App.tsx` (watcher bootstrap).
 
@@ -102,15 +107,15 @@ Activities cache key: `ADMIN_STAFF_ACTIVITIES` (`module-cache.ts`). Invalidate o
 
 ## Realtime and scale (current system)
 
-Every browser tab mounts `OrderRealtimeBridge`, which subscribes to **pulse tables** (`app_order_pulse`, `app_kv_domain_pulse`, `app_vendor_application_pulse`) rather than broadcasting every KV row. Domain pulses are debounced (~400ms) before cache invalidation or admin refetch. A legacy full-KV subscription activates only if the pulse channel fails.
+**Super-admin routes** mount `OrderRealtimeBridge` (via `AdminRealtimeBridge` in `routes.tsx`), which subscribes to **pulse tables** (`app_order_pulse`, `app_kv_domain_pulse`, `app_vendor_application_pulse`) rather than broadcasting every KV row. Domain pulses are debounced (~400ms) before cache invalidation or admin refetch. A legacy full-KV subscription activates only if the pulse channel fails. Storefront/guest tabs do **not** mount this bridge.
 
 Checkout still uses a **filtered** `kpay_txn:{orderId}` channel. Vendor storefront tabs may listen for product/policy changes in `VendorStoreView`.
 
 | CloudBase/Tencent Pro limit | Included | Impact on this app |
 |--------------------|----------|-------------------|
-| Realtime peak connections | 500 | ~500 open tabs across all users before throttling |
+| Realtime peak connections | 500 | Driven by admin pulse bridges + checkout/scoped storefront channels (not every guest tab) |
 | Realtime messages / month | 5M | Pulse model reduces fanout vs. global KV; monitor during flash sales |
-| Edge Function invocations | 2M/mo | Client cache + SQL read RPCs reduce repeat scans |
+| Cloud Function invocations | 2M/mo | Client cache + SQL read RPCs reduce repeat scans |
 | Auth MAU | 100k | Guest browsers **do not** count; only signed-in accounts |
 
 Before high-traffic events, read [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) §9 and validate read models per [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md).

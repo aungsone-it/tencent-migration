@@ -7,7 +7,7 @@ This guide documents operator workflows for the current **NEXA Platform** app (*
 ### Super admin
 
 - Portal: `/admin` and `/admin/:section`
-- Host: platform apex (e.g. `https://www.nexa-mm.com/admin` or `https://nexa-apex.online/admin`)
+- Host: platform apex (e.g. `https://www.nexa-mm.com/admin`)
 
 ### Vendor public storefront
 
@@ -15,7 +15,7 @@ Customers shop on **one vendor at a time**:
 
 | Deployment | Public store URL |
 |------------|------------------|
-| Subdomain (production) | `https://{label}.{VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN}/` (e.g. `https://gogo.nexa-apex.online/` or `https://migoo.nexa-mm.com/`) |
+| Subdomain (production) | `https://{label}.{VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN}/` (current base: `nexa-mm.com`, e.g. `https://gogo.nexa-mm.com/`) |
 | Custom domain | `https://your-domain.com/` |
 | Path-based (dev) | `https://your-domain/vendor/{store-slug}/` |
 
@@ -186,7 +186,7 @@ Before release windows, confirm:
 - vendor storefront on **subdomain** and **path-based** URLs
 - category routes (e.g. `/cosmetic`) show full category catalog without requiring “Load more” on home first
 - order updates sync correctly across admin/vendor/customer views
-- KBZPay return lands on apex `/summary` (e.g. `nexa-apex.online/summary`) and Continue Shopping returns to the vendor storefront
+- KBZPay return lands on apex `/summary` (current: `nexa-apex.online/summary`) and Continue Shopping returns to the vendor storefront
 - chat and notification flows are healthy
 - **Settings → Activities** updates after vendor approve/delete and staff user changes
 - **Landing page** carousel logos load; cards link to correct vendor store URL

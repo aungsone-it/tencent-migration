@@ -8,8 +8,8 @@ This is the canonical payment reference for this repo.
 - **KBZPay QR** checkout on vendor storefront (`Checkout.tsx`)
 - **KBZPay PWA** (mobile browser / app return)
 - KBZPay return-page handling (`/kpay/return`)
-- **Unified post-payment summary** on platform apex `/summary` (e.g. `https://nexa-apex.online/summary` — set via `KPAY_PWA_FRONTEND_RETURN_URL`)
-- KBZPay webhook (`kpay-webhook` Edge Function) + Realtime on `kpay_txn:{merchantOrderId}`
+- **Unified post-payment summary** on platform apex `/summary` (current: `https://nexa-apex.online/summary` — set via `KPAY_PWA_FRONTEND_RETURN_URL`)
+- KBZPay webhook (`kpay-webhook` Cloud Function) + Realtime on `kpay_txn:{merchantOrderId}`
 
 ## Not active in vendor checkout
 
@@ -25,15 +25,16 @@ This is the canonical payment reference for this repo.
 | Order summary UI | **Platform apex** `/summary` (redirect from vendor hosts when needed) |
 | Continue Shopping | Back to `storefrontOrigin` stored on the checkout draft (the vendor where payment started) |
 
-Implementation: `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, `middleware.ts` edge redirect, `vendorCheckoutPaths.ts`.
+Implementation: `kpayUnifiedSummaryRedirect.ts`, `index.html` inline redirect, `vendorCheckoutPaths.ts`. On EdgeOne the apex redirect is client-side; Vercel `middleware.ts` default export can also rewrite KBZ return query params.
 
 ## Main implementation locations
 
 - Frontend checkout UI: `src/app/components/Checkout.tsx`
 - Frontend KBZPay client helpers: `src/app/utils/kpayClient.ts`
 - Return landing page: `src/app/pages/KPayReturnPage.tsx`
-- Server KBZPay routes: `cloudbase/functions/make-server-16010b6f/kpay_routes.tsx`
-- Webhook function: `cloudbase/functions/kpay-webhook/index.ts`
+- Server KBZPay routes (source of truth): `supabase/functions/make-server-16010b6f/kpay_routes.tsx`
+- Webhook function (source of truth): `supabase/functions/kpay-webhook/`
+- Packaged deploy artifacts: `.cloudbase/dist/make-server-16010b6f.zip`, `.cloudbase/dist/kpay-webhook.zip`
 
 ## Branding and naming
 
@@ -58,12 +59,12 @@ KBZ PWA checkouts store a server draft (`kpay_pwa_draft:ORD-…`) before payment
 
 ### Automatic recovery (recommended)
 
-1. Set CloudBase/Tencent Edge secret **`KPAY_PWA_RECONCILE_SECRET`** (or reuse `EDGE_ADMIN_OPERATION_SECRET`).
-2. Schedule **`POST /make-server-16010b6f/kpay/pwa/reconcile`** every 10–15 minutes with header `x-kpay-reconcile-secret`.
+1. Set Cloud Function secret **`KPAY_PWA_RECONCILE_SECRET`** (or reuse `EDGE_ADMIN_OPERATION_SECRET`).
+2. Schedule **`POST {CLOUDBASE_API_BASE_URL}/kpay/pwa/reconcile`** every 10–15 minutes with header `x-kpay-reconcile-secret` (base URL already ends with `/make-server-16010b6f`).
 3. Use the helper script:
 
 ```bash
-CLOUDBASE_API_BASE_URL=https://your-api-domain.example.com/make-server-16010b6f \
+CLOUDBASE_API_BASE_URL=https://your-host.example.com/make-server-16010b6f \
 KPAY_PWA_RECONCILE_SECRET=your-secret \
 ./scripts/kpay-pwa-reconcile.sh
 ```

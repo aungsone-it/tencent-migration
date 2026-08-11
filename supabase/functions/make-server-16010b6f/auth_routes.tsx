@@ -96,6 +96,11 @@ async function setStaffPassword(user: StaffKvUser, plainPassword: string, tempPa
   });
 }
 
+function isStaffAccountInactive(profile: Record<string, unknown> | null | undefined): boolean {
+  if (!profile || typeof profile !== "object") return false;
+  return String(profile.status || "active").trim().toLowerCase() === "inactive";
+}
+
 async function tryStaffLogin(
   email: string,
   password: string,
@@ -114,6 +119,10 @@ async function tryStaffLogin(
   }
 
   const refreshed = (await findStaffUserByEmail(emailLower)) || staffUser;
+  if (isStaffAccountInactive(refreshed)) {
+    return { error: "This account has been deactivated. Please contact your administrator." };
+  }
+
   const { password: _password, ...safeUser } = refreshed;
   return { user: safeUser };
 }
@@ -138,6 +147,44 @@ const supabaseAdmin = createClient(
     },
   }
 );
+
+async function bumpStaffSessionPulse(
+  userId: string,
+  reason: "deactivated" | "deleted",
+): Promise<void> {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  try {
+    const { data: existing, error: readErr } = await supabaseAdmin
+      .from("app_kv_domain_pulse")
+      .select("bump")
+      .eq("domain", "staff_sessions")
+      .maybeSingle();
+    if (readErr) {
+      console.warn("[staff-session-pulse] read failed:", readErr.message);
+      return;
+    }
+    const nextBump = (Number(existing?.bump) || 0) + 1;
+    const detail = {
+      userId: uid,
+      reason,
+      at: new Date().toISOString(),
+    };
+    const { error: writeErr } = await supabaseAdmin
+      .from("app_kv_domain_pulse")
+      .upsert({
+        domain: "staff_sessions",
+        bump: nextBump,
+        detail,
+        updated_at: new Date().toISOString(),
+      });
+    if (writeErr) {
+      console.warn("[staff-session-pulse] write failed:", writeErr.message);
+    }
+  } catch (error) {
+    console.warn("[staff-session-pulse] unavailable:", error);
+  }
+}
 
 // 🔥 SEPARATE CLIENT FOR CUSTOMER AUTH (uses anon key for signInWithPassword)
 const supabaseAuth = createClient(
@@ -1218,6 +1265,11 @@ authApp.get("/profile/:userId", async (c) => {
     const profile = await kv.get(`auth:user:${userId}`);
 
     if (profile && typeof profile === "object") {
+      if (isStaffAccountInactive(profile as Record<string, unknown>)) {
+        console.log(`❌ API Error (/auth/profile/${userId}): Account deactivated`);
+        return c.json({ error: "Account deactivated", code: "account_deactivated" }, 403);
+      }
+
       const { password: _, ...rest } = profile as Record<string, unknown> & {
         password?: string;
         profileImage?: string;
@@ -1633,6 +1685,11 @@ authApp.put("/user/:userId", async (c) => {
 
     console.log(`🔄 Updating user ${userId}:`, { name, email, phone, role, shouldClearImage });
 
+    const prevStatus = String((p as { status?: unknown }).status || "").trim().toLowerCase();
+    const nextStatusRaw =
+      status !== undefined ? status : (p as { status?: unknown }).status;
+    const nextStatus = String(nextStatusRaw || "").trim().toLowerCase();
+
     const updatedProfile: Record<string, unknown> = {
       ...p,
       name: name !== undefined ? name : p.name,
@@ -1643,6 +1700,10 @@ authApp.put("/user/:userId", async (c) => {
       storeId: storeId !== undefined ? storeId : p.storeId,
       updatedAt: new Date().toISOString(),
     };
+
+    if (prevStatus !== nextStatus && nextStatus === "inactive") {
+      updatedProfile.sessionRevokedAt = new Date().toISOString();
+    }
 
     if (location !== undefined) updatedProfile.location = location;
     if (addressLine1 !== undefined) updatedProfile.addressLine1 = addressLine1;
@@ -1700,8 +1761,6 @@ authApp.put("/user/:userId", async (c) => {
         })
       );
     }
-    const prevStatus = String((p as { status?: unknown }).status || "").trim().toLowerCase();
-    const nextStatus = String(updatedProfile.status || "").trim().toLowerCase();
     if (prevStatus !== nextStatus && nextStatus) {
       detailParts.push(
         [targetLabel, formatAuditStatusLabel(nextStatus)].filter(Boolean).join(" | ")
@@ -1725,6 +1784,10 @@ authApp.put("/user/:userId", async (c) => {
       action: "User updated",
       detail: detailParts.join(" · "),
     });
+
+    if (prevStatus !== nextStatus && nextStatus === "inactive") {
+      await bumpStaffSessionPulse(userId, "deactivated");
+    }
 
     return c.json({ success: true, user: updatedProfile });
   } catch (error: any) {
@@ -1800,6 +1863,8 @@ authApp.delete("/user/:userId", async (c) => {
         role: profileRole,
       }),
     });
+
+    await bumpStaffSessionPulse(userId, "deleted");
 
     return c.json({ success: true });
   } catch (error: any) {

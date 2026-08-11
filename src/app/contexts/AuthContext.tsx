@@ -10,6 +10,10 @@ import {
   freeLocalStorageForAuth,
   isStorageQuotaError,
 } from '../utils/persistedLocalCache';
+import {
+  subscribeStaffSessionRevoked,
+  type StaffSessionRevokedPayload,
+} from '../utils/staffSessionRealtime';
 
 // ============================================
 // REMOVED: Session cleanup code
@@ -62,6 +66,7 @@ export interface AuthUser {
   updatedAt?: string;
   authCreatedAt?: string;
   lastSignInAt?: string;
+  status?: 'active' | 'inactive' | string;
 }
 
 interface AuthContextType {
@@ -77,6 +82,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /** Throttle background profile refresh to avoid a burst of API calls when alt-tabbing (each was 2+ fetches). */
 const PROFILE_BG_REFRESH_MIN_MS = 5 * 60 * 1000;
+const STAFF_SESSION_PULSE_POLL_MS = 5_000;
 
 /** Profile fetch: long enough for cold edge + local dev; background refresh stays shorter. */
 const PROFILE_FETCH_TIMEOUT_MS = (background: boolean) => (background ? 12_000 : 25_000);
@@ -115,6 +121,11 @@ function persistStaffActorId(profile: unknown): void {
   }
 }
 
+function isStaffProfileInactive(profile: unknown): boolean {
+  if (!profile || typeof profile !== 'object') return false;
+  return String((profile as { status?: unknown }).status || 'active').trim().toLowerCase() === 'inactive';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -132,11 +143,144 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const lastBgProfileRefreshRef = useRef(0);
+  const userRef = useRef<AuthUser | null>(null);
+  const staffSessionPulseRef = useRef<{ bump: number; userId?: string } | null>(null);
+  const forceLogoutInFlightRef = useRef(false);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const forceLogout = async (reason?: StaffSessionRevokedPayload['reason']) => {
+    if (forceLogoutInFlightRef.current) return;
+    forceLogoutInFlightRef.current = true;
+    try {
+      console.warn(
+        reason === 'deleted'
+          ? '🔒 Staff account deleted — signing out'
+          : '🔒 Staff account deactivated — signing out'
+      );
+      await supabase.auth.signOut();
+      setUser(null);
+      persistStaffActorId(null);
+    } catch (error) {
+      console.error('❌ Force logout error:', error);
+      setUser(null);
+      persistStaffActorId(null);
+    } finally {
+      forceLogoutInFlightRef.current = false;
+    }
+  };
+
+  const validateStaffSession = async (userId: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/profile/${userId}`, {
+        headers: {
+          ...getCloudBaseRequestHeaders(),
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+        },
+        cache: 'no-store',
+      });
+      if (response.status === 403 || response.status === 404) {
+        await forceLogout(response.status === 404 ? 'deleted' : 'deactivated');
+        return false;
+      }
+      if (!response.ok) return true;
+      const data = await response.json();
+      const profile =
+        data && typeof data === 'object' && data.user != null && typeof data.user === 'object'
+          ? data.user
+          : data;
+      if (isStaffProfileInactive(profile)) {
+        await forceLogout('deactivated');
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
 
   // Check for existing session on mount
   useEffect(() => {
     checkSession();
   }, []);
+
+  // Force logout when this account is deactivated/deleted (same browser + cross-tab).
+  useEffect(() => {
+    if (!user?.id) return;
+    return subscribeStaffSessionRevoked((payload) => {
+      if (String(payload.userId).trim() !== String(userRef.current?.id || '').trim()) return;
+      void forceLogout(payload.reason);
+    });
+  }, [user?.id]);
+
+  // Poll staff_sessions pulse for cross-device forced logout (~5s when tab is visible).
+  useEffect(() => {
+    if (!user?.id) return;
+    let disposed = false;
+    let inFlight = false;
+
+    const pollStaffSessionPulse = async () => {
+      if (
+        disposed ||
+        inFlight ||
+        !userRef.current?.id ||
+        (typeof document !== 'undefined' && document.visibilityState !== 'visible')
+      ) {
+        return;
+      }
+      inFlight = true;
+      try {
+        const response = await fetch(`${API_BASE_URL}/realtime/pulses`, {
+          headers: {
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+          },
+          cache: 'no-store',
+        });
+        if (!response.ok || disposed) return;
+        const next = (await response.json()) as {
+          success?: boolean;
+          domains?: Record<string, { bump?: number; detail?: { userId?: string } }>;
+        };
+        if (disposed || next.success === false) return;
+        const counter = next.domains?.staff_sessions;
+        if (!counter) return;
+        const bump = Number(counter.bump) || 0;
+        const targetUserId = String(counter.detail?.userId || '').trim();
+        const reason =
+          counter.detail?.reason === 'deleted' ? 'deleted' : 'deactivated';
+        const previous = staffSessionPulseRef.current;
+        staffSessionPulseRef.current = { bump, userId: targetUserId || undefined };
+        if (!previous || bump === previous.bump) return;
+        const currentUserId = String(userRef.current?.id || '').trim();
+        if (targetUserId && targetUserId !== currentUserId) return;
+        if (!targetUserId) {
+          await validateStaffSession(currentUserId);
+          return;
+        }
+        await forceLogout(reason);
+      } catch {
+        /* next poll retries */
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void pollStaffSessionPulse();
+    const interval = window.setInterval(() => void pollStaffSessionPulse(), STAFF_SESSION_PULSE_POLL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void pollStaffSessionPulse();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user?.id]);
 
   // 🔥 AUTO-REFRESH user data when browser tab becomes visible (throttled)
   useEffect(() => {
@@ -228,6 +372,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               data && typeof data === "object" && data.user != null && typeof data.user === "object"
                 ? data.user
                 : data;
+            if (isStaffProfileInactive(profile)) {
+              console.warn("⚠️ Staff account is inactive — signing out");
+              await forceLogout("deactivated");
+              return null;
+            }
             console.log("✅ Profile loaded successfully");
             setUser(profile as AuthUser);
             persistStaffActorId(profile);
@@ -246,10 +395,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (response.status === 404) {
             console.warn("⚠️ User profile not found. Setup may be required.");
             console.warn("   User ID:", userId);
-            if (!isBackgroundRefresh) {
-              setUser(null);
-              persistStaffActorId(null);
-            }
+            await forceLogout("deleted");
+            return null;
+          }
+
+          if (response.status === 403) {
+            console.warn("⚠️ Staff account deactivated — signing out");
+            await forceLogout("deactivated");
             return null;
           }
 

@@ -11,6 +11,10 @@ import {
 } from "../utils/module-cache";
 import { notifyCustomerRealtimeLocal, type CustomerRealtimePayload } from "../utils/customersRealtime";
 import { notifyAdminNotificationsUpdated } from "../utils/adminNotificationsRealtime";
+import {
+  notifyStaffSessionRevokedLocal,
+  type StaffSessionRevokedPayload,
+} from "../utils/staffSessionRealtime";
 
 const PULSE_POLL_MS = 5_000;
 
@@ -55,6 +59,15 @@ export function OrderRealtimeBridge() {
         window.dispatchEvent(new CustomEvent("marketingDataUpdated"));
       } else if (domain === "notifications") {
         notifyAdminNotificationsUpdated();
+      } else if (domain === "staff_sessions") {
+        const detail = counter?.detail as StaffSessionRevokedPayload | undefined;
+        const userId = String(detail?.userId || "").trim();
+        if (userId) {
+          notifyStaffSessionRevokedLocal({
+            userId,
+            reason: detail?.reason === "deleted" ? "deleted" : "deactivated",
+          });
+        }
       }
     };
 

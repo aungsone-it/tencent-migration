@@ -84,6 +84,7 @@ import {
   type StaffActivityFeedRow,
   logoDisplayImageUrl,
 } from "../utils/module-cache";
+import { broadcastStaffSessionRevoked } from "../utils/staffSessionRealtime";
 import {
   readPersistedJson,
   PERSISTED_CATALOG_TTL_MS,
@@ -1183,6 +1184,9 @@ export function Settings() {
       }
       
       console.log(`✅ User status updated to ${newStatus}`);
+      if (newStatus === "inactive") {
+        void broadcastStaffSessionRevoked({ userId, reason: "deactivated" });
+      }
     } catch (error) {
       console.error('❌ Error updating user status:', error);
       // Revert on error
@@ -1225,6 +1229,7 @@ export function Settings() {
 
       setUsers(users.filter((u) => u.id !== userId));
       invalidateAdminAuthUsersCache();
+      void broadcastStaffSessionRevoked({ userId, reason: "deleted" });
 
       toast.success("User deleted successfully from database!");
     } catch (error: any) {

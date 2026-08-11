@@ -14,6 +14,10 @@ import {
   subscribeStaffSessionRevoked,
   type StaffSessionRevokedPayload,
 } from '../utils/staffSessionRealtime';
+import {
+  registerStaffForceLogoutHandler,
+  type StaffForceLogoutReason,
+} from '../utils/staffForceLogout';
 
 // ============================================
 // REMOVED: Session cleanup code
@@ -82,8 +86,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /** Throttle background profile refresh to avoid a burst of API calls when alt-tabbing (each was 2+ fetches). */
 const PROFILE_BG_REFRESH_MIN_MS = 5 * 60 * 1000;
-const STAFF_SESSION_WATCH_TIMEOUT_MS = 20_000;
-const STAFF_SESSION_STATUS_FALLBACK_MS = 1_500;
+const STAFF_SESSION_HEARTBEAT_MS = 800;
 
 /** Profile fetch: long enough for cold edge + local dev; background refresh stays shorter. */
 const PROFILE_FETCH_TIMEOUT_MS = (background: boolean) => (background ? 12_000 : 25_000);
@@ -146,21 +149,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastBgProfileRefreshRef = useRef(0);
   const userRef = useRef<AuthUser | null>(null);
   const forceLogoutInFlightRef = useRef(false);
-  const staffSessionWatchAbortRef = useRef<AbortController | null>(null);
+  const staffHeartbeatTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     userRef.current = user;
   }, [user]);
 
-  const forceLogout = async (reason?: StaffSessionRevokedPayload['reason']) => {
+  const forceLogout = async (reason: StaffForceLogoutReason = 'deactivated') => {
     if (forceLogoutInFlightRef.current) return;
     forceLogoutInFlightRef.current = true;
     try {
-      console.warn(
-        reason === 'deleted'
-          ? '🔒 Staff account deleted — signing out'
-          : '🔒 Staff account deactivated — signing out'
-      );
+      if (staffHeartbeatTimerRef.current != null) {
+        window.clearInterval(staffHeartbeatTimerRef.current);
+        staffHeartbeatTimerRef.current = null;
+      }
       await supabase.auth.signOut();
       setUser(null);
       persistStaffActorId(null);
@@ -173,76 +175,88 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const validateStaffSession = async (userId: string): Promise<boolean> => {
+  const evaluateStaffProfileResponse = async (
+    userId: string,
+    response: Response
+  ): Promise<boolean> => {
+    if (response.status === 403) {
+      await forceLogout('deactivated');
+      return false;
+    }
+    if (response.status === 404) {
+      await forceLogout('deleted');
+      return false;
+    }
+    if (!response.ok) return true;
+    const data = await response.json().catch(() => null);
+    const profile =
+      data && typeof data === 'object' && data.user != null && typeof data.user === 'object'
+        ? data.user
+        : data;
+    if (isStaffProfileInactive(profile)) {
+      await forceLogout('deactivated');
+      return false;
+    }
+    if (
+      profile &&
+      typeof profile === 'object' &&
+      String((profile as { id?: unknown }).id || '').trim() &&
+      String((profile as { id?: unknown }).id || '').trim() !== String(userId).trim()
+    ) {
+      return true;
+    }
+    return true;
+  };
+
+  const pingStaffSession = async (userId: string): Promise<void> => {
+    const uid = String(userId || '').trim();
+    if (!uid || forceLogoutInFlightRef.current) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/session-status/${userId}`, {
-        headers: {
-          ...getCloudBaseRequestHeaders(),
-          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-        },
-        cache: 'no-store',
-      });
-      if (!response.ok) return true;
-      const data = (await response.json()) as { active?: boolean; reason?: StaffSessionRevokedPayload['reason'] };
-      if (data.active === false) {
-        await forceLogout(data.reason === 'deleted' ? 'deleted' : 'deactivated');
-        return false;
-      }
-      return true;
+      const response = await fetch(
+        `${API_BASE_URL}/auth/profile/${uid}?_staffSession=${Date.now()}`,
+        {
+          headers: {
+            ...getCloudBaseRequestHeaders(),
+            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+          },
+          cache: 'no-store',
+        }
+      );
+      await evaluateStaffProfileResponse(uid, response);
     } catch {
-      return true;
+      /* retry on next heartbeat */
     }
   };
 
-  const startStaffSessionWatch = (userId: string) => {
-    staffSessionWatchAbortRef.current?.abort();
-    const controller = new AbortController();
-    staffSessionWatchAbortRef.current = controller;
+  const startStaffSessionHeartbeat = (userId: string) => {
+    if (staffHeartbeatTimerRef.current != null) {
+      window.clearInterval(staffHeartbeatTimerRef.current);
+      staffHeartbeatTimerRef.current = null;
+    }
     const uid = String(userId || '').trim();
     if (!uid) return;
-
-    const watchLoop = async () => {
-      while (!controller.signal.aborted && String(userRef.current?.id || '').trim() === uid) {
-        try {
-          const response = await fetch(
-            `${API_BASE_URL}/auth/session-watch/${uid}?timeoutMs=${STAFF_SESSION_WATCH_TIMEOUT_MS}`,
-            {
-              headers: {
-                ...getCloudBaseRequestHeaders(),
-                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-              },
-              cache: 'no-store',
-              signal: controller.signal,
-            }
-          );
-          if (controller.signal.aborted) return;
-          if (!response.ok) {
-            await sleep(STAFF_SESSION_STATUS_FALLBACK_MS);
-            continue;
-          }
-          const data = (await response.json()) as {
-            active?: boolean;
-            reason?: StaffSessionRevokedPayload['reason'];
-          };
-          if (data.active === false) {
-            await forceLogout(data.reason === 'deleted' ? 'deleted' : 'deactivated');
-            return;
-          }
-        } catch (error: unknown) {
-          if (controller.signal.aborted) return;
-          const err = error as { name?: string };
-          if (err?.name === 'AbortError') return;
-          await sleep(STAFF_SESSION_STATUS_FALLBACK_MS);
+    void pingStaffSession(uid);
+    staffHeartbeatTimerRef.current = window.setInterval(() => {
+      if (String(userRef.current?.id || '').trim() !== uid) {
+        if (staffHeartbeatTimerRef.current != null) {
+          window.clearInterval(staffHeartbeatTimerRef.current);
+          staffHeartbeatTimerRef.current = null;
         }
+        return;
       }
-    };
-
-    void watchLoop();
+      void pingStaffSession(uid);
+    }, STAFF_SESSION_HEARTBEAT_MS);
   };
 
   // Check for existing session on mount
   useEffect(() => {
     checkSession();
+  }, []);
+
+  // Register global force-logout handler (api fetch interceptor + realtime).
+  useEffect(() => {
+    registerStaffForceLogoutHandler((reason) => forceLogout(reason));
+    return () => registerStaffForceLogoutHandler(null);
   }, []);
 
   // Instant logout via cross-tab broadcast when this account is deactivated/deleted.
@@ -254,26 +268,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Long-poll session watch for cross-device forced logout (~400ms server-side detection).
+  // Poll staff profile every ~800ms — works even when session-watch is unavailable.
   useEffect(() => {
     if (!user?.id) {
-      staffSessionWatchAbortRef.current?.abort();
-      staffSessionWatchAbortRef.current = null;
+      if (staffHeartbeatTimerRef.current != null) {
+        window.clearInterval(staffHeartbeatTimerRef.current);
+        staffHeartbeatTimerRef.current = null;
+      }
       return;
     }
-    startStaffSessionWatch(user.id);
+    startStaffSessionHeartbeat(user.id);
     return () => {
-      staffSessionWatchAbortRef.current?.abort();
-      staffSessionWatchAbortRef.current = null;
+      if (staffHeartbeatTimerRef.current != null) {
+        window.clearInterval(staffHeartbeatTimerRef.current);
+        staffHeartbeatTimerRef.current = null;
+      }
     };
   }, [user?.id]);
+
+  // Catch deactivated/deleted responses from any in-flight auth/profile request.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      const currentUserId = String(userRef.current?.id || '').trim();
+      if (!currentUserId || forceLogoutInFlightRef.current) return response;
+      const target = String(args[0] ?? '');
+      if (!target.includes('/auth/profile/') && !target.includes('/auth/session-')) return response;
+      if (response.status === 403) {
+        void forceLogout('deactivated');
+        return response;
+      }
+      if (response.status === 404 && target.includes('/auth/profile/')) {
+        void forceLogout('deleted');
+        return response;
+      }
+      if (response.ok && target.includes('/auth/profile/')) {
+        try {
+          const clone = response.clone();
+          const data = await clone.json();
+          const profile =
+            data && typeof data === 'object' && data.user != null && typeof data.user === 'object'
+              ? data.user
+              : data;
+          if (isStaffProfileInactive(profile)) {
+            void forceLogout('deactivated');
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      return response;
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
 
   // Immediate session check when tab becomes visible again.
   useEffect(() => {
     if (!user?.id) return;
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      void validateStaffSession(user.id!);
+      void pingStaffSession(user.id!);
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);

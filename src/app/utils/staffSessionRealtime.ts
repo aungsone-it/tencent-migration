@@ -1,4 +1,4 @@
-import { supabase } from "../contexts/AuthContext";
+import { createTencentCloudBaseCompatClient } from "../../utils/tencentCloudbaseClient";
 
 export const STAFF_SESSION_REVOKED_EVENT = "staffSessionRevoked";
 
@@ -6,13 +6,15 @@ const STAFF_SESSION_BC_NAME = "migoo-staff-session-realtime";
 const STAFF_SESSION_BROADCAST_CHANNEL = "sec-staff-session-v1";
 const STAFF_SESSION_STORAGE_KEY = "migoo-staff-session-revoked";
 
+const realtimeClient = createTencentCloudBaseCompatClient();
+
 export type StaffSessionRevokedPayload = {
   userId: string;
   reason: "deactivated" | "deleted";
 };
 
 async function waitSubscribed(
-  ch: ReturnType<typeof supabase.channel>,
+  ch: ReturnType<typeof realtimeClient.channel>,
   ms = 8000
 ): Promise<boolean> {
   return new Promise((resolve) => {
@@ -61,13 +63,13 @@ export async function broadcastStaffSessionRevoked(
 ): Promise<void> {
   notifyStaffSessionRevokedLocal(payload);
   if (typeof window === "undefined") return;
-  const ch = supabase.channel(STAFF_SESSION_BROADCAST_CHANNEL, {
+  const ch = realtimeClient.channel(STAFF_SESSION_BROADCAST_CHANNEL, {
     config: { broadcast: { ack: false } },
   });
   const ok = await waitSubscribed(ch);
   if (!ok) {
     try {
-      await supabase.removeChannel(ch);
+      await realtimeClient.removeChannel(ch);
     } catch {
       /* ignore */
     }
@@ -81,7 +83,7 @@ export async function broadcastStaffSessionRevoked(
     });
   } finally {
     try {
-      await supabase.removeChannel(ch);
+      await realtimeClient.removeChannel(ch);
     } catch {
       /* ignore */
     }
@@ -130,7 +132,7 @@ export function subscribeStaffSessionRevoked(
     /* ignore */
   }
 
-  const ch = supabase
+  const ch = realtimeClient
     .channel(STAFF_SESSION_BROADCAST_CHANNEL, { config: { broadcast: { ack: false } } })
     .on(
       "broadcast",
@@ -146,7 +148,7 @@ export function subscribeStaffSessionRevoked(
     window.removeEventListener("storage", onStorage);
     bc?.close();
     try {
-      void supabase.removeChannel(ch);
+      void realtimeClient.removeChannel(ch);
     } catch {
       /* ignore */
     }

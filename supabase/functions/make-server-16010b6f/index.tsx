@@ -2140,6 +2140,11 @@ app.post("/make-server-16010b6f/auth/change-password", async (c) => {
 });
 
 // Get user profile
+function isStaffProfileInactiveRecord(record: unknown): boolean {
+  if (!record || typeof record !== "object") return false;
+  return String((record as { status?: unknown }).status || "active").trim().toLowerCase() === "inactive";
+}
+
 app.get("/make-server-16010b6f/auth/profile/:userId", async (c) => {
   try {
     let userId = c.req.param("userId");
@@ -2190,6 +2195,9 @@ app.get("/make-server-16010b6f/auth/profile/:userId", async (c) => {
       // Supabase storefront customers + profile PUT often live in auth:user:${userId} or customer:* — not legacy user:${email}
       const authProfile = await withTimeout(kv.get(`auth:user:${userId}`), 5000);
       if (authProfile && typeof authProfile === "object") {
+        if (isStaffProfileInactiveRecord(authProfile)) {
+          return c.json({ error: "Account deactivated", code: "account_deactivated" }, 403);
+        }
         const { password: __, ...authRest } = authProfile as Record<string, unknown> & {
           password?: string;
         };
@@ -2238,6 +2246,10 @@ app.get("/make-server-16010b6f/auth/profile/:userId", async (c) => {
 
       console.log(`❌ User not found: ${userId}`);
       return c.json({ error: "User not found" }, 404);
+    }
+
+    if (isStaffProfileInactiveRecord(user)) {
+      return c.json({ error: "Account deactivated", code: "account_deactivated" }, 403);
     }
 
     const { password: _, ...userWithoutPassword } = user;

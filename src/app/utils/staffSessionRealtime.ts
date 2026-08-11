@@ -4,6 +4,7 @@ export const STAFF_SESSION_REVOKED_EVENT = "staffSessionRevoked";
 
 const STAFF_SESSION_BC_NAME = "migoo-staff-session-realtime";
 const STAFF_SESSION_BROADCAST_CHANNEL = "sec-staff-session-v1";
+const STAFF_SESSION_STORAGE_KEY = "migoo-staff-session-revoked";
 
 export type StaffSessionRevokedPayload = {
   userId: string;
@@ -29,7 +30,7 @@ async function waitSubscribed(
   });
 }
 
-/** Same-tab + cross-tab (BroadcastChannel) fan-out. */
+/** Same-tab + cross-tab (BroadcastChannel + storage) fan-out. */
 export function notifyStaffSessionRevokedLocal(payload: StaffSessionRevokedPayload): void {
   if (typeof window === "undefined") return;
   try {
@@ -43,6 +44,12 @@ export function notifyStaffSessionRevokedLocal(payload: StaffSessionRevokedPaylo
     const bc = new BroadcastChannel(STAFF_SESSION_BC_NAME);
     bc.postMessage(payload);
     bc.close();
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.localStorage.setItem(STAFF_SESSION_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.removeItem(STAFF_SESSION_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -101,7 +108,17 @@ export function subscribeStaffSessionRevoked(
     handlePayload((e as CustomEvent<StaffSessionRevokedPayload>).detail);
   };
 
+  const onStorage = (e: StorageEvent) => {
+    if (e.key !== STAFF_SESSION_STORAGE_KEY || !e.newValue) return;
+    try {
+      handlePayload(JSON.parse(e.newValue) as StaffSessionRevokedPayload);
+    } catch {
+      /* ignore malformed payloads */
+    }
+  };
+
   window.addEventListener(STAFF_SESSION_REVOKED_EVENT, onWindow);
+  window.addEventListener("storage", onStorage);
 
   let bc: BroadcastChannel | null = null;
   try {
@@ -126,6 +143,7 @@ export function subscribeStaffSessionRevoked(
 
   return () => {
     window.removeEventListener(STAFF_SESSION_REVOKED_EVENT, onWindow);
+    window.removeEventListener("storage", onStorage);
     bc?.close();
     try {
       void supabase.removeChannel(ch);

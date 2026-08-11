@@ -1352,6 +1352,66 @@ authApp.get("/profile/:userId", async (c) => {
   }
 });
 
+async function getStaffSessionStatus(
+  userId: string,
+): Promise<{ active: boolean; reason?: "deactivated" | "deleted" }> {
+  const uid = String(userId || "").trim();
+  if (!uid) return { active: false, reason: "deleted" };
+  const profile = await kv.get(`auth:user:${uid}`);
+  if (!profile || typeof profile !== "object") {
+    return { active: false, reason: "deleted" };
+  }
+  if (isStaffAccountInactive(profile as Record<string, unknown>)) {
+    return { active: false, reason: "deactivated" };
+  }
+  return { active: true };
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Lightweight one-shot staff session check (used by client watchdog fallback).
+authApp.get("/session-status/:userId", async (c) => {
+  try {
+    const userId = String(c.req.param("userId") || "").trim();
+    if (!userId) return c.json({ error: "userId required" }, 400);
+    const status = await getStaffSessionStatus(userId);
+    return c.json(status, 200, { "Cache-Control": "no-store, max-age=0" });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 500);
+  }
+});
+
+// Long-poll until the staff session is revoked or timeout (~400ms server-side checks).
+authApp.get("/session-watch/:userId", async (c) => {
+  try {
+    const userId = String(c.req.param("userId") || "").trim();
+    if (!userId) return c.json({ error: "userId required" }, 400);
+
+    const requestedTimeout = Number(c.req.query("timeoutMs"));
+    const timeoutMs = Number.isFinite(requestedTimeout)
+      ? Math.min(25_000, Math.max(1_000, requestedTimeout))
+      : 20_000;
+    const pollMs = 400;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const status = await getStaffSessionStatus(userId);
+      if (!status.active) {
+        return c.json(status, 200, { "Cache-Control": "no-store, max-age=0" });
+      }
+      await sleepMs(pollMs);
+    }
+
+    return c.json({ active: true }, 200, { "Cache-Control": "no-store, max-age=0" });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 500);
+  }
+});
+
 // ============================================
 // UPDATE PASSWORD (logged-in staff, KV auth)
 // ============================================

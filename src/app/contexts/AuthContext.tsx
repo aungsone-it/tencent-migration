@@ -82,7 +82,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /** Throttle background profile refresh to avoid a burst of API calls when alt-tabbing (each was 2+ fetches). */
 const PROFILE_BG_REFRESH_MIN_MS = 5 * 60 * 1000;
-const STAFF_SESSION_PULSE_POLL_MS = 5_000;
+const STAFF_SESSION_WATCH_TIMEOUT_MS = 20_000;
+const STAFF_SESSION_STATUS_FALLBACK_MS = 1_500;
 
 /** Profile fetch: long enough for cold edge + local dev; background refresh stays shorter. */
 const PROFILE_FETCH_TIMEOUT_MS = (background: boolean) => (background ? 12_000 : 25_000);
@@ -144,8 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const lastBgProfileRefreshRef = useRef(0);
   const userRef = useRef<AuthUser | null>(null);
-  const staffSessionPulseRef = useRef<{ bump: number; userId?: string } | null>(null);
   const forceLogoutInFlightRef = useRef(false);
+  const staffSessionWatchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     userRef.current = user;
@@ -174,25 +175,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const validateStaffSession = async (userId: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/profile/${userId}`, {
+      const response = await fetch(`${API_BASE_URL}/auth/session-status/${userId}`, {
         headers: {
           ...getCloudBaseRequestHeaders(),
           ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
         },
         cache: 'no-store',
       });
-      if (response.status === 403 || response.status === 404) {
-        await forceLogout(response.status === 404 ? 'deleted' : 'deactivated');
-        return false;
-      }
       if (!response.ok) return true;
-      const data = await response.json();
-      const profile =
-        data && typeof data === 'object' && data.user != null && typeof data.user === 'object'
-          ? data.user
-          : data;
-      if (isStaffProfileInactive(profile)) {
-        await forceLogout('deactivated');
+      const data = (await response.json()) as { active?: boolean; reason?: StaffSessionRevokedPayload['reason'] };
+      if (data.active === false) {
+        await forceLogout(data.reason === 'deleted' ? 'deleted' : 'deactivated');
         return false;
       }
       return true;
@@ -201,84 +194,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const startStaffSessionWatch = (userId: string) => {
+    staffSessionWatchAbortRef.current?.abort();
+    const controller = new AbortController();
+    staffSessionWatchAbortRef.current = controller;
+    const uid = String(userId || '').trim();
+    if (!uid) return;
+
+    const watchLoop = async () => {
+      while (!controller.signal.aborted && String(userRef.current?.id || '').trim() === uid) {
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/auth/session-watch/${uid}?timeoutMs=${STAFF_SESSION_WATCH_TIMEOUT_MS}`,
+            {
+              headers: {
+                ...getCloudBaseRequestHeaders(),
+                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+              },
+              cache: 'no-store',
+              signal: controller.signal,
+            }
+          );
+          if (controller.signal.aborted) return;
+          if (!response.ok) {
+            await sleep(STAFF_SESSION_STATUS_FALLBACK_MS);
+            continue;
+          }
+          const data = (await response.json()) as {
+            active?: boolean;
+            reason?: StaffSessionRevokedPayload['reason'];
+          };
+          if (data.active === false) {
+            await forceLogout(data.reason === 'deleted' ? 'deleted' : 'deactivated');
+            return;
+          }
+        } catch (error: unknown) {
+          if (controller.signal.aborted) return;
+          const err = error as { name?: string };
+          if (err?.name === 'AbortError') return;
+          await sleep(STAFF_SESSION_STATUS_FALLBACK_MS);
+        }
+      }
+    };
+
+    void watchLoop();
+  };
+
   // Check for existing session on mount
   useEffect(() => {
     checkSession();
   }, []);
 
-  // Force logout when this account is deactivated/deleted (same browser + cross-tab).
+  // Instant logout via cross-tab broadcast when this account is deactivated/deleted.
   useEffect(() => {
-    if (!user?.id) return;
     return subscribeStaffSessionRevoked((payload) => {
-      if (String(payload.userId).trim() !== String(userRef.current?.id || '').trim()) return;
+      const currentUserId = String(userRef.current?.id || '').trim();
+      if (!currentUserId || String(payload.userId).trim() !== currentUserId) return;
       void forceLogout(payload.reason);
     });
+  }, []);
+
+  // Long-poll session watch for cross-device forced logout (~400ms server-side detection).
+  useEffect(() => {
+    if (!user?.id) {
+      staffSessionWatchAbortRef.current?.abort();
+      staffSessionWatchAbortRef.current = null;
+      return;
+    }
+    startStaffSessionWatch(user.id);
+    return () => {
+      staffSessionWatchAbortRef.current?.abort();
+      staffSessionWatchAbortRef.current = null;
+    };
   }, [user?.id]);
 
-  // Poll staff_sessions pulse for cross-device forced logout (~5s when tab is visible).
+  // Immediate session check when tab becomes visible again.
   useEffect(() => {
     if (!user?.id) return;
-    let disposed = false;
-    let inFlight = false;
-
-    const pollStaffSessionPulse = async () => {
-      if (
-        disposed ||
-        inFlight ||
-        !userRef.current?.id ||
-        (typeof document !== 'undefined' && document.visibilityState !== 'visible')
-      ) {
-        return;
-      }
-      inFlight = true;
-      try {
-        const response = await fetch(`${API_BASE_URL}/realtime/pulses`, {
-          headers: {
-            ...getCloudBaseRequestHeaders(),
-            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-          },
-          cache: 'no-store',
-        });
-        if (!response.ok || disposed) return;
-        const next = (await response.json()) as {
-          success?: boolean;
-          domains?: Record<string, { bump?: number; detail?: { userId?: string } }>;
-        };
-        if (disposed || next.success === false) return;
-        const counter = next.domains?.staff_sessions;
-        if (!counter) return;
-        const bump = Number(counter.bump) || 0;
-        const targetUserId = String(counter.detail?.userId || '').trim();
-        const reason =
-          counter.detail?.reason === 'deleted' ? 'deleted' : 'deactivated';
-        const previous = staffSessionPulseRef.current;
-        staffSessionPulseRef.current = { bump, userId: targetUserId || undefined };
-        if (!previous || bump === previous.bump) return;
-        const currentUserId = String(userRef.current?.id || '').trim();
-        if (targetUserId && targetUserId !== currentUserId) return;
-        if (!targetUserId) {
-          await validateStaffSession(currentUserId);
-          return;
-        }
-        await forceLogout(reason);
-      } catch {
-        /* next poll retries */
-      } finally {
-        inFlight = false;
-      }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void validateStaffSession(user.id!);
     };
-
-    void pollStaffSessionPulse();
-    const interval = window.setInterval(() => void pollStaffSessionPulse(), STAFF_SESSION_PULSE_POLL_MS);
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') void pollStaffSessionPulse();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
     return () => {
-      disposed = true;
-      window.clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
     };
   }, [user?.id]);
 

@@ -38,6 +38,7 @@ import {
   saveVendorKpayAccount,
   postVendorCommissionWithdraw,
 } from "./vendor_commission_withdraw.tsx";
+import { issueVendorSessionToken, revokeVendorSession } from "./vendor_session_guard.tsx";
 import {
   deletePwaCheckoutDraft,
   resolveMerchantOrderIdFromOrder,
@@ -347,6 +348,7 @@ app.use("*", cors({
     "x-cloudbase-region",
     "x-cloudbase-publishable-key",
     "x-admin-operation-secret",
+    "x-vendor-session",
   ],
   exposeHeaders: ["Content-Length"],
   maxAge: 86400,
@@ -363,7 +365,8 @@ app.use("*", async (c, next) => {
       c.req.url.includes('/stats') ||
       c.req.url.includes('/vendors') ||
       c.req.url.includes('/campaigns') ||
-      c.req.url.includes('/bulk-assign-vendor')) {
+      c.req.url.includes('/bulk-assign-vendor') ||
+      c.req.url.includes('/vendor/commission-withdraw/')) {
     return await next();
   }
 
@@ -2931,6 +2934,7 @@ app.post("/make-server-16010b6f/vendor-auth/login", async (c) => {
     
     // Return vendor data without password
     const { password: _, ...vendorWithoutPassword } = vendor;
+    const sessionToken = await issueVendorSessionToken(String(vendor.id), String(vendor.email || email));
     
     return c.json({ 
       success: true,
@@ -2939,11 +2943,27 @@ app.post("/make-server-16010b6f/vendor-auth/login", async (c) => {
         storeName: storefrontSettings?.storeName || vendorSettings?.storeName || vendor.name,
         storeSlug: storefrontSettings?.storeSlug || vendorSettings?.storeSlug || vendor.storeSlug,
       },
+      sessionToken,
       message: "Login successful"
     });
   } catch (error) {
     console.error("❌ [VendorAuth] Error during login:", error);
     return c.json({ error: "Failed to login", details: String(error) }, 500);
+  }
+});
+
+app.post("/make-server-16010b6f/vendor-auth/logout", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const vendorId = String((body as { vendorId?: string }).vendorId || "").trim();
+    if (!vendorId) {
+      return c.json({ error: "vendorId is required" }, 400);
+    }
+    await revokeVendorSession(vendorId);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("❌ [VendorAuth] Logout error:", error);
+    return c.json({ error: "Failed to logout" }, 500);
   }
 });
 
@@ -4398,7 +4418,11 @@ app.post("/make-server-16010b6f/products", async (c) => {
       name: body.title || body.name, // Ensure name field exists
       description: safeDescription, // ✅ Safe Unicode description
       variants: formattedVariants, // Store formatted variants
-      commissionRate: body.commissionRate !== undefined ? parseFloat(body.commissionRate) : 0, // 🔥 Product-level commission rate (%)
+      ...(body.commissionRate !== undefined &&
+      body.commissionRate !== null &&
+      String(body.commissionRate).trim() !== ""
+        ? { commissionRate: parseFloat(String(body.commissionRate)) }
+        : {}),
       selectedVendors: body.selectedVendors || [], // 🔥 Multi-vendor support
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -4637,7 +4661,13 @@ app.put("/make-server-16010b6f/products/:id", async (c) => {
       price: formattedPrice, // Store formatted price
       name: restPatch.title || restPatch.name || existingProduct.name, // Ensure name field exists
       description: safeDescription, // ✅ Safe Unicode description
-      commissionRate: restPatch.commissionRate !== undefined ? parseFloat(restPatch.commissionRate) : (existingProduct.commissionRate || 0), // 🔥 Product-level commission rate (%)
+      ...(restPatch.commissionRate !== undefined
+        ? String(restPatch.commissionRate).trim() === ""
+          ? { commissionRate: undefined }
+          : { commissionRate: parseFloat(String(restPatch.commissionRate)) }
+        : existingProduct.commissionRate !== undefined
+          ? { commissionRate: existingProduct.commissionRate }
+          : {}),
       selectedVendors: nextSelectedVendors,
       vendorFreeShipping: nextVendorFreeShipping,
       updatedAt: new Date().toISOString(),
@@ -8824,7 +8854,7 @@ app.put("/make-server-16010b6f/vendor-applications/:id", async (c) => {
       status: "active",
       productsCount: 0,
       totalRevenue: 0,
-      commission: parseInt(String((application as any).requestedCommission || ""), 10) || 15,
+      commission: parseInt(String((application as any).requestedCommission || ""), 10) || 0,
       joinedDate: new Date().toISOString(),
       avatar:
         ((application as any).companyName || (application as any).businessName)?.substring(0, 2).toUpperCase() ||
@@ -10426,7 +10456,10 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
       if (vendor?.id) {
         vendorMap.set(vendor.id, {
           name: vendor.name || vendor.businessName,
-          commission: vendor.commission || 15, // Default 15% (fallback only)
+          commission:
+            vendor.commission !== undefined && vendor.commission !== null && vendor.commission !== ""
+              ? parseFloat(String(vendor.commission).replace(/[^0-9.-]/g, "")) || 0
+              : 0,
           email: vendor.email,
         });
       }
@@ -10438,16 +10471,19 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
       return 0;
     };
 
-    /** Positive commission % from number or string (e.g. 10, "10", "10%"). */
-    const parseCommissionPercent = (v: unknown): number => {
-      if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
-      if (v == null || v === "") return 0;
+    /** Commission % from number or string; null when unset. */
+    const parseCommissionPercent = (v: unknown): number | null => {
+      if (v == null || v === "") return null;
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
       const n = parseFloat(String(v).replace(/[^0-9.-]/g, ""));
-      return Number.isFinite(n) && n > 0 ? n : 0;
+      return Number.isFinite(n) && n >= 0 ? n : null;
     };
 
+    const productHasExplicitRate = (rate: unknown) =>
+      rate !== undefined && rate !== null && String(rate).trim() !== "";
+
     // 🔥 Create product lookup map for commission rates + owning vendor (line-level payout split)
-    const productMap = new Map<string, { name: string; commissionRate: unknown; vendorId: string | null }>();
+    const productMap = new Map<string, { name: string; commissionRate: unknown; vendorId: string | null; hasExplicitRate: boolean }>();
     validProducts.forEach((product: any) => {
       if (product?.id == null || String(product.id).trim() === "") return;
       const vid =
@@ -10457,10 +10493,8 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
           : null);
       const info = {
         name: product.name || product.title,
-        commissionRate:
-          product.commissionRate !== undefined && product.commissionRate !== null
-            ? product.commissionRate
-            : 0,
+        commissionRate: productHasExplicitRate(product.commissionRate) ? product.commissionRate : null,
+        hasExplicitRate: productHasExplicitRate(product.commissionRate),
         vendorId: vid != null && String(vid).trim() !== "" ? String(vid) : null,
       };
       const idKey = String(product.id).trim();
@@ -10514,7 +10548,7 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
       const orderVendorFallback = order.vendorId || order.vendor || "Unknown";
       const vendorInfoFallback = vendorMap.get(orderVendorFallback) || {
         name: order.vendor || "Unknown Vendor",
-        commission: 15,
+        commission: 0,
         email: "",
       };
 
@@ -10548,20 +10582,27 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
         for (const item of order.items) {
           const productInfo = resolveProductInfo(item);
           const lineSub = parseMoney(item.price) * (item.quantity || 1);
-          // Per-line %: prefer snapshot on the order line (checkout), then catalog product.
-          const rateFromLine = parseCommissionPercent(
-            item.commissionRate ?? item.commission ?? item.product?.commissionRate
-          );
-          const rateFromProduct = parseCommissionPercent(productInfo?.commissionRate);
-          const rate = rateFromLine > 0 ? rateFromLine : rateFromProduct;
-          const lineComm = lineSub * (rate / 100);
-          commission += lineComm;
 
           const lineVendorKey =
             (item.vendorId != null && String(item.vendorId).trim() !== "" && String(item.vendorId)) ||
             (item.vendor != null && String(item.vendor).trim() !== "" && String(item.vendor)) ||
             (productInfo?.vendorId != null && String(productInfo.vendorId)) ||
             String(orderVendorFallback);
+
+          // Per-line %: line snapshot → product admin rate → vendor contract → 0% default
+          const rateFromLine = parseCommissionPercent(
+            item.commissionRate ?? item.commission ?? item.product?.commissionRate
+          );
+          const rateFromProduct = productInfo?.hasExplicitRate
+            ? parseCommissionPercent(productInfo.commissionRate)
+            : null;
+          const vMetaForRate =
+            vendorMap.get(lineVendorKey) ||
+            (lineVendorKey === String(orderVendorFallback) ? vendorInfoFallback : null);
+          const rateFromVendor = parseCommissionPercent(vMetaForRate?.commission);
+          const rate = rateFromLine ?? rateFromProduct ?? rateFromVendor ?? 0;
+          const lineComm = lineSub * (rate / 100);
+          commission += lineComm;
 
           const vMeta =
             vendorMap.get(lineVendorKey) ||

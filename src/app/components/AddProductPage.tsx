@@ -283,7 +283,9 @@ export function AddProductPage({ onBack, onSave }: AddProductPageProps) {
       status: status,
       
       // 🔥 Commission Rate (Product-level)
-      commissionRate: commissionRate ? parseFloat(commissionRate) : 0,
+      ...(commissionRate.trim() !== ""
+        ? { commissionRate: parseFloat(commissionRate) }
+        : {}),
       
       // Media
       images: images,
@@ -586,7 +588,7 @@ export function AddProductPage({ onBack, onSave }: AddProductPageProps) {
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">%</span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1.5">
-                      Platform commission for this product (e.g., 15% for electronics, 10% for smartphones, 8% for fashion)
+                      Leave blank for no product-specific rate (uses vendor contract, otherwise 0%).
                     </p>
                   </div>
                 </CardContent>

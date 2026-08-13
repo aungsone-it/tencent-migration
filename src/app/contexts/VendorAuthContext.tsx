@@ -10,6 +10,11 @@ import {
   type VendorAuthCookieVendor,
 } from '../utils/vendorAuthCookie';
 import {
+  clearVendorSessionToken,
+  getVendorSessionHeaders,
+  storeVendorSessionToken,
+} from '../utils/vendorSessionHeaders';
+import {
   resolveVendorAdminPortalContext,
   vendorAuthMatchesAdminPortal,
 } from '../utils/vendorAdminPortalAccess';
@@ -166,6 +171,7 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
         setVendor(null);
         localStorage.removeItem('vendorAuth');
         clearVendorAuthSessionCookie();
+        clearVendorSessionToken();
         return;
       }
       if (validity === "unknown") {
@@ -183,6 +189,7 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
         setVendor(null);
         localStorage.removeItem('vendorAuth');
         clearVendorAuthSessionCookie();
+        clearVendorSessionToken();
         return;
       }
 
@@ -273,6 +280,10 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
           localStorage.setItem('vendorAuth', JSON.stringify(vendorData));
         }
 
+        if (typeof data.sessionToken === "string" && data.sessionToken.trim()) {
+          storeVendorSessionToken(data.sessionToken);
+        }
+
         setVendorAuthSessionCookie(vendorData, rememberMe);
 
         return { success: true };
@@ -287,9 +298,22 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     console.log('🔓 [VendorAuth] Logging out vendor...');
+    const vendorId = vendor?.vendorId;
     setVendor(null);
     localStorage.removeItem('vendorAuth');
     clearVendorAuthSessionCookie();
+    clearVendorSessionToken();
+    if (vendorId) {
+      void fetch(`${API_BASE_URL}/vendor-auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getCloudBaseRequestHeaders(),
+          ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+        },
+        body: JSON.stringify({ vendorId }),
+      }).catch(() => undefined);
+    }
     console.log('✅ [VendorAuth] Logout successful');
   };
 

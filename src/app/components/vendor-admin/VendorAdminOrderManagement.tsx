@@ -115,21 +115,21 @@ function MmkTiny({
 
 async function fetchVendorContractCommissionPercent(slugOrId: string | undefined): Promise<number> {
   const key = slugOrId?.trim();
-  if (!key) return 15;
+  if (!key) return 0;
   try {
     const res = await fetch(
       `${API_BASE_URL}/vendors/by-slug/${encodeURIComponent(key)}`,
       { headers: { ...getCloudBaseRequestHeaders(),
  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
     );
-    if (!res.ok) return 15;
+    if (!res.ok) return 0;
     const data = (await res.json()) as { vendor?: { commission?: unknown } };
     const c = data.vendor?.commission;
-    if (c == null || c === "") return 15;
+    if (c == null || c === "") return 0;
     const n = typeof c === "number" ? c : parseFloat(String(c));
-    return Number.isFinite(n) && n >= 0 ? n : 15;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   } catch {
-    return 15;
+    return 0;
   }
 }
 

@@ -676,7 +676,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         price: `$${finalPrice}`,
         compareAtPrice,
         costPerItem,
-        commissionRate: commissionRate ? parseFloat(commissionRate) : 0, // 🔥 Product commission rate
+        ...(commissionRate.trim() !== ""
+          ? { commissionRate: parseFloat(commissionRate) }
+          : {}),
         sku: finalSku,
         barcode,
         inventory: finalInventory,
@@ -1188,7 +1190,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">%</span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">Platform commission for this product (e.g., 15% for electronics, 10% for smartphones)</p>
+                  <p className="text-xs text-slate-500 mt-1">Leave blank for no product-specific rate (uses vendor contract, otherwise 0%).</p>
                 </div>
                 
                 {compareAtPrice && parseFloat(compareAtPrice) > parseFloat(price) && (

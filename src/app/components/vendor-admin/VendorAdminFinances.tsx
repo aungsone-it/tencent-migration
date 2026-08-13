@@ -64,6 +64,7 @@ import {
   pctChangePriorWindow,
 } from "../../utils/vendorAdminAnalytics";
 import { computeVendorPayoutEarned } from "../../utils/vendorCommissionEarned";
+import { getVendorSessionHeaders } from "../../utils/vendorSessionHeaders";
 import { formatOrderNumberDisplay } from "../../utils/orderNumber";
 import { toast } from "sonner";
 
@@ -137,21 +138,21 @@ function transactionStatusFromOrder(order: any): "paid" | "pending" | "failed" {
 
 async function fetchVendorContractCommissionPercent(slugOrId: string | undefined): Promise<number> {
   const key = slugOrId?.trim();
-  if (!key) return 15;
+  if (!key) return 0;
   try {
     const res = await fetch(
       `${API_BASE_URL}/vendors/by-slug/${encodeURIComponent(key)}`,
       { headers: { ...getCloudBaseRequestHeaders(),
  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } }
     );
-    if (!res.ok) return 15;
+    if (!res.ok) return 0;
     const data = (await res.json()) as { vendor?: { commission?: unknown } };
     const c = data.vendor?.commission;
-    if (c == null || c === "") return 15;
+    if (c == null || c === "") return 0;
     const n = typeof c === "number" ? c : parseFloat(String(c));
-    return Number.isFinite(n) && n >= 0 ? n : 15;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   } catch {
-    return 15;
+    return 0;
   }
 }
 
@@ -180,7 +181,7 @@ export function VendorAdminFinances({
   const [rawOrders, setRawOrders] = useState<any[]>(cachedOrders);
   const [rawProducts, setRawProducts] = useState<any[]>(cachedProducts);
   const [vendorContractCommissionPct, setVendorContractCommissionPct] = useState(
-    typeof cachedContractPct === "number" ? cachedContractPct : 15
+    typeof cachedContractPct === "number" ? cachedContractPct : 0
   );
   const [txPage, setTxPage] = useState(1);
   const [txPageSize, setTxPageSize] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
@@ -206,12 +207,16 @@ export function VendorAdminFinances({
         {
           headers: {
             ...getCloudBaseRequestHeaders(),
+            ...getVendorSessionHeaders(),
             ...(cloudbasePublishableKey
               ? { Authorization: `Bearer ${cloudbasePublishableKey}` }
               : {}),
           },
         },
       );
+      if (res.status === 401) {
+        throw new Error("Session expired. Please sign in again to view your commission wallet.");
+      }
       if (!res.ok) throw new Error("Failed to load wallet");
       const data = (await res.json()) as { wallet?: VendorCommissionWallet };
       const next = data.wallet ?? null;
@@ -219,6 +224,9 @@ export function VendorAdminFinances({
       if (next?.kpayPhone) setKpayPhoneInput(next.kpayPhone);
     } catch (error) {
       console.error("Failed to load commission wallet:", error);
+      if (error instanceof Error && /sign in again/i.test(error.message)) {
+        toast.error(error.message);
+      }
     } finally {
       setWalletLoading(false);
     }
@@ -396,18 +404,45 @@ export function VendorAdminFinances({
 
     setWithdrawing(true);
     try {
+      const sessionHeaders = {
+        ...getCloudBaseRequestHeaders(),
+        ...getVendorSessionHeaders(),
+        ...(cloudbasePublishableKey
+          ? { Authorization: `Bearer ${cloudbasePublishableKey}` }
+          : {}),
+      };
+
+      const savedPhone = wallet?.kpayPhone?.trim() ?? "";
+      if (!savedPhone || savedPhone !== phone) {
+        const saveRes = await fetch(
+          `${API_BASE_URL}/vendor/kpay-account/${encodeURIComponent(vendorId)}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              ...sessionHeaders,
+            },
+            body: JSON.stringify({ kpayPhone: phone }),
+          },
+        );
+        if (!saveRes.ok) {
+          const savePayload = (await saveRes.json().catch(() => ({}))) as { error?: string };
+          if (saveRes.status === 401) {
+            throw new Error("Session expired. Please sign in again before withdrawing.");
+          }
+          throw new Error(savePayload.error || "Failed to save KBZPay account");
+        }
+      }
+
       const withdrawRes = await fetch(
         `${API_BASE_URL}/vendor/commission-withdraw/${encodeURIComponent(vendorId)}`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...getCloudBaseRequestHeaders(),
-            ...(cloudbasePublishableKey
-              ? { Authorization: `Bearer ${cloudbasePublishableKey}` }
-              : {}),
+            ...sessionHeaders,
           },
-          body: JSON.stringify({ kpayPhone: phone }),
+          body: JSON.stringify({}),
         },
       );
       const rawText = await withdrawRes.text().catch(() => "");
@@ -437,7 +472,9 @@ export function VendorAdminFinances({
         const serverMsg =
           payload.error ||
           payload.message ||
-          (withdrawRes.status === 502
+          (withdrawRes.status === 401
+            ? "Session expired. Please sign in again before withdrawing."
+            : withdrawRes.status === 502
             ? "Payout server returned 502 — redeploy make-server-16010b6f with the latest code."
             : withdrawRes.statusText || "Withdrawal failed");
         const isLocalMockSuccess =
@@ -728,7 +765,8 @@ export function VendorAdminFinances({
                 </Button>
                 {!walletLoading && (wallet?.availableBalance ?? 0) <= 0 && (
                     <p className="text-[11px] text-amber-700 leading-snug">
-                      Withdrawals use ready-to-ship &amp; fulfilled order earnings (minimum{" "}
+                      Withdrawals use ready-to-ship, fulfilled, and delivered order earnings with
+                      collected payment (minimum{" "}
                       {(wallet?.minWithdrawAmount ?? 1).toLocaleString()} MMK).
                     </p>
                   )}
@@ -1008,8 +1046,9 @@ export function VendorAdminFinances({
           <DialogHeader>
             <DialogTitle>Withdraw commission to KBZPay</DialogTitle>
             <DialogDescription>
-              Enter your KBZPay wallet phone number. Eligible earnings include ready-to-ship and
-              fulfilled orders. Payout is sent automatically via KBZ Enterprise Payment.
+              Enter your KBZPay wallet phone number. Eligible earnings include ready-to-ship,
+              fulfilled, and delivered orders with collected payment. Payout is sent automatically via
+              KBZ Enterprise Payment.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">

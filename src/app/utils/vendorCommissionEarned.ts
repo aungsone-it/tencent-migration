@@ -1,7 +1,6 @@
 /**
- * Vendor commission earned — same rules as super-admin vendor profile:
- * accrues only on orders shipped or later in the fulfillment pipeline,
- * per line net of order-level discount, using line → product → vendor default %.
+ * Vendor commission earned — aligned with server-side vendor_commission_withdraw.tsx:
+ * accrues on ready-to-ship+ orders with collected payment, per line net of order-level discount.
  */
 
 export type VendorCatalogKeys = { ids: Set<string>; skus: Set<string> };
@@ -19,15 +18,15 @@ export function normalizeOrderStatusKey(status: string | undefined): string {
     .replace(/\s+/g, "-");
 }
 
-/** Commission & vendor revenue accrue only after fulfillment pipeline (aligned with VendorProfile). */
-export const VENDOR_COMMISSION_ACCRUE_STATUSES = new Set([
-  "processing",
-  "ready-to-ship",
-  "fulfilled",
-]);
+function normalizePaymentKey(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+}
 
-/** Orders eligible for KBZPay commission withdrawal (ready-to-ship onward). */
-export const VENDOR_WITHDRAWABLE_STATUSES = new Set([
+/** Revenue/commission dashboard cards — processing onward (inventory must be committed). */
+export const VENDOR_COMMISSION_ACCRUE_STATUSES = new Set([
   "processing",
   "ready-to-ship",
   "fulfilled",
@@ -35,11 +34,67 @@ export const VENDOR_WITHDRAWABLE_STATUSES = new Set([
   "delivered",
 ]);
 
+/** Platform default when admin has not set vendor contract or product rate. */
+export const PLATFORM_DEFAULT_COMMISSION_PERCENT = 0;
+
+/** Orders eligible for KBZPay commission withdrawal (ready-to-ship onward, payment collected). */
+export const VENDOR_WITHDRAWABLE_STATUSES = new Set([
+  "ready-to-ship",
+  "fulfilled",
+  "shipped",
+  "delivered",
+]);
+
+const COD_COLLECTED_STATUSES = new Set(["fulfilled", "delivered"]);
+
+function isCodPaymentMethod(order: any): boolean {
+  const method = normalizePaymentKey(order?.paymentMethod);
+  return method === "cod" || method.includes("cash-on-delivery") || method.includes("cash on delivery");
+}
+
+function isKpayPaymentMethod(order: any): boolean {
+  const method = normalizePaymentKey(order?.paymentMethod);
+  return method.includes("kpay") || method.includes("kbz");
+}
+
+function orderRefundBlocksWithdraw(order: any): boolean {
+  const pay = normalizePaymentKey(order?.paymentStatus);
+  if (pay === "refunded" || pay === "pending-refund") return true;
+  const kpayRefund = normalizePaymentKey(order?.kpay?.refund?.status);
+  return (
+    kpayRefund === "success" ||
+    kpayRefund === "already-refunded" ||
+    kpayRefund === "already_refunded"
+  );
+}
+
+function isOrderPaymentCollected(order: any): boolean {
+  const pay = normalizePaymentKey(order?.paymentStatus);
+  const st = normalizeOrderStatusKey(String(order?.status ?? ""));
+  const kpayStatus = normalizePaymentKey(order?.kpay?.status);
+
+  if (orderRefundBlocksWithdraw(order)) return false;
+  if (pay === "unpaid" || pay === "pending" || pay === "pending-verification") return false;
+
+  if (isCodPaymentMethod(order)) {
+    return COD_COLLECTED_STATUSES.has(st) || pay === "paid";
+  }
+
+  if (isKpayPaymentMethod(order)) {
+    return pay === "paid" || kpayStatus === "paid";
+  }
+
+  return pay === "paid" || pay === "complete";
+}
+
 export function isVendorOrderWithdrawable(order: any): boolean {
   if (order == null || typeof order !== "object") return false;
   const st = normalizeOrderStatusKey(String(order.status ?? ""));
-  if (st === "cancelled") return false;
-  return VENDOR_WITHDRAWABLE_STATUSES.has(st);
+  if (st === "cancelled" || st === "canceled") return false;
+  if (!VENDOR_WITHDRAWABLE_STATUSES.has(st)) return false;
+  if (order.inventoryDeducted === false) return false;
+  if (!isOrderPaymentCollected(order)) return false;
+  return true;
 }
 
 export function buildVendorCatalogKeys(products: any[]): VendorCatalogKeys {
@@ -96,33 +151,42 @@ export function orderLineNetAfterDiscount(lineGross: number, order: any): number
   return lineGross;
 }
 
-function lineCommissionPercent(item: any, products: any[], defaultVendorPercent: number): number {
-  if (
-    item.commissionRate != null &&
-    item.commissionRate !== "" &&
-    (typeof item.commissionRate === "number" || Number.isFinite(parseFloat(String(item.commissionRate))))
-  ) {
-    return parseOrderMoney(item.commissionRate);
-  }
-  if (item.product?.commission != null) {
-    return parseOrderMoney(item.product.commission);
-  }
-  if (item.commission != null) {
-    return parseOrderMoney(item.commission);
-  }
+function explicitCommissionPercent(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = parseOrderMoney(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function productHasExplicitCommissionRate(product: any): boolean {
+  return (
+    product?.commissionRate !== undefined &&
+    product?.commissionRate !== null &&
+    String(product.commissionRate).trim() !== ""
+  );
+}
+
+function defaultVendorCommissionPercent(value: unknown): number {
+  if (value == null || value === "") return PLATFORM_DEFAULT_COMMISSION_PERCENT;
+  const parsed = explicitCommissionPercent(value);
+  return parsed != null ? parsed : PLATFORM_DEFAULT_COMMISSION_PERCENT;
+}
+
+function lineCommissionPercent(item: any, products: any[], vendorContractPercent: number): number {
+  const fromLine = explicitCommissionPercent(
+    item.commissionRate ?? item.commission ?? item.product?.commissionRate ?? item.product?.commission
+  );
+  if (fromLine != null) return fromLine;
+
   const matched = products.find(
     (p: any) =>
       (item.sku && p.sku === item.sku) ||
-      (item.name && p.name === item.name) ||
       (item.productId != null && p.id != null && String(p.id) === String(item.productId))
   );
-  if (matched?.commissionRate != null) {
-    return parseOrderMoney(matched.commissionRate);
+  if (matched && productHasExplicitCommissionRate(matched)) {
+    const fromProduct = explicitCommissionPercent(matched.commissionRate ?? matched.commission);
+    if (fromProduct != null) return fromProduct;
   }
-  if (matched?.commission != null) {
-    return parseOrderMoney(matched.commission);
-  }
-  return parseOrderMoney(defaultVendorPercent);
+  return vendorContractPercent;
 }
 
 /**
@@ -164,6 +228,7 @@ export function computeVendorPayoutEarned(
   defaultCommissionPercent: number
 ): number {
   const catalog = buildVendorCatalogKeys(products);
+  const contractPct = defaultVendorCommissionPercent(defaultCommissionPercent);
   let payout = 0;
 
   for (const order of orders) {
@@ -175,7 +240,7 @@ export function computeVendorPayoutEarned(
       if (!lineItemBelongsToVendor(item, vendorId, catalog)) continue;
       const gross = orderLineGross(item);
       const net = orderLineNetAfterDiscount(gross, order);
-      const pct = lineCommissionPercent(item, products, defaultCommissionPercent);
+      const pct = lineCommissionPercent(item, products, contractPct);
       payout += Math.max(0, net - (net * pct) / 100);
     }
   }

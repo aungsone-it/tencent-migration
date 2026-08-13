@@ -19,7 +19,11 @@ export function VendorForm({ onBack, onSave, editingVendor }: VendorFormProps) {
   const [location, setLocation] = useState(editingVendor?.location || "");
   const [businessType, setBusinessType] = useState(editingVendor?.businessType || "");
   const [description, setDescription] = useState(editingVendor?.description || "");
-  const [commission, setCommission] = useState(editingVendor?.commission || 15);
+  const [commission, setCommission] = useState(
+    editingVendor?.commission != null && editingVendor.commission !== ""
+      ? editingVendor.commission
+      : 0
+  );
   const [status, setStatus] = useState(editingVendor?.status || "pending");
   const [freeShippingEnabled, setFreeShippingEnabled] = useState(
     editingVendor?.freeShippingEnabled === true

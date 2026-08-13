@@ -363,7 +363,9 @@ export function VendorAdminAddProduct({
         hasVariants,
         variants: hasVariants ? variants : undefined,
         variantOptions: hasVariants ? variantOptions : undefined,
-        commissionRate: commissionRate ? parseFloat(commissionRate) : 0, // 🔥 Product commission rate (default 0)
+        ...(commissionRate.trim() !== ""
+          ? { commissionRate: parseFloat(commissionRate) }
+          : {}),
         ...(vendorFreeShippingAccess
           ? {
               vendorFreeShipping: { [vendorId]: freeShipping },
@@ -892,7 +894,7 @@ export function VendorAdminAddProduct({
                   step="0.1"
                 />
                 <p className="text-sm text-slate-500 mt-1">
-                  Platform commission for this product (e.g., 15% for electronics, 10% for smartphones)
+                  Leave blank for no product-specific rate (uses vendor contract, otherwise 0%).
                 </p>
               </div>
             </CardContent>

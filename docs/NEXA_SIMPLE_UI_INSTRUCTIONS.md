@@ -50,8 +50,9 @@ Platform staff at `https://www.nexa-mm.com/admin` have one of **four roles**. Th
    - `https://yourstore.nexa-mm.com/admin`, or
    - `https://www.nexa-mm.com/vendor/your-store-slug/admin` (path-based)
 4. **Free shipping** (if enabled for your store): mark products or whole categories on **Products** / **Categories** — see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
-5. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
-6. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).
+5. **Finances** — view earnings and withdraw commission to your **KBZPay wallet** when balance is available. Platform commission is **0% by default** unless the admin set a rate for your store or specific products. You must be signed in; if withdrawal fails with “session expired”, sign out and sign in again.
+6. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
+7. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).
 
 ### Applying to sell
 
@@ -80,3 +81,4 @@ At `https://www.nexa-mm.com/vendor/application`:
 - Login issues: use **Forgot password** (OTP email) or contact your system admin.
 - Vendor application “Checking email…” stuck: refresh and try again; server validates again on submit.
 - Activity missing after approve: ensure you were logged in as staff (actions need your user account).
+- Vendor withdrawal “session expired”: sign out at `/vendor/login` and sign in again, then retry **Finances → Withdraw**.

@@ -50,6 +50,11 @@ All major entities are stored as JSON documents in `kv_store_16010b6f`:
 | `vendor_application:` | Vendor applications |
 | `kpay_txn:` | KBZPay transaction state (on TCB — not re-imported from Supabase) |
 | `kpay_pwa_draft:` | KBZPay PWA checkout drafts (orphan recovery in super-admin Orders) |
+| `vendor_withdrawals:{vendorId}` | KBZPay commission payout history for a vendor |
+| `vendor_withdraw_lock:{vendorId}` | In-flight withdrawal lock (prevents concurrent payouts) |
+| `vendor_withdrawal_txn:{merchOrderId}` | Single withdrawal record keyed by `VWD-*` merchant order id |
+| `vendor_session:{token}` | Vendor login session (30-day TTL) for secured payout routes |
+| `vendor_session_active:{vendorId}` | Active session token pointer per vendor |
 | `customer:{uid}:cart` | Signed-in cart |
 | `wishlist:{uid}` | Wishlist |
 | `chat:message:` | Chat messages |
@@ -148,6 +153,17 @@ Uses server pagination + category filter (see `fetchVendorProducts` in `module-c
 
 Order create rejects `shippingFee === 0` unless every line item resolves as free shipping for that vendor in KV. Client helpers: `src/app/utils/freeShipping.ts`. Full reference: [FREE_SHIPPING.md](./FREE_SHIPPING.md).
 
+**Vendor commission wallet & KBZPay withdrawal** (vendor session required — `x-vendor-session`):
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/vendor/commission-wallet/:vendorId` | Balances and withdrawal history |
+| `PUT` / `POST` | `/vendor/kpay-account/:vendorId` | Save KBZPay payout phone |
+| `POST` | `/vendor/commission-withdraw/:vendorId` | Payout available balance via KBZ `businesspay` |
+| `POST` | `/vendor-auth/logout` | Revoke vendor session token |
+
+Default platform commission is **0%** unless admin sets vendor or product rates. See [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
+
 **Admin audit (Settings → Activities):** Tracks **super-admin portal** actions only — product/user/vendor CRUD (explicit), settings, categories, orders status changes, etc. Storefront traffic (cart, checkout, KBZPay, customer self-service) is **not** logged. Actor must be a staff profile in `auth:user:{id}` with a staff role; `x-actor-user-id` is sent only from `migoo-staff-actor-id` (admin session), never from customer `migoo-user`.
 
 ---
@@ -158,7 +174,7 @@ Order create rejects `shippingFee === 0` unless every line item resolves as free
 |-----------|----------------|----------------------------|
 | **Guest shopper** | No login; anon JWT on API calls; cart in `localStorage` | **No** |
 | **Registered customer** | CloudBase/Tencent Auth (`signInWithPassword`, etc.) | **Yes** — 1 MAU per unique user ID per billing month |
-| **Vendor admin** | Vendor auth flow + `VendorAuthContext` | **Yes** (if using CloudBase/Tencent Auth session) |
+| **Vendor admin** | Vendor login (`/vendor-auth/login`) issues a **server session token** (`x-vendor-session`) for secured routes (commission wallet, KBZ payout account, withdraw). KV-backed vendor password auth + `VendorAuthContext`. | **Yes** (if using CloudBase/Tencent Auth session) |
 | **Super admin / staff** | Admin auth + setup checks | **Yes** |
 
 **MAU rule:** One account = one MAU for the whole month, regardless of daily logins or open tabs. Guest visits do not consume the 100k MAU quota on CloudBase/Tencent Pro.
@@ -227,6 +243,17 @@ KV writes bump the appropriate pulse row (via DB triggers in migrations). The br
 - Realtime on `kpay_txn:{merchantOrderId}` + HTTP polling fallback (~1.5s during checkout)
 
 See [PAYMENTS.md](./PAYMENTS.md).
+
+### Vendor commission withdrawal (KBZPay Enterprise Payment)
+
+Vendors withdraw accrued net earnings to a **KBZPay wallet** from vendor admin → **Finances**.
+
+- **Default platform commission:** **0%** on vendor contract and products unless admin sets a rate (see [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md)).
+- **Payout API:** `POST /vendor/commission-withdraw/:vendorId` — requires `x-vendor-session` header (issued on vendor login).
+- **Infrastructure:** KBZ `businesspay` via VPS PHP relay (`businesspay.php` + `KBZ_VPS_API_SECRET`); not the customer checkout QR/PWA path.
+- **KV:** `vendor_withdrawals:*`, `vendor_withdraw_lock:*`, `vendor_session:*`.
+
+Full reference: [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
 
 ### Stripe (not active in vendor checkout)
 
@@ -301,6 +328,7 @@ Functions (source → package → deploy):
 | [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md) | Routes, hosts, guards |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Hosting checklist |
 | [PAYMENTS.md](./PAYMENTS.md) | KBZPay flows |
+| [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md) | Commission rates (0% default), vendor KBZPay withdrawal |
 | [FREE_SHIPPING.md](./FREE_SHIPPING.md) | Per-vendor free shipping — KV model, API, checkout |
 | [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) | LCP, client cache |
 | [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md) | Read-model deploy validation |

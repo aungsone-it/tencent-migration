@@ -25,6 +25,7 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | **Super-admin Orders** | KBZPay **draft recovery** panel; optimistic list updates; badge count normalization |
 | **Logistics admin** | Delivery partners CRUD, per-region rates, logo upload (~500KB compress), warehouse role access |
 | **Free shipping** | Per-vendor product flags; super admin grants access; category + product bulk toggles; checkout 0 MMK when cart qualifies — see [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md) |
+| **Vendor commission & withdrawal** | **0% default** commission; admin-defined vendor/product rates; KBZPay Enterprise Payment payout from vendor Finances; session token auth — see [docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md](docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md) |
 | **Image storage** | **Production default:** files in TencentDB KV (`storage:obj:*` keys); optional CloudBase object storage via `CLOUDBASE_STORAGE_API_BASE_URL` |
 
 ### Earlier (June 2026)
@@ -304,6 +305,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/TCB_CONSOLE_SETUP.md](doc
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and env setup |
 | [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) | Read-model deploy validation and monitoring |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |
+| [docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md](docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md) | Commission rates (0% default), vendor KBZPay withdrawal, session auth |
 | [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md) | Per-vendor free shipping — data model, admin UI, checkout rules |
 | [cloudbase/function-env.template.env](cloudbase/function-env.template.env) | Cloud Function env vars (SES, SMS, KBZPay, storage) |
 | [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, deploy refresh, scroll restore, Realtime scale notes |

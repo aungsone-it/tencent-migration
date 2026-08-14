@@ -72,6 +72,17 @@ When reviewing or editing a vendor (**Vendor → Review applications** or vendor
 
 Full data model, API, and checkout rules: [FREE_SHIPPING.md](./FREE_SHIPPING.md).
 
+### Vendor commission (super admin)
+
+When creating or editing a vendor (**Vendor form** / approved application):
+
+| Field | Behavior |
+|-------|----------|
+| **Commission %** | Platform take from that vendor’s sales. **Default: 0%** when left unset or empty. |
+| **Product overrides** | Per-product **Commission Rate (%)** in product forms — leave blank to use the vendor contract; enter a value for a product-specific rate. |
+
+Commission is deducted from vendor net earnings before KBZPay withdrawal. Full rules and withdrawal setup: [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
+
 ### Orders
 
 - Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
@@ -146,6 +157,20 @@ Rules:
 
 See [FREE_SHIPPING.md](./FREE_SHIPPING.md) for checkout behavior and API details.
 
+### Finances and KBZPay withdrawal
+
+Vendor admin → **Finances** shows revenue, commission, and **available balance** for KBZPay payout.
+
+| Topic | Rule |
+|-------|------|
+| **Default commission** | **0%** unless super admin sets vendor contract (`commission`) or product-specific rate |
+| **Product commission field** | Leave blank → uses vendor contract; enter a number for a product override |
+| **Withdrawable orders** | `ready-to-ship`, `fulfilled`, `shipped`, or `delivered` with **collected payment** (COD only after delivery) |
+| **KBZPay phone** | Saved on vendor record before withdraw; Myanmar `09…` format |
+| **Session** | Vendor must be signed in (server session token); re-login once after session-auth deploy |
+
+Operators configure KBZ Enterprise Payment / VPS relay on the backend — see [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
+
 ### Public storefront verification
 
 Use **preview / open store** from vendor admin to verify:
@@ -194,6 +219,7 @@ Before release windows, confirm:
 - Storefront language menu shows English/Burmese; admin language controls stay English/Chinese
 - after backend deploy: run read-model validation (`docs/READ_MODEL_ROLLOUT.md`)
 - **Free shipping:** super admin access toggle → vendor category bulk ON/OFF → storefront checkout with all-free cart shows 0 MMK shipping
+- **Vendor withdrawal:** vendor re-login after deploy → Finances shows balance → test KBZ payout in UAT (`KPAY_BUSINESS_PAY_MOCK=1`) before production relay
 
 ## 6) Related docs
 
@@ -203,5 +229,6 @@ Before release windows, confirm:
 - Deployment: `docs/DEPLOYMENT.md`
 - Read-model rollout: `docs/READ_MODEL_ROLLOUT.md`
 - Payments: `docs/PAYMENTS.md`
+- Vendor commission & withdrawal: `docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md`
 - Simplified non-technical instructions: `docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md`
 - Outdated root markdown: `docs/LEGACY_DOCS.md`

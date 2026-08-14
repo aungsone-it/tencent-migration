@@ -86,6 +86,19 @@ The job syncs KBZ payment status, finalizes paid drafts, and logs `{ scanned, fi
 | POST | `/kpay/pwa/finalize/:merchantOrderId` | Retry finalize (admin UI) |
 | POST | `/kpay/pwa/reconcile` | Batch reconcile (cron, secret header) |
 
+## Vendor commission withdrawal (KBZPay payout)
+
+Separate from **customer checkout** — pays **vendor net earnings** to the vendor’s KBZPay wallet via KBZ Enterprise Payment (`businesspay`).
+
+| Topic | Detail |
+|-------|--------|
+| **UI** | Vendor admin → Finances → Withdraw to KBZPay |
+| **Default commission** | **0%** unless admin sets vendor contract or product rate |
+| **Auth** | `x-vendor-session` header (token from `POST /vendor-auth/login`) |
+| **Relay** | VPS `businesspay.php` + `KBZ_VPS_API_SECRET` (CloudBase cannot use mTLS gateway directly) |
+
+Canonical reference: [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
+
 ## Non-goals for this doc
 
 - Historical payment experiments

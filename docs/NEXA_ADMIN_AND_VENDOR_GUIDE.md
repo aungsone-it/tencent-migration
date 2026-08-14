@@ -37,13 +37,16 @@ Customers shop on **one vendor at a time**:
 ### Core areas
 
 - Dashboard/home
-- Products, categories, inventory (platform-wide catalog management for admins)
-- Orders
+- Products, categories, inventory (platform-wide catalog — super admin creates/edits; vendors select only)
+- Orders (includes **KBZPay draft recovery** panel)
 - Vendors (**Review applications** — new sellers are approved here; there is no “Add vendor” button)
 - Customers
-- Marketing
 - Chat
+- **Subscriptions** (Plans, Subscribers)
 - Finances and settings (role dependent)
+- Logistics
+
+> **Marketing** is not in the current sidebar (legacy `/admin/marketing` redirects to Home).
 
 ### Settings tabs
 
@@ -133,11 +136,15 @@ After approval, the vendor completes setup at `/vendor/setup` and signs in at `/
 ### Vendor admin areas
 
 - Analytics
-- Products and categories (this vendor’s catalog only)
-- Orders
+- **Products → All Products** — select/unselect items from the **platform catalog** (read-only price, stock, status); remove from store; free-shipping toggles
+- **Products → Categories** — create vendor-owned categories and assign already-selected products for storefront tabs
+- Orders (includes **KBZPay draft recovery** for paid PWA checkouts with no order)
 - Customers
+- **Subscriptions** — Plans and Subscribers
 - Finances
 - Settings/branding (logo, subdomain preview, custom domain, terms/privacy, social links)
+
+**Platform catalog:** Super admin creates all product data under **Products** / **Inventory**. Vendors do not add or edit catalog records — they use **Select Product** to pick from the pool super admin maintains. Super admin can also assign vendors on the product form or via **Vendors → profile → Products**.
 
 ### Free shipping (vendor catalog)
 

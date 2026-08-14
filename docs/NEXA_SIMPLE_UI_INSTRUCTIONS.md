@@ -12,8 +12,10 @@ This version is intentionally short and non-technical.
 
 1. Open `https://www.nexa-mm.com/admin`.
 2. Sign in with your staff account.
-3. Use the left menu for Products, Orders, Vendors, Customers, Marketing, Chat, and Settings.
+3. Use the left menu for **Home**, **Product** (Products, Categories, Inventory), **Orders**, **Vendor**, **Chat**, **Customers**, **Subscriptions** (Plans, Subscribers), **Finances**, **Logistics**, and **Settings**.
 4. If you cannot see a section, your role likely does not have permission — see **Admin user roles** below.
+
+> **Marketing** is not in the current menu (legacy route redirects to Home).
 
 ### Settings
 
@@ -30,9 +32,9 @@ Platform staff at `https://www.nexa-mm.com/admin` have one of **four roles**. Th
 | Role | Access summary |
 |------|----------------|
 | **Store Owner** | Full access — all menus including **Finances** and **Settings → Users**. Can manage all staff roles. |
-| **Administrator** | Operations — products, orders, vendors, customers, chat, logistics, settings (General + Activities). **No Finances.** No **Settings → Users**. |
-| **Data Entry** | Catalog only — Home, Product (products/categories/inventory), Chat, limited Settings (General). |
-| **Warehouse** | Fulfillment — Home, Orders, Inventory, Logistics. No products, vendors, finances, settings, or global search. |
+| **Administrator** | All menus **except Finances**; **Settings** (General + Activities, no Users tab). |
+| **Data Entry** | Home, Product, Categories, Inventory, **Chat**, Settings (General, no Users). |
+| **Warehouse** | Home, Orders, Inventory, Logistics only. No products, vendors, finances, or settings. |
 
 **Who can add staff:** only **Store Owner** (Settings → Users). To fix a missing menu item, ask the Store Owner to check your role there.
 
@@ -49,10 +51,14 @@ Platform staff at `https://www.nexa-mm.com/admin` have one of **four roles**. Th
 3. Manage your store in the vendor admin:
    - `https://yourstore.nexa-mm.com/admin`, or
    - `https://www.nexa-mm.com/vendor/your-store-slug/admin` (path-based)
-4. **Free shipping** (if enabled for your store): mark products or whole categories on **Products** / **Categories** — see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
-5. **Finances** — view earnings and withdraw commission to your **KBZPay wallet** when balance is available. Platform commission is **0% by default** unless the admin set a rate for your store or specific products. You must be signed in; if withdrawal fails with “session expired”, sign out and sign in again.
-6. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
-7. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).
+4. Complete setup at `/vendor/setup` if prompted after approval.
+5. **Products → Select Product** — pick from the **platform catalog** (read-only price/stock). **Products → Categories** — create store tabs and assign selected products.
+6. **Free shipping** (if enabled for your store): mark products or whole categories on **Products** / **Categories** — see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
+7. **Finances** — view earnings and withdraw commission to your **KBZPay wallet** when balance is available. Platform commission is **0% by default** unless the admin set a rate for your store or specific products. You must be signed in; if withdrawal fails with “session expired”, sign out and sign in again.
+8. **Orders** — update status; use **KBZPay draft recovery** if customer paid but no order exists.
+9. **Subscriptions** — Plans and Subscribers (if enabled).
+10. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
+11. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).
 
 ### Applying to sell
 
@@ -69,7 +75,9 @@ At `https://www.nexa-mm.com/vendor/application`:
 - Use the **chat bubble** (bottom-right) on the homepage or any vendor store for support.
 - Use the store phone contact to choose **Dial** or **Viber**. On desktop the choice appears on hover; on mobile both buttons are shown in the menu.
 - Tap **Add to Home** (above the chat bubble) to save a vendor store shortcut on your phone. On Android Chrome you may get an install prompt; on iPhone use Safari → Share → Add to Home Screen.
-- Checkout supports **Cash on Delivery** and **KBZPay**. After KBZPay app payment, order summary may open on the platform apex `/summary` (e.g. `https://nexa-apex.online/summary`); use Continue Shopping to return to the vendor store.
+- **Wishlist / Saved** requires sign-in (guests are prompted to log in).
+- Select **delivery region/partner** before payment; **COD** only appears when your region supports it.
+- After KBZPay payment, order summary may open on the platform apex `/summary` (e.g. `https://nexa-apex.online/summary`); use Continue Shopping to return to the vendor store.
 - **Free shipping:** when every item in your cart is marked free shipping for that store, checkout shows **FREE** delivery (0 MMK). Mixed carts pay normal delivery fees.
 - **Forgot password:** customers and vendors use the reset page — enter email, OTP code from email, new password. Vendors: **Forgot Password?** on `/vendor/login`.
 

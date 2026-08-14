@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -16,33 +16,60 @@
     }
     * { box-sizing: border-box; }
     body {
-      font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: "Segoe UI", system-ui, sans-serif;
       font-size: 15px;
       line-height: 1.6;
       color: var(--ink);
       background: var(--bg);
-      max-width: 44rem;
+      max-width: 46rem;
       margin: 0 auto;
       padding: 0 1.5rem 3rem;
+    }
+    html[data-lang="zh"] body {
+      font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
     }
     .doc-header {
       border-bottom: 1px solid var(--border);
       padding: 2rem 0 1.5rem;
       margin-bottom: 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
     }
+    .doc-header-main { flex: 1; min-width: 0; }
     .doc-header h1 {
-      font-size: 1.75rem;
+      font-size: 1.65rem;
       font-weight: 700;
       color: var(--accent);
       margin: 0 0 0.35rem;
       letter-spacing: -0.02em;
+      line-height: 1.35;
     }
-    .doc-meta {
-      font-size: 0.875rem;
+    .doc-meta { font-size: 0.875rem; color: var(--muted); margin: 0; }
+    .lang-toggle {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .lang-toggle button {
+      font: inherit;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      padding: 0.45rem 0.85rem;
+      border: none;
+      background: transparent;
       color: var(--muted);
-      margin: 0;
+      cursor: pointer;
     }
-    .doc-meta span + span::before { content: " · "; }
+    .lang-toggle button:hover { background: var(--accent-light); color: var(--accent); }
+    .lang-toggle button.active { background: var(--accent); color: #fff; }
+    html[data-lang="en"] .zh { display: none !important; }
+    html[data-lang="zh"] .en { display: none !important; }
     nav.toc {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -59,27 +86,21 @@
       margin-bottom: 0.5rem;
     }
     nav.toc ol { margin: 0; padding-left: 1.25rem; }
-    nav.toc li { margin: 0.25rem 0; }
+    nav.toc li { margin: 0.35rem 0; }
     nav.toc a { color: var(--accent); text-decoration: none; }
     nav.toc a:hover { text-decoration: underline; }
     h2 {
-      font-size: 1.25rem;
+      font-size: 1.2rem;
       font-weight: 600;
       color: var(--accent);
       margin: 2.5rem 0 1rem;
       padding-bottom: 0.35rem;
       border-bottom: 2px solid var(--accent-light);
-      page-break-after: avoid;
     }
-    h3 {
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: var(--ink);
-      margin: 1.5rem 0 0.65rem;
-      page-break-after: avoid;
-    }
-    p, li { color: var(--muted); }
-    strong { color: var(--ink); font-weight: 600; }
+    h3 { font-size: 1.02rem; font-weight: 600; margin: 1.5rem 0 0.65rem; }
+    h4 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.5rem; color: var(--muted); }
+    p { margin: 0 0 1rem; }
+    strong { font-weight: 600; }
     code {
       font-family: ui-monospace, Consolas, monospace;
       font-size: 0.875em;
@@ -90,7 +111,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       margin: 0.75rem 0 1rem;
     }
     th, td {
@@ -101,7 +122,7 @@
     }
     th { background: var(--accent-light); font-weight: 600; }
     tr:nth-child(even) td { background: var(--surface); }
-    ol, ul { padding-left: 1.35rem; }
+    ol, ul { padding-left: 1.35rem; margin: 0.5rem 0 1rem; }
     li { margin: 0.35rem 0; }
     .doc-footer {
       margin-top: 3rem;
@@ -110,200 +131,434 @@
       font-size: 0.8125rem;
       color: var(--muted);
     }
-    @media print {
-      body { font-size: 11pt; padding: 0.6in; max-width: none; }
-      nav.toc { break-inside: avoid; }
-      h2 { break-before: page; }
-      h2:first-of-type { break-before: auto; }
-    }
+    @media print { .lang-toggle { display: none; } }
   </style>
 </head>
 <body>
 
   <header class="doc-header">
-    <h1>NEXA Platform — Client Instructions</h1>
-    <p class="doc-meta">
-      <span>User manual</span>
-      <span>Customers, vendors &amp; staff</span>
-      <span>Plain language</span>
-    </p>
+    <div class="doc-header-main">
+      <h1>
+        <span class="en">NEXA Platform — Client Instructions</span>
+        <span class="zh">NEXA 平台 — 客户使用说明</span>
+      </h1>
+      <p class="doc-meta">
+        <span class="en">User manual · Customers, vendors &amp; staff</span>
+        <span class="zh">用户手册 · 顾客、商家与员工</span>
+      </p>
+    </div>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button type="button" id="btn-en" class="active" aria-pressed="true">English</button>
+      <button type="button" id="btn-zh" aria-pressed="false">中文</button>
+    </div>
   </header>
 
-  <nav class="toc" aria-label="Table of contents">
-    <strong>Contents</strong>
+  <nav class="toc">
+    <strong><span class="en">Contents</span><span class="zh">目录</span></strong>
     <ol>
-      <li><a href="#overview">Overview</a></li>
-      <li><a href="#customer">Customer guide</a></li>
-      <li><a href="#vendor">Vendor guide</a></li>
-      <li><a href="#admin">Super admin guide</a></li>
-      <li><a href="#admin-roles">Admin user roles</a></li>
-      <li><a href="#reference">Reference</a></li>
+      <li><a href="#overview"><span class="en">Overview</span><span class="zh">概述</span></a></li>
+      <li><a href="#customer"><span class="en">Customer guide</span><span class="zh">顾客指南</span></a></li>
+      <li><a href="#vendor"><span class="en">Vendor guide</span><span class="zh">商家指南</span></a></li>
+      <li><a href="#admin"><span class="en">Super admin guide</span><span class="zh">超级管理员指南</span></a></li>
+      <li><a href="#reference"><span class="en">Reference</span><span class="zh">参考</span></a></li>
     </ol>
   </nav>
 
-  <h2 id="overview">1. Overview</h2>
+  <!-- ===== 1. OVERVIEW ===== -->
+  <h2 id="overview">
+    <span class="en">1. Overview</span><span class="zh">1. 概述</span>
+  </h2>
 
-  <h3>What is NEXA?</h3>
-  <p>NEXA Platform is an online shopping system where <strong>each store has its own website</strong>. The main site helps people find stores; each vendor has a separate shop. Customers shop one store at a time.</p>
-
-  <h3>User roles</h3>
-  <table>
-    <thead><tr><th>Role</th><th>Responsibility</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Customer</strong></td><td>Browse, cart, checkout, track orders</td></tr>
-      <tr><td><strong>Vendor</strong></td><td>Manage one store — products, orders, settings</td></tr>
-      <tr><td><strong>Super Admin</strong></td><td>Manage the whole platform</td></tr>
-    </tbody>
-  </table>
-
-  <h3>Where customers shop</h3>
-  <p>Customers do <strong>not</strong> shop from a product list on the main homepage. Open a vendor store link (e.g. <code>https://gogo.nexa-mm.com/</code>) or click a vendor logo on the homepage carousel.</p>
-
-  <h2 id="customer">2. Customer guide</h2>
-
-  <h3>Opening a store</h3>
-  <table>
-    <thead><tr><th>Method</th><th>Example</th></tr></thead>
-    <tbody>
-      <tr><td>Vendor subdomain</td><td><code>https://gogo.nexa-mm.com/</code></td></tr>
-      <tr><td>Custom domain</td><td><code>https://yourstore.com/</code></td></tr>
-      <tr><td>Main site carousel</td><td>Click a vendor logo</td></tr>
-    </tbody>
-  </table>
-
-  <h3>Browsing and cart</h3>
+  <h3><span class="en">What is NEXA?</span><span class="zh">NEXA 是什么？</span></h3>
+  <p class="en">NEXA Platform is an online shopping system where <strong>each store has its own website</strong>.</p>
+  <p class="zh">NEXA 平台是一个在线购物系统，<strong>每家店铺都有独立的网店</strong>。</p>
   <ul>
-    <li>Use <strong>category tabs</strong> and search to find products.</li>
-    <li>Tap a product for details; use <strong>Add to Cart</strong> or the heart icon for saved items.</li>
-    <li>Guest carts stay on one device; sign in to sync across devices.</li>
+    <li><span class="en">One <strong>main website</strong> (<code>https://www.nexa-mm.com/</code>) helps people find stores and run the platform.</span><span class="zh">一个<strong>主站</strong>（<code>https://www.nexa-mm.com/</code>）用于发现店铺并管理平台。</span></li>
+    <li><span class="en">Each <strong>vendor</strong> has a <strong>separate shop link</strong> — like an independent mini-store.</span><span class="zh">每位<strong>商家</strong>拥有<strong>独立的店铺链接</strong>，类似独立小店。</span></li>
+    <li><span class="en">Customers shop <strong>one store at a time</strong>. There is no single mixed marketplace catalog.</span><span class="zh">顾客<strong>一次只逛一家店</strong>，没有混合所有商家的统一商城目录。</span></li>
+  </ul>
+  <p class="en"><strong>Platform catalog model:</strong> Super admin maintains one platform product catalog (prices, stock, images). Vendors <strong>select products from that catalog</strong> and organize them into store categories — they do not create or edit catalog data.</p>
+  <p class="zh"><strong>平台商品目录模式：</strong>超级管理员维护统一商品目录（价格、库存、图片等）。商家<strong>从目录中选品</strong>并分配到店铺分类 — 不能创建或编辑目录数据。</p>
+
+  <h3><span class="en">User roles</span><span class="zh">用户角色</span></h3>
+  <table>
+    <thead><tr><th><span class="en">Role</span><span class="zh">角色</span></th><th><span class="en">Responsibility</span><span class="zh">职责</span></th></tr></thead>
+    <tbody>
+      <tr><td><span class="en"><strong>Customer</strong></span><span class="zh"><strong>顾客</strong></span></td><td><span class="en">Browse products, manage cart, checkout, track orders</span><span class="zh">浏览商品、购物车、结账、查看订单</span></td></tr>
+      <tr><td><span class="en"><strong>Vendor</strong></span><span class="zh"><strong>商家</strong></span></td><td><span class="en">Select products from platform catalog, manage categories, orders, branding</span><span class="zh">从平台目录选品、管理分类、订单与品牌</span></td></tr>
+      <tr><td><span class="en"><strong>Super Admin</strong></span><span class="zh"><strong>超级管理员</strong></span></td><td><span class="en">Manage the whole platform — vendors, orders, staff, settings</span><span class="zh">管理全平台商家、订单、员工与设置</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3><span class="en">Where customers shop</span><span class="zh">顾客在哪里购物</span></h3>
+  <p class="en">Customers <strong>do not</strong> shop from a product list on the main homepage. The main site shows platform information, a <strong>vendor logo carousel</strong> (click to open a store), and links to apply or sign in.</p>
+  <p class="zh">顾客<strong>不会</strong>在主站首页的商品列表中购物。主站展示平台信息、<strong>商家 Logo 轮播</strong>（点击进店）以及入驻/登录入口。</p>
+  <p class="en"><strong>To buy something:</strong></p>
+  <p class="zh"><strong>如何购买：</strong></p>
+  <ol>
+    <li><span class="en">Open a vendor's store link (e.g. <code>https://gogo.nexa-mm.com/</code>) <strong>or</strong> click a vendor logo on the homepage carousel.</span><span class="zh">打开商家店铺链接（如 <code>https://gogo.nexa-mm.com/</code>），<strong>或</strong>点击首页轮播中的商家 Logo。</span></li>
+  </ol>
+  <p class="en">Each store sells <strong>only its own products</strong>.</p>
+  <p class="zh">每家店<strong>只销售本店商品</strong>。</p>
+
+  <!-- ===== 2. CUSTOMER ===== -->
+  <h2 id="customer">
+    <span class="en">2. Customer guide</span><span class="zh">2. 顾客指南</span>
+  </h2>
+
+  <h3><span class="en">Opening a store</span><span class="zh">打开店铺</span></h3>
+  <table>
+    <thead><tr><th><span class="en">Method</span><span class="zh">方式</span></th><th><span class="en">Example</span><span class="zh">示例</span></th></tr></thead>
+    <tbody>
+      <tr><td><span class="en">Vendor subdomain</span><span class="zh">商家子域名</span></td><td><code>https://gogo.nexa-mm.com/</code></td></tr>
+      <tr><td><span class="en">Custom domain</span><span class="zh">自定义域名</span></td><td><code>https://yourstore.com/</code></td></tr>
+      <tr><td><span class="en">Main site carousel</span><span class="zh">主站轮播</span></td><td><span class="en">Click a vendor logo</span><span class="zh">点击商家 Logo</span></td></tr>
+    </tbody>
+  </table>
+  <p class="en">On the store you can browse products, search, switch <strong>English / Burmese</strong>, contact the store (<strong>Dial</strong> or <strong>Viber</strong>), and use the <strong>chat bubble</strong> (bottom-right).</p>
+  <p class="zh">在店铺内可浏览商品、搜索、切换<strong>英语/缅甸语</strong>、通过<strong>电话或 Viber</strong> 联系商家，并使用右下角<strong>聊天按钮</strong>。</p>
+
+  <h3><span class="en">Browsing and searching</span><span class="zh">浏览与搜索</span></h3>
+  <h4><span class="en">Home page</span><span class="zh">首页</span></h4>
+  <ul>
+    <li><span class="en">Products with optional banner; <strong>category tabs</strong>; <strong>Load more</strong> when needed.</span><span class="zh">商品列表与横幅；<strong>分类标签</strong>；商品多时可点<strong>加载更多</strong>。</span></li>
+    <li><span class="en">Tap a product → details; <strong>Back</strong> restores scroll position.</span><span class="zh">点击商品查看详情；<strong>返回</strong>时恢复列表滚动位置。</span></li>
+  </ul>
+  <h4><span class="en">Product page</span><span class="zh">商品页</span></h4>
+  <p class="en">Photos, price, stock, <strong>Add to Cart</strong>, <strong>Saved / Wishlist</strong> (heart icon).</p>
+  <p class="zh">图片、价格、库存、<strong>加入购物车</strong>、<strong>收藏/心愿单</strong>（心形图标）。</p>
+  <h4><span class="en">Search</span><span class="zh">搜索</span></h4>
+  <p class="en">Type in the search box; results update as you type.</p>
+  <p class="zh">在搜索框输入；结果随输入实时更新。</p>
+
+  <h3><span class="en">Cart and saved items</span><span class="zh">购物车与收藏</span></h3>
+  <ul>
+    <li><span class="en"><strong>Guest</strong> cart stays on this device.</span><span class="zh"><strong>访客</strong>购物车仅保存在本设备。</span></li>
+    <li><span class="en"><strong>Signed in</strong> cart syncs across devices.</span><span class="zh"><strong>登录后</strong>购物车可跨设备同步。</span></li>
+    <li><span class="en">Heart icon saves items to <strong>Saved / Wishlist</strong> — <strong>requires sign-in</strong> (guests are prompted to log in).</span><span class="zh">心形图标加入<strong>收藏/心愿单</strong> — <strong>需登录</strong>（访客会提示登录）。</span></li>
   </ul>
 
-  <h3>Checkout</h3>
+  <h3><span class="en">Account and profile</span><span class="zh">账户与个人资料</span></h3>
+  <p class="en"><strong>Benefits of signing in:</strong> order history, saved addresses, synced cart and wishlist.</p>
+  <p class="zh"><strong>登录的好处：</strong>订单记录、保存地址、跨设备同步购物车与收藏。</p>
+  <p class="en"><strong>Forgot password:</strong> email → <strong>OTP code</strong> → new password. Check spam if email is delayed.</p>
+  <p class="zh"><strong>忘记密码：</strong>邮箱 → <strong>验证码</strong> → 新密码。邮件延迟请检查垃圾邮件。</p>
+
+  <h3><span class="en">Checkout</span><span class="zh">结账</span></h3>
   <ol>
-    <li>Open <strong>Cart</strong> → <strong>Checkout</strong>.</li>
-    <li>Enter shipping address and phone.</li>
-    <li>Choose <strong>Cash on Delivery</strong> or <strong>KBZPay</strong>.</li>
-    <li>Review and place the order.</li>
+    <li><span class="en"><strong>Cart</strong> → <strong>Checkout</strong></span><span class="zh"><strong>购物车</strong> → <strong>结账</strong></span></li>
+    <li><span class="en">Shipping address and phone</span><span class="zh">收货地址与电话</span></li>
+    <li><span class="en">Delivery region / township and <strong>delivery partner</strong> (required before payment; still required when shipping is free)</span><span class="zh">配送区域/乡镇及<strong>配送方式</strong>（付款前必选；免运费时也需选择）</span></li>
+    <li><span class="en"><strong>Free shipping:</strong> all qualifying items → <strong>FREE (0 MMK)</strong>; delivery partner locked to free shipping</span><span class="zh"><strong>免运费：</strong>全部符合免运费商品时显示 <strong>免费（0 缅元）</strong>；配送方式锁定为免运费</span></li>
+    <li><span class="en"><strong>Cash on Delivery (COD)</strong> or <strong>KBZPay</strong> — COD only when your region/partner supports it</span><span class="zh"><strong>货到付款</strong> 或 <strong>KBZPay</strong> — 货到付款仅在区域/物流支持时显示</span></li>
+    <li><span class="en">Review and <strong>Place Order</strong> / <strong>Pay with KBZPay</strong></span><span class="zh">确认后<strong>下单</strong>或<strong>KBZPay 支付</strong></span></li>
   </ol>
 
-  <h3>Cash on Delivery</h3>
-  <p>Order is created immediately. Pay the delivery person in cash when your order arrives. Track status under <strong>Profile → Orders</strong> when signed in.</p>
+  <h3><span class="en">Cash on Delivery</span><span class="zh">货到付款</span></h3>
+  <p class="en">Order created immediately; pay cash on delivery. Track under <strong>Profile → Orders</strong>.</p>
+  <p class="zh">订单立即创建；收货时现金支付。可在<strong>个人资料 → 订单</strong>中跟踪。</p>
 
-  <h3>KBZPay</h3>
-  <ol>
-    <li>Choose KBZPay at checkout.</li>
-    <li>Pay in the KBZPay app (QR or app launch).</li>
-    <li>After payment you may see <code>https://www.nexa-mm.com/summary</code> — tap <strong>Continue Shopping</strong>.</li>
-  </ol>
-  <p>Keep the browser open until payment finishes. If payment succeeded but no order appears, contact the store with your receipt.</p>
-
-  <h3>Profile, support, and shortcuts</h3>
+  <h3><span class="en">KBZPay</span><span class="zh">KBZPay 支付</span></h3>
   <ul>
-    <li><strong>Profile:</strong> orders, addresses, account settings.</li>
-    <li><strong>Support:</strong> chat bubble; phone menu for Dial or Viber.</li>
-    <li><strong>Add to Home:</strong> Android Chrome — tap the button above chat; iPhone — Safari → Share → Add to Home Screen.</li>
-    <li><strong>Language:</strong> English or Burmese on the storefront menu.</li>
+    <li><span class="en"><strong>Desktop:</strong> pay via <strong>KBZPay QR</strong> on checkout</span><span class="zh"><strong>桌面端：</strong>结账页 <strong>KBZPay 二维码</strong></span></li>
+    <li><span class="en"><strong>Mobile:</strong> pay via <strong>KBZPay app / PWA</strong></span><span class="zh"><strong>手机端：</strong><strong>KBZPay 应用 / PWA</strong></span></li>
+    <li><span class="en">After payment you may land on platform apex <code>/summary</code> (e.g. <code>https://nexa-apex.online/summary</code>) — tap <strong>Continue Shopping</strong></span><span class="zh">支付后可能跳转到平台主站 <code>/summary</code> — 点<strong>继续购物</strong></span></li>
+  </ul>
+  <p class="en">Keep the browser open until payment finishes. Contact the store with receipt if payment succeeded but no order appears.</p>
+  <p class="zh">支付完成前请勿关闭浏览器。若已扣款但无订单，请联系商家并提供凭证。</p>
+
+  <h3><span class="en">Order history</span><span class="zh">订单记录</span></h3>
+  <p class="en"><strong>Profile:</strong> Orders, Addresses, Account settings.</p>
+  <p class="zh"><strong>个人资料：</strong>订单、地址、账户设置。</p>
+
+  <h3><span class="en">Contact and support</span><span class="zh">联系与客服</span></h3>
+  <p class="en"><strong>Chat bubble</strong>; <strong>Dial</strong> or <strong>Viber</strong> from phone menu. Provide order number, store name, and payment screenshot when needed.</p>
+  <p class="zh"><strong>聊天</strong>；电话菜单中的<strong>拨打</strong>或 <strong>Viber</strong>。联系时请提供订单号、店铺名称及支付截图。</p>
+
+  <h3><span class="en">Add store to home screen</span><span class="zh">添加到主屏幕</span></h3>
+  <ul>
+    <li><span class="en"><strong>Android (Chrome):</strong> <strong>Add to Home</strong> above chat.</span><span class="zh"><strong>Android：</strong>点击聊天上方的<strong>添加到主屏幕</strong>。</span></li>
+    <li><span class="en"><strong>iPhone (Safari):</strong> Share → Add to Home Screen (must use Safari).</span><span class="zh"><strong>iPhone：</strong>分享 → 添加到主屏幕（须使用 Safari）。</span></li>
   </ul>
 
-  <h2 id="vendor">3. Vendor guide</h2>
+  <h3><span class="en">Language</span><span class="zh">语言</span></h3>
+  <p class="en">Storefronts: <strong>English</strong> and <strong>Burmese</strong>. Admin dashboards: <strong>English</strong> and <strong>Chinese</strong> (does not change storefront language).</p>
+  <p class="zh">店铺前台：<strong>英语</strong>与<strong>缅甸语</strong>。管理后台：<strong>英语</strong>与<strong>中文</strong>（不影响顾客前台语言）。</p>
 
-  <h3>Getting started</h3>
+  <!-- ===== 3. VENDOR ===== -->
+  <h2 id="vendor">
+    <span class="en">3. Vendor guide</span><span class="zh">3. 商家指南</span>
+  </h2>
+
+  <h3><span class="en">Getting started</span><span class="zh">入门</span></h3>
   <ol>
-    <li>Apply at <code>https://www.nexa-mm.com/vendor/application</code>.</li>
-    <li>Wait for approval from super admin.</li>
-    <li>Sign in at <code>https://www.nexa-mm.com/vendor/login</code> and open vendor admin.</li>
+    <li><span class="en">Apply at <code>https://www.nexa-mm.com/vendor/application</code></span><span class="zh">在入驻页面申请</span></li>
+    <li><span class="en">Wait for super admin approval</span><span class="zh">等待超级管理员审核</span></li>
+    <li><span class="en">Complete setup at <code>https://www.nexa-mm.com/vendor/setup</code> if prompted</span><span class="zh">如提示，在 <code>https://www.nexa-mm.com/vendor/setup</code> 完成设置</span></li>
+    <li><span class="en">Sign in at <code>https://www.nexa-mm.com/vendor/login</code></span><span class="zh">登录商家后台</span></li>
+    <li><span class="en">Open <strong>vendor admin</strong> → <strong>Products → Select Product</strong> to pick from the platform catalog</span><span class="zh">进入<strong>商家后台</strong> → <strong>商品 → 选择商品</strong>，从平台目录选品</span></li>
   </ol>
+  <p class="en"><strong>Forgot password:</strong> <strong>Forgot Password?</strong> → <code>/reset-password?returnTo=/admin&amp;account=vendor</code> → OTP email → new password.</p>
+  <p class="zh"><strong>忘记密码：</strong><strong>忘记密码？</strong> → <code>/reset-password?returnTo=/admin&amp;account=vendor</code> → 邮箱验证码 → 新密码。</p>
   <table>
-    <thead><tr><th>URL</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>URL</th><th><span class="en">Purpose</span><span class="zh">用途</span></th></tr></thead>
     <tbody>
-      <tr><td><code>https://yourstore.nexa-mm.com/</code></td><td>Customer shop</td></tr>
-      <tr><td><code>https://yourstore.nexa-mm.com/admin</code></td><td>Your dashboard</td></tr>
+      <tr><td><code>https://yourstore.nexa-mm.com/</code></td><td><span class="en">Customer shop</span><span class="zh">顾客店铺</span></td></tr>
+      <tr><td><code>https://yourstore.nexa-mm.com/admin</code></td><td><span class="en">Vendor dashboard</span><span class="zh">商家后台</span></td></tr>
+      <tr><td><code>https://www.nexa-mm.com/vendor/your-store-slug/admin</code></td><td><span class="en">Path-based admin (alternative)</span><span class="zh">路径式后台（备选）</span></td></tr>
     </tbody>
   </table>
 
-  <h3>Application requirements</h3>
+  <h3><span class="en">Application form</span><span class="zh">入驻表单</span></h3>
   <table>
-    <thead><tr><th>Field</th><th>Requirement</th></tr></thead>
+    <thead><tr><th><span class="en">Field</span><span class="zh">字段</span></th><th><span class="en">Requirement</span><span class="zh">要求</span></th></tr></thead>
     <tbody>
-      <tr><td>Phone</td><td>Myanmar format: <code>+959…</code> or <code>09…</code></td></tr>
-      <tr><td>Email</td><td>Wait for <strong>Email is available</strong></td></tr>
-      <tr><td>Description</td><td>At least 10 characters</td></tr>
+      <tr><td><span class="en">Application type</span><span class="zh">申请类型</span></td><td><span class="en">Professional or Influencer</span><span class="zh">专业商家或达人</span></td></tr>
+      <tr><td><span class="en">Contact name</span><span class="zh">联系人</span></td><td><span class="en">At least 2 characters</span><span class="zh">至少 2 个字符</span></td></tr>
+      <tr><td><span class="en">Phone</span><span class="zh">电话</span></td><td><span class="en">Myanmar: <code>+959…</code> or <code>09…</code></span><span class="zh">缅甸格式</span></td></tr>
+      <tr><td><span class="en">Email</span><span class="zh">邮箱</span></td><td><span class="en">Wait for <strong>Email is available</strong> before submitting</span><span class="zh">显示<strong>邮箱可用</strong>后再提交</span></td></tr>
+      <tr><td><span class="en">Store description</span><span class="zh">店铺介绍</span></td><td><span class="en">At least 10 characters</span><span class="zh">至少 10 个字符</span></td></tr>
+      <tr><td><span class="en">Bank details</span><span class="zh">银行信息</span></td><td><span class="en">Bank name and account</span><span class="zh">银行名称与账户</span></td></tr>
+      <tr><td><span class="en">Documents</span><span class="zh">证件</span></td><td><span class="en">Professional: business license · Influencer: ID document</span><span class="zh">专业：营业执照 · 达人：身份证件</span></td></tr>
     </tbody>
   </table>
 
-  <h3>Daily work</h3>
+  <h3><span class="en">Admin dashboard</span><span class="zh">管理后台</span></h3>
+  <table>
+    <thead><tr><th><span class="en">Section</span><span class="zh">模块</span></th><th><span class="en">Purpose</span><span class="zh">用途</span></th></tr></thead>
+    <tbody>
+      <tr><td><span class="en">Dashboard / Analytics</span><span class="zh">概览</span></td><td><span class="en">Sales overview</span><span class="zh">销售概览</span></td></tr>
+      <tr><td><span class="en">Products → All Products</span><span class="zh">商品 → 全部商品</span></td><td><span class="en"><strong>Select products</strong> from platform catalog; read-only price/stock/status; remove from store; free shipping</span><span class="zh"><strong>从平台目录选品</strong>；价格/库存/状态只读；从店铺移除；免运费</span></td></tr>
+      <tr><td><span class="en">Products → Categories</span><span class="zh">商品 → 分类</span></td><td><span class="en"><strong>Create categories</strong> and assign selected products (storefront tabs)</span><span class="zh"><strong>创建分类</strong>并分配已选商品（前台标签）</span></td></tr>
+      <tr><td><span class="en">Orders</span><span class="zh">订单</span></td><td><span class="en">View, update status, <strong>KBZPay draft recovery</strong></span><span class="zh">查看、更新状态、<strong>KBZPay 草稿恢复</strong></span></td></tr>
+      <tr><td><span class="en">Customers</span><span class="zh">顾客</span></td><td><span class="en">Buyers linked to your store</span><span class="zh">本店买家</span></td></tr>
+      <tr><td><span class="en">Subscriptions</span><span class="zh">订阅</span></td><td><span class="en">Plans and Subscribers (if enabled)</span><span class="zh">套餐与订阅用户（如已开启）</span></td></tr>
+      <tr><td><span class="en">Finances</span><span class="zh">财务</span></td><td><span class="en">Revenue, commission, <strong>KBZPay withdrawal</strong></span><span class="zh">收入、佣金、<strong>KBZPay 提现</strong></span></td></tr>
+      <tr><td><span class="en">Settings</span><span class="zh">设置</span></td><td><span class="en">Logo, banner, contact, terms</span><span class="zh">标识、横幅、联系方式、条款</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3><span class="en">Commission rates</span><span class="zh">佣金比例</span></h3>
+  <p class="en"><strong>Default platform commission is 0%.</strong> The platform takes nothing unless an admin sets a rate.</p>
+  <p class="zh"><strong>平台默认佣金为 0%。</strong>除非管理员设置比例，否则平台不收取佣金。</p>
+  <table>
+    <thead><tr><th><span class="en">Level</span><span class="zh">层级</span></th><th><span class="en">Set by</span><span class="zh">设置方</span></th><th><span class="en">Default</span><span class="zh">默认</span></th></tr></thead>
+    <tbody>
+      <tr><td><span class="en">Vendor contract</span><span class="zh">商家合同</span></td><td><span class="en">Super admin on vendor profile</span><span class="zh">超级管理员在商家资料中</span></td><td><strong>0%</strong></td></tr>
+      <tr><td><span class="en">Product</span><span class="zh">商品</span></td><td><span class="en">Super admin on product form</span><span class="zh">超级管理员在商品表单中</span></td><td><span class="en">Blank = vendor contract, then 0%</span><span class="zh">留空 = 商家合同，否则 0%</span></td></tr>
+      <tr><td><span class="en">Specific product</span><span class="zh">特定商品</span></td><td><span class="en">Admin enters a % on the product</span><span class="zh">管理员在商品上填写百分比</span></td><td><span class="en">e.g. 15% on that product only</span><span class="zh">例如仅该商品 15%</span></td></tr>
+    </tbody>
+  </table>
+  <p class="en"><strong>Resolution order per order line:</strong> line snapshot → product rate (if set) → vendor contract → <strong>0%</strong>.</p>
+  <p class="zh"><strong>每条订单明细的优先级：</strong>行快照 → 商品比例（如已设置）→ 商家合同 → <strong>0%</strong>。</p>
+
+  <h3><span class="en">Finances and KBZPay withdrawal</span><span class="zh">财务与 KBZPay 提现</span></h3>
+  <p class="en">Under <strong>Finances</strong> you can:</p>
+  <p class="zh">在<strong>财务</strong>模块可以：</p>
   <ul>
-    <li><strong>Products:</strong> add photos, prices, stock, and categories.</li>
-    <li><strong>Orders:</strong> check pending orders; update status as you fulfill.</li>
-    <li><strong>Settings:</strong> logo, banner, contact, terms, subdomain.</li>
-    <li>Use <strong>Preview store</strong> before sharing your link.</li>
+    <li><span class="en">View revenue and commission</span><span class="zh">查看收入与佣金</span></li>
+    <li><span class="en">See <strong>available balance</strong> eligible for withdrawal</span><span class="zh">查看<strong>可提现余额</strong></span></li>
+    <li><span class="en">Save your <strong>KBZPay phone number</strong> (Myanmar <code>09…</code> format)</span><span class="zh">保存 <strong>KBZPay 手机号</strong>（缅甸 <code>09…</code> 格式）</span></li>
+    <li><span class="en"><strong>Withdraw to KBZPay</strong> when balance meets the minimum</span><span class="zh">余额达到最低金额后可<strong>提现至 KBZPay</strong></span></li>
+  </ul>
+  <p class="en"><strong>Withdrawable earnings include:</strong></p>
+  <p class="zh"><strong>可提现收入包括：</strong></p>
+  <ul>
+    <li><span class="en">Orders in <strong>ready-to-ship, fulfilled, shipped, or delivered</strong> status with <strong>payment collected</strong></span><span class="zh">状态为<strong>待发货、已完成、已发货、已送达</strong>且<strong>已收款</strong>的订单</span></li>
+    <li><span class="en"><strong>COD:</strong> only after delivery (or marked paid)</span><span class="zh"><strong>货到付款：</strong>送达后（或标记已付）</span></li>
+    <li><span class="en"><strong>KBZPay:</strong> only after payment confirmed</span><span class="zh"><strong>KBZPay：</strong>支付确认后</span></li>
+  </ul>
+  <p class="en"><strong>Before withdrawing:</strong></p>
+  <p class="zh"><strong>提现前：</strong></p>
+  <ol>
+    <li><span class="en">You must be <strong>signed in</strong> (session token from login)</span><span class="zh">必须<strong>已登录</strong>（登录后获得会话令牌）</span></li>
+    <li><span class="en">If you see <strong>"Session expired"</strong>, sign out and sign in again</span><span class="zh">若提示<strong>“会话已过期”</strong>，请退出后重新登录</span></li>
+    <li><span class="en">Confirm or save your KBZPay phone, then tap <strong>Withdraw now</strong></span><span class="zh">确认或保存 KBZPay 手机号后点击<strong>立即提现</strong></span></li>
+  </ol>
+
+  <h3><span class="en">Products and categories</span><span class="zh">商品与分类</span></h3>
+  <p class="en"><strong>Super admin</strong> creates all catalog products (name, price, stock, images, SKU, status). Vendors only choose which items appear in their store.</p>
+  <p class="zh"><strong>超级管理员</strong>创建所有目录商品（名称、价格、库存、图片、SKU、状态）。商家仅选择本店上架的商品。</p>
+  <h4><span class="en">Products tab</span><span class="zh">商品模块</span></h4>
+  <ol>
+    <li><span class="en"><strong>Select Product</strong> → browse platform catalog → check items → Save (same item can be sold by multiple vendors)</span><span class="zh"><strong>选择商品</strong> → 浏览平台目录 → 勾选 → 保存（同一商品可被多个商家销售）</span></li>
+    <li><span class="en">Price, stock, and status are <strong>read-only</strong> in the list</span><span class="zh">列表中价格、库存、状态为<strong>只读</strong></span></li>
+    <li><span class="en"><strong>Remove from store</strong> unlinks from your shop (product stays in platform catalog)</span><span class="zh"><strong>从店铺移除</strong>取消本店关联（商品仍保留在平台目录）</span></li>
+    <li><span class="en"><strong>View</strong> opens read-only product details</span><span class="zh"><strong>查看</strong>打开只读详情</span></li>
+  </ol>
+  <h4><span class="en">Categories tab</span><span class="zh">分类模块</span></h4>
+  <ol>
+    <li><span class="en"><strong>Create</strong> a vendor category (name, cover, description)</span><span class="zh"><strong>创建</strong>店铺分类（名称、封面、描述）</span></li>
+    <li><span class="en"><strong>Assign products</strong> already selected for your store</span><span class="zh"><strong>分配</strong>已在本店选中的商品</span></li>
+    <li><span class="en">Categories become <strong>tabs on your storefront</strong></span><span class="zh">分类显示为<strong>前台分类标签</strong></span></li>
+    <li><span class="en">Super-admin product categories are <strong>not imported</strong> — use your own vendor categories</span><span class="zh">不会导入超管商品分类 — 请使用商家自建分类</span></li>
+  </ol>
+  <p class="en"><strong>Typical workflow:</strong> Select Product → create category → assign products → preview store.</p>
+  <p class="zh"><strong>典型流程：</strong>选择商品 → 创建分类 → 分配商品 → 预览店铺。</p>
+  <p class="en"><strong>Free shipping</strong> (if enabled): per-product on Products, or bulk by category on Products / Categories.</p>
+  <p class="zh"><strong>免运费</strong>（如已开启）：在商品中按单品，或在商品/分类中按分类批量设置。</p>
+
+  <h3><span class="en">Orders</span><span class="zh">订单</span></h3>
+  <p class="en">Update status: <strong>Pending</strong> → <strong>Processing</strong> → <strong>Ready to ship</strong> → <strong>Fulfilled</strong> (shipping may show Shipped / Delivered). <strong>COD:</strong> prepare and collect cash. <strong>KBZPay:</strong> verify payment before shipping. Use the <strong>KBZPay draft recovery</strong> panel if a customer paid but no order was created.</p>
+  <p class="zh">更新状态：<strong>待处理</strong> → <strong>处理中</strong> → <strong>待发货</strong> → <strong>已完成</strong>。<strong>货到付款：</strong>备货并收货款。<strong>KBZPay：</strong>确认到账后再发货。若顾客已付但无订单，使用 <strong>KBZPay 草稿恢复</strong> 面板。</p>
+
+  <h3><span class="en">Settings and sharing</span><span class="zh">设置与推广</span></h3>
+  <p class="en">Configure logo, banner, phone, subdomain, custom domain, terms, and social links. Share <strong>your store URL</strong>, not the main site product list. Use <strong>preview / open store</strong> in admin to verify catalog, categories, checkout, and scroll restore.</p>
+  <p class="zh">配置 Logo、横幅、电话、子域名、自定义域名、条款与社交链接。分享<strong>本店链接</strong>，而非主站商品列表。在后台使用<strong>预览/打开店铺</strong>验证目录、分类、结账与滚动恢复。</p>
+
+  <!-- ===== 4. ADMIN ===== -->
+  <h2 id="admin">
+    <span class="en">4. Super admin guide</span><span class="zh">4. 超级管理员指南</span>
+  </h2>
+
+  <h3><span class="en">Access</span><span class="zh">访问</span></h3>
+  <p class="en">Open <code>https://www.nexa-mm.com/admin</code> and sign in. Left menu (role-dependent): <strong>Home</strong>, <strong>Product</strong> (Products, Categories, Inventory), <strong>Orders</strong>, <strong>Vendor</strong>, <strong>Chat</strong>, <strong>Customers</strong>, <strong>Subscriptions</strong> (Plans, Subscribers), <strong>Finances</strong>, <strong>Logistics</strong>, <strong>Settings</strong>. <em>Marketing is not in the current menu.</em></p>
+  <p class="zh">打开 <code>https://www.nexa-mm.com/admin</code> 并登录。左侧菜单（因角色而异）：<strong>首页</strong>、<strong>商品</strong>、<strong>订单</strong>、<strong>商家</strong>、<strong>聊天</strong>、<strong>顾客</strong>、<strong>订阅</strong>、<strong>财务</strong>、<strong>物流</strong>、<strong>设置</strong>。<em>营销不在当前菜单中。</em></p>
+
+  <h3><span class="en">Admin user roles</span><span class="zh">管理员角色</span></h3>
+  <table>
+    <thead><tr><th><span class="en">Role</span><span class="zh">角色</span></th><th><span class="en">Access</span><span class="zh">权限</span></th></tr></thead>
+    <tbody>
+      <tr><td><span class="en"><strong>Store Owner</strong></span><span class="zh"><strong>店主</strong></span></td><td><span class="en">Full access — <strong>Finances</strong>, <strong>Settings → Users</strong>, all menus</span><span class="zh">全部权限 — 含财务与用户管理</span></td></tr>
+      <tr><td><span class="en"><strong>Administrator</strong></span><span class="zh"><strong>管理员</strong></span></td><td><span class="en">All menus except <strong>Finances</strong>; Settings (General + Activities, no Users)</span><span class="zh">除财务外全部菜单；设置（常规+活动，无用户管理）</span></td></tr>
+      <tr><td><span class="en"><strong>Data Entry</strong></span><span class="zh"><strong>数据录入</strong></span></td><td><span class="en">Home, Product, Categories, Inventory, <strong>Chat</strong>, Settings (General, no Users)</span><span class="zh">首页、商品/分类/库存、<strong>聊天</strong>、设置（常规，无用户管理）</span></td></tr>
+      <tr><td><span class="en"><strong>Warehouse</strong></span><span class="zh"><strong>仓库</strong></span></td><td><span class="en">Home, Orders, Inventory, Logistics only</span><span class="zh">首页、订单、库存、物流</span></td></tr>
+    </tbody>
+  </table>
+  <p class="en">Only <strong>Store Owner</strong> can add staff under <strong>Settings → Users</strong>.</p>
+  <p class="zh">仅<strong>店主</strong>可在 <strong>Settings → Users</strong> 中添加员工。</p>
+
+  <h3><span class="en">Vendors</span><span class="zh">商家管理</span></h3>
+  <ul>
+    <li><span class="en">New sellers apply at <code>/vendor/application</code>; approve via <strong>Vendor → Review applications</strong>.</span><span class="zh">新商家在 <code>/vendor/application</code> 申请；通过<strong>商家 → 审核入驻</strong>批准。</span></li>
+    <li><span class="en">There is <strong>no "Add vendor" button</strong> — all vendors come through the application flow.</span><span class="zh"><strong>没有“添加商家”按钮</strong> — 所有商家均通过入驻流程。</span></li>
+    <li><span class="en"><strong>Free shipping feature access</strong> — toggle per vendor to enable/disable free-shipping controls in vendor admin.</span><span class="zh"><strong>免运费功能权限</strong> — 按商家开关，控制商家后台是否显示免运费设置。</span></li>
   </ul>
 
-  <h2 id="admin">4. Super admin guide</h2>
+  <h3><span class="en">Platform product catalog (super admin)</span><span class="zh">平台商品目录（超级管理员）</span></h3>
+  <p class="en">Under <strong>Products</strong> and <strong>Inventory</strong>, super admin creates and edits the platform catalog — price, stock, images, SKU, status, vendor assignment, and product commission rates. Vendors pick from this pool; they cannot change price or stock.</p>
+  <p class="zh">在 <strong>Products</strong> 与 <strong>Inventory</strong> 中，超级管理员创建并编辑平台目录 — 价格、库存、图片、SKU、状态、商家分配及商品佣金。商家从目录选品，不能修改价格或库存。</p>
 
-  <h3>Access</h3>
-  <p>Open <code>https://www.nexa-mm.com/admin</code> and sign in with your staff account.</p>
+  <h3><span class="en">Vendor commission (super admin)</span><span class="zh">商家佣金（超级管理员）</span></h3>
+  <p class="en">When creating or editing a vendor, set <strong>Commission %</strong>. Default is <strong>0%</strong> when unset. Product-level commission overrides are set by <strong>super admin</strong> on individual products in the platform catalog.</p>
+  <p class="zh">创建或编辑商家时设置<strong>佣金 %</strong>。未设置时默认为 <strong>0%</strong>。商品级佣金覆盖由<strong>超级管理员</strong>在平台目录的商品表单中设置。</p>
 
-  <h2 id="admin-roles">Admin user roles</h2>
-  <p>Platform staff have one of <strong>four roles</strong>. Your role controls which menu items appear.</p>
-  <table>
-    <thead><tr><th>Role</th><th>Access</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Store Owner</strong></td><td>Full access — Finances, Settings → Users, all menus</td></tr>
-      <tr><td><strong>Administrator</strong></td><td>Operations — no Finances, no Settings → Users</td></tr>
-      <tr><td><strong>Data Entry</strong></td><td>Products, categories, inventory, Chat only</td></tr>
-      <tr><td><strong>Warehouse</strong></td><td>Orders, Inventory, Logistics only</td></tr>
-    </tbody>
-  </table>
-  <p>Only <strong>Store Owner</strong> can add staff under <strong>Settings → Users</strong>.</p>
-
-  <h3>Daily workflow</h3>
+  <h3><span class="en">Daily workflow</span><span class="zh">日常工作</span></h3>
   <ol>
-    <li>Review <strong>Orders</strong> (pending badge on sidebar).</li>
-    <li>Recover KBZPay drafts from the amber panel if needed.</li>
-    <li>Approve or reject vendors under <strong>Vendor → Review applications</strong>.</li>
-    <li>Check <strong>Settings → Activities</strong> for the audit log.</li>
+    <li><span class="en">Review <strong>Orders</strong> (pending badge)</span><span class="zh">查看<strong>订单</strong>（待处理角标）</span></li>
+    <li><span class="en">Recover <strong>KBZPay drafts</strong> if needed — paid checkouts that never became orders</span><span class="zh">必要时恢复 <strong>KBZPay 草稿订单</strong> — 已付但未生成订单的结账</span></li>
+    <li><span class="en"><strong>Vendor → Review applications</strong></span><span class="zh"><strong>商家 → 审核入驻申请</strong></span></li>
+    <li><span class="en"><strong>Settings → Activities</strong> audit log</span><span class="zh"><strong>设置 → 活动</strong> 审计日志</span></li>
   </ol>
 
-  <h3>Settings</h3>
+  <h3><span class="en">Settings</span><span class="zh">设置</span></h3>
   <table>
-    <thead><tr><th>Tab</th><th>Purpose</th></tr></thead>
+    <thead><tr><th><span class="en">Tab</span><span class="zh">标签</span></th><th><span class="en">Purpose</span><span class="zh">用途</span></th></tr></thead>
     <tbody>
-      <tr><td>General</td><td>Platform name, logo, support contact</td></tr>
-      <tr><td>Users</td><td>Staff accounts (owner only)</td></tr>
-      <tr><td>Activities</td><td>Audit timeline</td></tr>
+      <tr><td><span class="en">General</span><span class="zh">常规</span></td><td><span class="en">Platform name, logo, support contact</span><span class="zh">平台名称、Logo、客服</span></td></tr>
+      <tr><td><span class="en">Users</span><span class="zh">用户</span></td><td><span class="en">Staff accounts (owner only)</span><span class="zh">员工账户（仅店主）</span></td></tr>
+      <tr><td><span class="en">Activities</span><span class="zh">活动</span></td><td><span class="en">Audit timeline — who did what across the platform</span><span class="zh">操作审计 — 全平台操作记录</span></td></tr>
+    </tbody>
+  </table>
+  <p class="en">There is no separate <strong>Appearance</strong> tab; branding is under <strong>General</strong>.</p>
+  <p class="zh">没有单独的<strong>外观</strong>标签；品牌设置在<strong>常规</strong>中。</p>
+
+  <!-- ===== 5. REFERENCE ===== -->
+  <h2 id="reference">
+    <span class="en">5. Reference</span><span class="zh">5. 参考</span>
+  </h2>
+
+  <h3><span class="en">Quick URLs</span><span class="zh">常用链接</span></h3>
+  <table>
+    <thead><tr><th><span class="en">Purpose</span><span class="zh">用途</span></th><th>URL</th></tr></thead>
+    <tbody>
+      <tr><td><span class="en">Main site</span><span class="zh">主站</span></td><td><code>https://www.nexa-mm.com/</code></td></tr>
+      <tr><td><span class="en">Super admin</span><span class="zh">超级管理</span></td><td><code>https://www.nexa-mm.com/admin</code></td></tr>
+      <tr><td><span class="en">Apply to sell</span><span class="zh">商家入驻</span></td><td><code>https://www.nexa-mm.com/vendor/application</code></td></tr>
+      <tr><td><span class="en">Vendor login</span><span class="zh">商家登录</span></td><td><code>https://www.nexa-mm.com/vendor/login</code></td></tr>
+      <tr><td><span class="en">Vendor setup</span><span class="zh">商家设置</span></td><td><code>https://www.nexa-mm.com/vendor/setup</code></td></tr>
+      <tr><td><span class="en">After KBZPay</span><span class="zh">支付后</span></td><td><span class="en">Platform apex <code>/summary</code> (e.g. <code>https://nexa-apex.online/summary</code>)</span><span class="zh">平台主站 <code>/summary</code></span></td></tr>
+      <tr><td><span class="en">Password reset</span><span class="zh">重置密码</span></td><td><code>https://www.nexa-mm.com/reset-password</code></td></tr>
+      <tr><td><span class="en">Vendor password reset</span><span class="zh">商家重置密码</span></td><td><code>https://www.nexa-mm.com/reset-password?returnTo=/admin&amp;account=vendor</code></td></tr>
     </tbody>
   </table>
 
-  <h2 id="reference">5. Reference</h2>
+  <h3><span class="en">Do's and don'ts</span><span class="zh">注意事项</span></h3>
+  <h4><span class="en">Do</span><span class="zh">建议</span></h4>
+  <ul>
+    <li><span class="en">Use the correct URL for your role</span><span class="zh">使用对应角色的正确链接</span></li>
+    <li><span class="en">Sign in for order history</span><span class="zh">登录以查看订单记录</span></li>
+    <li><span class="en">Update order status promptly</span><span class="zh">及时更新订单状态</span></li>
+    <li><span class="en">Re-login if vendor withdrawal shows session expired</span><span class="zh">提现提示会话过期时请重新登录</span></li>
+  </ul>
+  <h4><span class="en">Don't</span><span class="zh">避免</span></h4>
+  <ul>
+    <li><span class="en">Expect one catalog on the main site</span><span class="zh">不要在主站寻找统一商品目录</span></li>
+    <li><span class="en">Pay twice on KBZPay without checking orders</span><span class="zh">未查订单前勿重复 KBZPay 支付</span></li>
+    <li><span class="en">Share staff passwords</span><span class="zh">勿共享员工密码</span></li>
+  </ul>
 
-  <h3>Quick URLs</h3>
+  <h3><span class="en">Troubleshooting</span><span class="zh">故障排查</span></h3>
   <table>
-    <thead><tr><th>Purpose</th><th>URL</th></tr></thead>
+    <thead><tr><th><span class="en">Problem</span><span class="zh">问题</span></th><th><span class="en">What to try</span><span class="zh">处理</span></th></tr></thead>
     <tbody>
-      <tr><td>Main site</td><td><code>https://www.nexa-mm.com/</code></td></tr>
-      <tr><td>Super admin</td><td><code>https://www.nexa-mm.com/admin</code></td></tr>
-      <tr><td>Apply to sell</td><td><code>https://www.nexa-mm.com/vendor/application</code></td></tr>
-      <tr><td>Vendor login</td><td><code>https://www.nexa-mm.com/vendor/login</code></td></tr>
-      <tr><td>After KBZPay</td><td><code>https://www.nexa-mm.com/summary</code></td></tr>
+      <tr><td><span class="en">Blank page</span><span class="zh">空白页</span></td><td><span class="en">Retry; use Chrome or Safari</span><span class="zh">重试；换 Chrome 或 Safari</span></td></tr>
+      <tr><td><span class="en">KBZPay paid, no order</span><span class="zh">已付无单</span></td><td><span class="en">Wait 1–2 min; check Profile → Orders</span><span class="zh">等待 1–2 分钟；查订单</span></td></tr>
+      <tr><td><span class="en">Vendor withdraw session expired</span><span class="zh">提现会话过期</span></td><td><span class="en">Sign out and sign in again</span><span class="zh">退出后重新登录</span></td></tr>
+      <tr><td><span class="en">Missing admin menu</span><span class="zh">缺少菜单</span></td><td><span class="en">Owner checks role in Settings → Users</span><span class="zh">店主在 Users 中检查角色</span></td></tr>
+      <tr><td><span class="en">Add to Home fails (iPhone)</span><span class="zh">添加主屏幕失败</span></td><td><span class="en">Safari → Share → Add to Home Screen</span><span class="zh">使用 Safari 添加</span></td></tr>
+      <tr><td><span class="en">Application email check stuck</span><span class="zh">入驻邮箱验证卡住</span></td><td><span class="en">Refresh and try again</span><span class="zh">刷新后重试</span></td></tr>
+      <tr><td><span class="en">Wishlist not saving</span><span class="zh">收藏无法保存</span></td><td><span class="en">Sign in first — wishlist requires an account</span><span class="zh">请先登录 — 收藏需账户</span></td></tr>
+      <tr><td><span class="en">COD not available</span><span class="zh">无货到付款</span></td><td><span class="en">Your region/partner may not support COD — try KBZPay</span><span class="zh">配送区域可能不支持货到付款 — 请试 KBZPay</span></td></tr>
+      <tr><td><span class="en">Category page empty</span><span class="zh">分类页空白</span></td><td><span class="en">Hard refresh; report if it persists</span><span class="zh">强制刷新；仍有问题请反馈</span></td></tr>
     </tbody>
   </table>
 
-  <h3>Troubleshooting</h3>
+  <h3><span class="en">Summary</span><span class="zh">摘要</span></h3>
   <table>
-    <thead><tr><th>Problem</th><th>What to try</th></tr></thead>
+    <thead><tr><th><span class="en">Role</span><span class="zh">角色</span></th><th><span class="en">Flow</span><span class="zh">流程</span></th></tr></thead>
     <tbody>
-      <tr><td>Blank page</td><td>Retry link; use Chrome or Safari</td></tr>
-      <tr><td>Empty category</td><td>Hard refresh; switch tabs</td></tr>
-      <tr><td>KBZPay paid, no order</td><td>Wait 1–2 min; check Profile → Orders</td></tr>
-      <tr><td>Missing admin menu</td><td>Owner checks role in Settings → Users</td></tr>
-      <tr><td>Add to Home (iPhone)</td><td>Safari → Share → Add to Home Screen</td></tr>
+      <tr><td><span class="en"><strong>Customer</strong></span><span class="zh"><strong>顾客</strong></span></td><td><span class="en">Store → browse → cart → checkout → profile</span><span class="zh">进店 → 浏览 → 购物车 → 结账 → 个人资料</span></td></tr>
+      <tr><td><span class="en"><strong>Vendor</strong></span><span class="zh"><strong>商家</strong></span></td><td><span class="en">Apply → admin → select catalog products → categories → orders → Finances</span><span class="zh">入驻 → 后台 → 从目录选品 → 分类 → 订单 → 财务</span></td></tr>
+      <tr><td><span class="en"><strong>Super Admin</strong></span><span class="zh"><strong>超管</strong></span></td><td><span class="en">Admin → orders, vendors, settings</span><span class="zh">管理后台 → 订单、商家、设置</span></td></tr>
     </tbody>
   </table>
 
   <footer class="doc-footer">
-    NEXA Platform — Client Instructions. Each store is independent; the main site connects people to stores.
+    <p class="en">NEXA Platform — Client Instructions</p>
+    <p class="zh">NEXA 平台 — 客户使用说明</p>
+    <p style="margin-top:0.75rem;">
+      <span class="en">Related: </span><span class="zh">相关文档：</span>
+      <code>NEXA_SIMPLE_UI_INSTRUCTIONS.md</code>,
+      <code>VENDOR_COMMISSION_AND_WITHDRAWAL.md</code>,
+      <code>NEXA_ADMIN_AND_VENDOR_GUIDE.md</code>
+    </p>
   </footer>
+
+  <script>
+    (function () {
+      var STORAGE_KEY = "nexa-client-instructions-lang";
+      var root = document.documentElement;
+      var btnEn = document.getElementById("btn-en");
+      var btnZh = document.getElementById("btn-zh");
+      function setLang(lang) {
+        lang = lang === "zh" ? "zh" : "en";
+        root.setAttribute("data-lang", lang);
+        root.lang = lang === "zh" ? "zh-CN" : "en";
+        document.title = lang === "zh" ? "NEXA 平台 — 客户使用说明" : "NEXA Platform — Client Instructions";
+        btnEn.classList.toggle("active", lang === "en");
+        btnZh.classList.toggle("active", lang === "zh");
+        btnEn.setAttribute("aria-pressed", lang === "en" ? "true" : "false");
+        btnZh.setAttribute("aria-pressed", lang === "zh" ? "true" : "false");
+        try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) {}
+      }
+      var saved = null;
+      try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+      setLang(saved === "zh" ? "zh" : "en");
+      btnEn.addEventListener("click", function () { setLang("en"); });
+      btnZh.addEventListener("click", function () { setLang("zh"); });
+    })();
+  </script>
 
 </body>
 </html>

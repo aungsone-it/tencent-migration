@@ -1407,22 +1407,11 @@ export function Checkout({
 
   const deliveryPartnerSelectOptions = useMemo(
     () =>
-      logisticsQuotes.map((quote) => {
-        const priceLabel = isFreeShippingCheckout
-          ? t("checkout.free")
-          : formatCheckoutShippingLabel(quote, formatStorefrontPrice) ||
-            t("checkout.free");
-        const etaLabel = quote.estimatedDays
-          ? formatEstimatedDeliveryLabel(quote.estimatedDays, (days) =>
-              t("checkout.withinDays").replace("{days}", String(days))
-            )
-          : null;
-        const label = etaLabel
-          ? `${quote.partner.name} — ${priceLabel} (${etaLabel})`
-          : `${quote.partner.name} — ${priceLabel}`;
-        return { id: quote.partner.id, label };
-      }),
-    [isFreeShippingCheckout, logisticsQuotes, formatStorefrontPrice, t]
+      logisticsQuotes.map((quote) => ({
+        id: quote.partner.id,
+        label: quote.partner.name,
+      })),
+    [logisticsQuotes]
   );
 
   const codPaymentAvailable =
@@ -3241,20 +3230,6 @@ export function Checkout({
                     {shippingSummaryLabel}
                   </span>
                 </div>
-
-                {logisticsQuote?.partner.name && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">{t("checkout.deliveryPartner")}</span>
-                    <span className="font-medium text-slate-700">{logisticsQuote.partner.name}</span>
-                  </div>
-                )}
-
-                {estimatedDeliveryLabel && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-500">{t("checkout.estimatedDelivery")}</span>
-                    <span className="text-slate-600">{estimatedDeliveryLabel}</span>
-                  </div>
-                )}
 
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-sm font-semibold text-slate-900">{t("checkout.total")}</span>

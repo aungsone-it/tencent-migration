@@ -1355,10 +1355,7 @@ export function Checkout({
 
   const hasSelectedRegion = Boolean(checkoutRegionKey);
   const hasSelectedTownship = Boolean(String(shippingInfo.city || "").trim());
-  const showDeliveryPartnerSelect =
-    hasSelectedRegion &&
-    hasSelectedTownship &&
-    logisticsQuotes.length > 1;
+  const showDeliveryPartnerSelect = false;
   const shippingUnavailable = hasSelectedRegion && hasSelectedTownship && !logisticsQuote;
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
@@ -1404,15 +1401,6 @@ export function Checkout({
       t("checkout.withinDays").replace("{days}", String(days))
     );
   }, [logisticsQuote?.estimatedDays, t]);
-
-  const deliveryPartnerSelectOptions = useMemo(
-    () =>
-      logisticsQuotes.map((quote) => ({
-        id: quote.partner.id,
-        label: quote.partner.name,
-      })),
-    [logisticsQuotes]
-  );
 
   const codPaymentAvailable =
     paymentSelectionEnabled && Boolean(logisticsQuote?.codSupported);
@@ -2921,44 +2909,6 @@ export function Checkout({
                   </div>
                 </div>
               </div>
-
-              {showDeliveryPartnerSelect && (
-                <div>
-                  <Label htmlFor="vs-delivery-partner" className={checkoutLabelClass}>
-                    {t("checkout.deliveryMethod")}
-                    {!isFreeShippingCheckout && " *"}
-                  </Label>
-                  <Select
-                    value={selectedDeliveryPartnerId}
-                    onValueChange={setSelectedDeliveryPartnerId}
-                    disabled={isFreeShippingCheckout}
-                    required={!isFreeShippingCheckout}
-                  >
-                    <SelectTrigger
-                      id="vs-delivery-partner"
-                      className={`${checkoutSelectClass}${
-                        isFreeShippingCheckout
-                          ? " cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500 opacity-60"
-                          : ""
-                      }`}
-                    >
-                      <SelectValue placeholder={t("checkout.selectDeliveryMethod")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {deliveryPartnerSelectOptions.map((option) => (
-                        <SelectItem key={option.id} value={option.id}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {isFreeShippingCheckout && (
-                    <p className="mt-1.5 text-xs text-slate-500">
-                      {t("checkout.freeShippingDeliveryLocked")}
-                    </p>
-                  )}
-                </div>
-              )}
 
               {/* Payment */}
               <div>

@@ -239,31 +239,59 @@ export function createTencentCloudBaseCompatClient(): TencentCloudBaseCompatClie
       },
 
       async signInStaffWithPassword({ email, password }) {
-        try {
+        const attempt = async () => {
           const response = await fetch(apiUrl("/auth/staff/login"), {
             method: "POST",
             headers: authHeaders(),
             body: JSON.stringify({ email, password }),
           });
           const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-          if (!response.ok || !data?.user) {
+          return { response, data };
+        };
+
+        let lastError = "Login failed";
+        for (let tryNum = 0; tryNum < 2; tryNum++) {
+          try {
+            const { response, data } = await attempt();
+            if (response.ok && data?.user) {
+              return persistAuthSessionFromLoginResponse(data);
+            }
             const raw = String(data?.error || data?.message || "Invalid email or password");
-            const message =
+            lastError =
               response.status === 404 || raw.toLowerCase() === "not found"
                 ? "Admin login is not available on the server yet. Deploy the latest make-server-16010b6f function (TCB console upload), then sign in again."
                 : raw;
+            const retryable =
+              tryNum === 0 &&
+              (/connection timeout|Connection terminated|Request timeout|Database query timed out/i.test(raw) ||
+                response.status >= 500);
+            if (retryable) {
+              await new Promise((r) => setTimeout(r, 900));
+              continue;
+            }
             return {
               data: { user: null, session: null },
-              error: { message },
+              error: { message: lastError },
+            };
+          } catch (error) {
+            lastError = error instanceof Error ? error.message : "Login failed";
+            if (
+              tryNum === 0 &&
+              /connection timeout|Connection terminated|Failed to fetch|NetworkError/i.test(lastError)
+            ) {
+              await new Promise((r) => setTimeout(r, 900));
+              continue;
+            }
+            return {
+              data: { user: null, session: null },
+              error: { message: lastError },
             };
           }
-          return persistAuthSessionFromLoginResponse(data);
-        } catch (error) {
-          return {
-            data: { user: null, session: null },
-            error: { message: error instanceof Error ? error.message : "Login failed" },
-          };
         }
+        return {
+          data: { user: null, session: null },
+          error: { message: lastError },
+        };
       },
 
       async signOut() {

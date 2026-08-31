@@ -105,6 +105,12 @@ function errorResult(message: string): QueryResult {
   return { data: null, error: { message } };
 }
 
+function isTransientPgError(message: string): boolean {
+  return /connection timeout|Connection terminated|ECONNREFUSED|ETIMEDOUT|timeout expired|connect ETIMEDOUT/i.test(
+    message
+  );
+}
+
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = serviceToken();
   return {
@@ -128,7 +134,7 @@ function getPgPool(): PgPoolLike {
     connectionString,
     max: 2,
     idleTimeoutMillis: 10_000,
-    connectionTimeoutMillis: 8_000,
+    connectionTimeoutMillis: 20_000,
     ssl: connectionString.includes("sslmode=require") ? { rejectUnauthorized: false } : undefined,
   });
   return pgPool;
@@ -262,8 +268,16 @@ class PostgrestQuery<T = unknown> implements PromiseLike<QueryResult<T>> {
 
   private async execute(): Promise<QueryResult<T>> {
     if (postgresConnectionString()) {
-      return this.executePg();
+      const pgResult = await this.executePg();
+      if (!pgResult.error) return pgResult;
+      const msg = pgResult.error.message || "";
+      if (!isTransientPgError(msg) || !postgrestBaseUrl()) return pgResult;
+      console.warn(`[cloudbase_compat] Direct PG failed (${msg}); falling back to PostgREST`);
     }
+    return this.executePostgrest();
+  }
+
+  private async executePostgrest(): Promise<QueryResult<T>> {
     const base = postgrestBaseUrl();
     if (!base) return errorResult("TENCENT_POSTGREST_URL is not configured") as QueryResult<T>;
     const qs = this.params.toString();

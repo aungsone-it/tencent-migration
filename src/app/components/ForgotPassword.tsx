@@ -6,6 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { ArrowLeft, Mail, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
+import { AdminAuthBrandMark } from './AdminAuthBrandMark';
 
 interface ForgotPasswordProps {
   onBack: () => void;
@@ -66,11 +67,7 @@ export function ForgotPassword({ onBack }: ForgotPasswordProps) {
 
       <div className="w-full max-w-[400px] relative z-10">
         {/* Logo */}
-        <div className="flex justify-center mb-6">
-          <div className="text-4xl font-bold text-slate-900 dark:text-white drop-shadow-2xl">
-            SECURE
-          </div>
-        </div>
+        <AdminAuthBrandMark />
 
         {/* Card */}
         <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700 p-8">

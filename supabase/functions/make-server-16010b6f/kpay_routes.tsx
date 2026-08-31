@@ -3055,14 +3055,19 @@ export async function invokeKPayBusinessPay(params: {
 }): Promise<KPayBusinessPayResult> {
   if (resolveEnv("KPAY_BUSINESS_PAY_MOCK") === "1") {
     const environment = text(resolveEnv("KPAY_ENV")).toLowerCase();
-    if (environment === "prod" || environment === "production") {
+    const allowMock =
+      environment === "uat" ||
+      environment === "dev" ||
+      environment === "development" ||
+      environment === "test";
+    if (!allowMock) {
       return {
         ok: false,
         success: false,
         pending: false,
         merchantOrderId: params.merchantOrderId,
         providerMessage:
-          "KPAY_BUSINESS_PAY_MOCK cannot be used in production. Disable it and configure the VPS Business Pay relay.",
+          "KPAY_BUSINESS_PAY_MOCK is only allowed when KPAY_ENV is uat, dev, or test. Disable it and configure the VPS Business Pay relay.",
       };
     }
     return {

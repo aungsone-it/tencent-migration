@@ -1088,6 +1088,17 @@ export const authApi = {
     return apiClient.post('/auth/send-register-phone-otp', { phone: phone.trim() });
   },
 
+  isPhoneOtpDisabledError(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const code = "code" in error ? String((error as { code?: string }).code || "") : "";
+    const status = "statusCode" in error ? Number((error as { statusCode?: number }).statusCode) : 0;
+    const message = error instanceof Error ? error.message : "";
+    return (
+      code === "PHONE_OTP_DISABLED" ||
+      (status === 503 && /temporarily disabled/i.test(message))
+    );
+  },
+
   /**
    * Verify phone OTP and receive a one-time registration token
    */

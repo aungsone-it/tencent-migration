@@ -91,6 +91,9 @@ export function AuthModal({
       toast.success(result.message || t("storefront.auth.otpSent"));
       return true;
     } catch (error) {
+      if (authApi.isPhoneOtpDisabledError(error)) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : t("storefront.auth.otpSendFailed");
       toast.error(message);
       return false;
@@ -101,7 +104,14 @@ export function AuthModal({
 
   const handleResendOtp = async () => {
     if (resendCooldown > 0 || otpSending) return;
-    await sendPhoneOtp();
+    try {
+      await sendPhoneOtp();
+    } catch (error) {
+      if (!authApi.isPhoneOtpDisabledError(error)) {
+        const message = error instanceof Error ? error.message : t("storefront.auth.otpSendFailed");
+        toast.error(message);
+      }
+    }
   };
 
   const getResetPasswordPath = (): string => {
@@ -159,7 +169,19 @@ export function AuthModal({
         toast.error(t("storefront.account.registerRequiredFields"));
         return;
       }
-      await onRegister(profileImage ?? undefined);
+      try {
+        const sent = await sendPhoneOtp();
+        if (sent) {
+          setRegisterStep('otp');
+          return;
+        }
+      } catch (error) {
+        if (authApi.isPhoneOtpDisabledError(error)) {
+          await onRegister(profileImage ?? undefined);
+          return;
+        }
+        throw error;
+      }
       return;
     }
 

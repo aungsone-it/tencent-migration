@@ -102,10 +102,16 @@ function resolveChatParticipant(): ChatParticipant {
           ""
       ).trim() || "";
 
-    if (storedEmail && !isGuestChatEmail(storedEmail)) {
+    const authEmail = String(user?.authEmail || "").trim();
+    const threadEmail =
+      (storedEmail && !isGuestChatEmail(storedEmail) ? storedEmail : "") ||
+      (authEmail && !isGuestChatEmail(authEmail) ? authEmail : "") ||
+      (user?.id != null ? `customer-${String(user.id).trim()}@phone.migoo.store` : "");
+
+    if (threadEmail) {
       return {
         name: storedName || "Customer",
-        email: storedEmail,
+        email: threadEmail,
         phone: resolveCustomerPhone(user) || "",
         isGuest: false,
         profileImage,

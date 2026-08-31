@@ -99,13 +99,13 @@ export function displayPlatformBrandName(
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
-/** Default platform name from settings — maps legacy "SECURE E-commerce" to SECURE. */
+/** Default platform name from settings — maps legacy SECURE branding to MIGOO. */
 export function normalizePlatformStoreName(
   name: string | null | undefined,
   fallback = BRANDING.APP_NAME
 ): string {
   const raw = String(name || "").trim();
-  if (!raw || /^secure\s+e-?commerce$/i.test(raw)) {
+  if (!raw || /^secure(\s+e-?commerce)?$/i.test(raw)) {
     return fallback;
   }
   return raw;

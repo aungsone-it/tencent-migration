@@ -94,7 +94,7 @@ function isOrderPaymentCollected(order: AnyRecord): boolean {
   if (pay === "unpaid" || pay === "pending" || pay === "pending-verification") return false;
 
   if (isCodPaymentMethod(order)) {
-    return COD_COLLECTED_STATUSES.has(st) || pay === "paid";
+    return COD_COLLECTED_STATUSES.has(st);
   }
 
   if (isKpayPaymentMethod(order)) {
@@ -201,6 +201,10 @@ function lineItemBelongsToVendor(
   if (Array.isArray(sel) && sel.some((x: unknown) => normalizedVendorIds.has(String(x).trim()))) {
     return true;
   }
+
+  const hasExplicitVendor =
+    idCandidates.length > 0 || (Array.isArray(sel) && sel.length > 0);
+  if (hasExplicitVendor) return false;
 
   if (catalog.ids.size > 0 || catalog.skus.size > 0) {
     const pid = item.productId != null ? String(item.productId).trim() : "";
@@ -427,17 +431,33 @@ async function acquireWithdrawLock(
   const existing = await readWithdrawLock(vendorId);
   if (
     existing &&
-    (existing.status === "pending" || existing.status === "processing") &&
-    !lockIsStale(existing)
+    (existing.status === "pending" || existing.status === "processing")
   ) {
     const rows = await listVendorWithdrawals(vendorId);
-    const inflight = rows.find((row) => row.id === existing.withdrawalId) ||
-      rows.find((row) => row.status === "pending" || row.status === "processing");
-    return {
-      ok: false,
-      message: "A withdrawal is already in progress. Please wait for it to complete.",
-      withdrawal: inflight,
-    };
+    const lockRow = rows.find((row) => row.id === existing.withdrawalId);
+    const stillInflight =
+      lockRow &&
+      (lockRow.status === "pending" || lockRow.status === "processing");
+    if (stillInflight || !lockIsStale(existing)) {
+      const inflight = lockRow ||
+        rows.find((row) => row.status === "pending" || row.status === "processing");
+      return {
+        ok: false,
+        message: "A withdrawal is already in progress. Please wait for it to complete.",
+        withdrawal: inflight,
+      };
+    }
+  }
+
+  if (existing) {
+    const again = await readWithdrawLock(vendorId);
+    if (
+      again &&
+      again.withdrawalId === existing.withdrawalId &&
+      (lockIsStale(again) || (again.status !== "pending" && again.status !== "processing"))
+    ) {
+      await kv.del(lockKey(vendorId)).catch(() => undefined);
+    }
   }
 
   const now = nowIso();
@@ -450,7 +470,13 @@ async function acquireWithdrawLock(
     createdAt: now,
     updatedAt: now,
   };
-  await kv.set(lockKey(vendorId), nextLock);
+  const inserted = await kv.setIfAbsent(lockKey(vendorId), nextLock);
+  if (!inserted) {
+    return {
+      ok: false,
+      message: "Could not reserve withdrawal balance. Please try again.",
+    };
+  }
 
   const verify = await readWithdrawLock(vendorId);
   if (!verify || verify.withdrawalId !== withdrawalId) {
@@ -670,11 +696,11 @@ export async function postVendorCommissionWithdraw(c: Context) {
     if (authError) return authError;
 
     const body = (await c.req.json().catch(() => ({}))) as AnyRecord;
-    const wallet = await computeVendorWallet(vendorId);
-    if (!wallet) return c.json({ error: "Vendor not found" }, 404);
+    const previewWallet = await computeVendorWallet(vendorId);
+    if (!previewWallet) return c.json({ error: "Vendor not found" }, 404);
 
     const vendor = (await kv.get(`vendor:${vendorId}`)) as AnyRecord | null;
-    const savedPhone = normalizeMyanmarKpayPhone(wallet.kpayPhone);
+    const savedPhone = normalizeMyanmarKpayPhone(previewWallet.kpayPhone);
     const bodyPhone = normalizeMyanmarKpayPhone(body.kpayPhone ?? body.kpayAccount);
 
     if (bodyPhone && savedPhone && bodyPhone !== savedPhone) {
@@ -691,15 +717,43 @@ export async function postVendorCommissionWithdraw(c: Context) {
       return c.json({ error: "Save a KBZPay phone number before withdrawing" }, 400);
     }
 
+    const requestedAmountHint =
+      body.amount != null && body.amount !== ""
+        ? Math.round(parseMoney(body.amount))
+        : Math.floor(previewWallet.availableBalance);
+
+    const merchOrderId = makeMerchOrderId(vendorId);
+    const withdrawalId = crypto.randomUUID();
+    const createdAt = nowIso();
+
+    const lock = await acquireWithdrawLock(vendorId, withdrawalId, requestedAmountHint, merchOrderId);
+    if (!lock.ok) {
+      return c.json(
+        {
+          error: lock.message,
+          withdrawal: lock.withdrawal,
+        },
+        409,
+      );
+    }
+
+    const wallet = await computeVendorWallet(vendorId);
+    if (!wallet) {
+      await releaseWithdrawLock(vendorId, withdrawalId);
+      return c.json({ error: "Vendor not found" }, 404);
+    }
+
     const requestedAmount =
       body.amount != null && body.amount !== ""
         ? Math.round(parseMoney(body.amount))
         : Math.floor(wallet.availableBalance);
 
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      await releaseWithdrawLock(vendorId, withdrawalId);
       return c.json({ error: "Withdrawal amount must be greater than zero" }, 400);
     }
     if (requestedAmount < wallet.minWithdrawAmount) {
+      await releaseWithdrawLock(vendorId, withdrawalId);
       return c.json(
         {
           error: `Minimum withdrawal is ${wallet.minWithdrawAmount.toLocaleString()} MMK`,
@@ -708,26 +762,12 @@ export async function postVendorCommissionWithdraw(c: Context) {
       );
     }
     if (requestedAmount > wallet.availableBalance) {
+      await releaseWithdrawLock(vendorId, withdrawalId);
       return c.json(
         {
           error: `Insufficient balance. Available: ${wallet.availableBalance.toLocaleString()} MMK`,
         },
         400,
-      );
-    }
-
-    const merchOrderId = makeMerchOrderId(vendorId);
-    const withdrawalId = crypto.randomUUID();
-    const createdAt = nowIso();
-
-    const lock = await acquireWithdrawLock(vendorId, withdrawalId, requestedAmount, merchOrderId);
-    if (!lock.ok) {
-      return c.json(
-        {
-          error: lock.message,
-          withdrawal: lock.withdrawal,
-        },
-        409,
       );
     }
 
@@ -754,6 +794,12 @@ export async function postVendorCommissionWithdraw(c: Context) {
         kpayAccount: kpayPhone,
         updatedAt: nowIso(),
       });
+    }
+
+    const lockBeforePay = await readWithdrawLock(vendorId);
+    if (!lockBeforePay || lockBeforePay.withdrawalId !== withdrawalId) {
+      await releaseWithdrawLock(vendorId, withdrawalId);
+      return c.json({ error: "Could not reserve withdrawal balance. Please try again." }, 409);
     }
 
     let payout: Awaited<ReturnType<typeof invokeKPayBusinessPay>>;
@@ -810,6 +856,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
         ...latestWithdrawals[idx],
         status: "processing",
         updatedAt,
+        errorMessage: payout.providerMessage || payout.networkError || "KBZPay payout is processing",
         kbz: {
           paymentOrderId: payout.paymentOrderId,
           mmOrderId: payout.mmOrderId,
@@ -817,7 +864,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
           endpointUsed: payout.endpointUsed,
           rawResponse: payout.rawResponse,
           providerMessage: payout.providerMessage || payout.networkError,
-          ambiguous: ambiguous || undefined,
+          ambiguous: true,
         },
       };
       await updateWithdrawLock(vendorId, withdrawalId, "processing");
@@ -828,10 +875,12 @@ export async function postVendorCommissionWithdraw(c: Context) {
         updatedAt,
         errorMessage: payout.providerMessage || payout.networkError || "KBZPay payout failed",
         kbz: {
+          paymentOrderId: payout.paymentOrderId,
+          mmOrderId: payout.mmOrderId,
+          tradeStatus: payout.tradeStatus,
           endpointUsed: payout.endpointUsed,
           rawResponse: payout.rawResponse,
-          providerCode: payout.providerCode,
-          providerMessage: payout.providerMessage,
+          providerMessage: payout.providerMessage || payout.networkError,
         },
       };
       await releaseWithdrawLock(vendorId, withdrawalId);

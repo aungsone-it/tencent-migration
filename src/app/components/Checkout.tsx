@@ -29,7 +29,6 @@ import {
 } from "./ui/select";
 import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
 import { useCart } from "./CartContext";
-import { useAuth } from "../contexts/AuthContext";
 import {
   ensureMetaPixelForVendor,
   trackMetaPurchaseOnce,
@@ -81,7 +80,9 @@ import { useLanguage } from "../contexts/LanguageContext";
 import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 import {
   formatCustomerPhoneDisplay,
+  isStorefrontCustomerSession,
   normalizeMyanmarPhone,
+  readNormalizedMigooUserFromStorage,
 } from "../utils/customerAuthIdentity";
 import { logisticsApi, type DeliveryPartner } from "../../utils/api";
 import {
@@ -95,30 +96,23 @@ import {
   resolveEffectiveCheckoutShippingFee,
 } from "../utils/freeShipping";
 
-/** KV-backed customer session (authApi / migoo-user) — AuthContext only has CloudBase sessions */
+/** Storefront customer session only — never staff AuthContext. */
 function getMigooCustomerFromStorage(): {
   id: string;
   email?: string;
   name?: string;
   phone?: string;
 } | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem("migoo-user");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { id?: string; email?: string; name?: string; phone?: string };
-    if (parsed && typeof parsed.id === "string") {
-      return {
-        id: parsed.id,
-        email: parsed.email,
-        name: parsed.name,
-        phone: parsed.phone,
-      };
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  const parsed = readNormalizedMigooUserFromStorage();
+  if (!parsed || !isStorefrontCustomerSession(parsed)) return null;
+  const id = resolveUserIdFromRecord(parsed);
+  if (!id) return null;
+  return {
+    id,
+    email: typeof parsed.email === "string" ? parsed.email : undefined,
+    name: typeof parsed.name === "string" ? parsed.name : undefined,
+    phone: typeof parsed.phone === "string" ? parsed.phone : undefined,
+  };
 }
 
 /** Same ID resolution as VendorStoreView / addresses page (`id` or `userId`). */
@@ -739,24 +733,24 @@ export function Checkout({
     }
     return null;
   }, [checkoutMiniCacheKey, checkoutStoragePath]);
-  const { user: authUser } = useAuth();
   const migoo = getMigooCustomerFromStorage();
 
   /**
    * Customer id + profile: prefer vendor `accountUser` (same as `/profile/addresses`),
-   * then CloudBase session, then raw migoo-user — so `/customers/:id/addresses` matches saved addresses.
+   * then storefront migoo-user. Never use staff AuthContext.
    */
   const effectiveUser = useMemo(() => {
-    const fromVendor = resolveUserIdFromRecord(accountUser);
-    const fromAuth = authUser?.id ? String(authUser.id) : null;
+    const fromVendor = isStorefrontCustomerSession(accountUser as Record<string, unknown> | null)
+      ? resolveUserIdFromRecord(accountUser)
+      : null;
     const fromMigoo = migoo?.id ? String(migoo.id) : null;
-    const id = fromVendor || fromAuth || fromMigoo;
+    const id = fromVendor || fromMigoo;
     if (!id) return null;
     return {
       id,
-      email: accountUser?.email ?? authUser?.email ?? migoo?.email ?? "",
-      name: accountUser?.name ?? authUser?.name ?? migoo?.name ?? "",
-      phone: accountUser?.phone ?? authUser?.phone ?? migoo?.phone ?? "",
+      email: accountUser?.email ?? migoo?.email ?? "",
+      name: accountUser?.name ?? migoo?.name ?? "",
+      phone: accountUser?.phone ?? migoo?.phone ?? "",
     };
   }, [
     accountUser?.id,
@@ -764,10 +758,6 @@ export function Checkout({
     accountUser?.email,
     accountUser?.name,
     accountUser?.phone,
-    authUser?.id,
-    authUser?.email,
-    authUser?.name,
-    authUser?.phone,
     migoo?.id,
     migoo?.email,
     migoo?.name,

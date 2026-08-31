@@ -13,6 +13,7 @@ import {
   readNormalizedMigooUserFromStorage,
   STOREFRONT_STAFF_BLOCKED_MESSAGE,
 } from "../utils/customerAuthIdentity";
+import { storeCustomerSessionToken } from "../utils/customerSessionHeaders";
 import { MIGOO_USER_SESSION_CHANGED_EVENT, notifyMigooUserSessionChanged } from "../../constants";
 import { hasKpaySummaryReturnContext } from "../utils/vendorCheckoutPaths";
 import { invalidateCustomerOrdersCache } from "../utils/module-cache";
@@ -24,7 +25,7 @@ function readMigooCustomer(): { id: string } | null {
 
 export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const { user: authUser, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const allowGuestSummary = useMemo(
     () =>
       hasKpaySummaryReturnContext({
@@ -55,7 +56,7 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
     };
   }, []);
 
-  const signedIn = Boolean(migooUser?.id || authUser?.id);
+  const signedIn = Boolean(migooUser?.id);
 
   useEffect(() => {
     if (allowGuestSummary) {
@@ -87,6 +88,7 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
         throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
       }
       localStorage.setItem("migoo-user", JSON.stringify(sessionUser));
+      storeCustomerSessionToken(response.sessionToken);
       notifyMigooUserSessionChanged();
       setMigooUser(readMigooCustomer());
       if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
@@ -109,7 +111,7 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
     }
   };
 
-  const handleRegister = async (profileImage?: string, _phoneVerificationToken?: string) => {
+  const handleRegister = async (profileImage?: string, phoneVerificationToken?: string) => {
     if (!authForm.password || !authForm.name || !authForm.phone.trim()) {
       toast.error("Please enter your name, phone number, and password");
       return;
@@ -122,6 +124,7 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
         authForm.name,
         authForm.phone.trim(),
         profileImage,
+        phoneVerificationToken,
       );
       const sessionUser = buildCustomerSessionFromAuthResponse(
         response.user as Record<string, unknown>,
@@ -131,6 +134,7 @@ export function UnifiedKpaySummarySignInGate({ children }: { children: ReactNode
         throw new Error(STOREFRONT_STAFF_BLOCKED_MESSAGE);
       }
       localStorage.setItem("migoo-user", JSON.stringify(sessionUser));
+      storeCustomerSessionToken(response.sessionToken);
       notifyMigooUserSessionChanged();
       setMigooUser(readMigooCustomer());
       if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);

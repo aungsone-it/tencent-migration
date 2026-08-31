@@ -8,6 +8,7 @@ import {
   getCloudBaseRequestHeaders,
 } from '../../utils/supabase/info';
 import { devLog, devWarn } from '../app/utils/devLog';
+import { getCustomerSessionHeaders } from '../app/utils/customerSessionHeaders';
 import {
   API_TIMEOUTS,
   PAYLOAD_LIMITS,
@@ -58,7 +59,8 @@ class ApiError extends Error {
   constructor(
     message: string,
     public statusCode?: number,
-    public details?: string
+    public details?: string,
+    public code?: string
   ) {
     super(message);
     this.name = 'ApiError';
@@ -142,6 +144,7 @@ async function apiRequest<T = any>(
     ...getCloudBaseRequestHeaders(),
     ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
     ...(actorUserId ? { "x-actor-user-id": actorUserId } : {}),
+    ...getCustomerSessionHeaders(),
     ...getAdminOperationHeaders(),
     ...fetchOptions.headers,
   };
@@ -265,7 +268,7 @@ async function apiRequest<T = any>(
         return data as T;
       }
 
-      const d = data as { error?: string; message?: string; details?: string };
+      const d = data as { error?: string; message?: string; details?: string; code?: string };
       const primary = d.error || `Server error: ${response.status}`;
       const extra =
         typeof d.message === "string" && d.message.trim()
@@ -276,7 +279,7 @@ async function apiRequest<T = any>(
           ? `${primary}: ${extra}`
           : extra || primary;
 
-      throw new ApiError(message, response.status, d.details);
+      throw new ApiError(message, response.status, d.details, d.code);
     }
 
     if (!silent) {

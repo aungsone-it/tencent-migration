@@ -208,6 +208,33 @@ async function purgeAuthAndUserKv(userId: string): Promise<void> {
     }
     await withTimeout(kv.del(`userId:${uid}`), 5000);
     await withTimeout(kv.del(`auth:user:${uid}`), 5000).catch(() => undefined);
+
+    const customerAuth = await withTimeout(kv.get(`customer_auth:${uid}`), 5000).catch(() => null);
+    if (customerAuth && typeof customerAuth === "object") {
+      const authEmail = String((customerAuth as { email?: string }).email || "").trim().toLowerCase();
+      const authPhone = String((customerAuth as { phone?: string }).phone || "").trim();
+      if (authEmail) {
+        await withTimeout(kv.del(`customer_auth_email:${authEmail}`), 5000).catch(() => undefined);
+      }
+      if (authPhone) {
+        await withTimeout(kv.del(`customer_auth_phone:${authPhone}`), 5000).catch(() => undefined);
+        const digits = authPhone.replace(/\D/g, "");
+        if (digits.startsWith("959") && digits.length >= 11) {
+          await withTimeout(kv.del(`customer_auth_phone:+${digits}`), 5000).catch(() => undefined);
+          await withTimeout(kv.del(`customer_auth_phone:0${digits.slice(2)}`), 5000).catch(() => undefined);
+        }
+      }
+      await withTimeout(kv.del(`customer_auth:${uid}`), 5000).catch(() => undefined);
+    }
+    const activeSession = await withTimeout(kv.get(`customer_session_active:${uid}`), 5000).catch(() => null);
+    const sessionToken =
+      activeSession && typeof activeSession === "object"
+        ? String((activeSession as { token?: string }).token || "").trim()
+        : "";
+    if (sessionToken) {
+      await withTimeout(kv.del(`customer_session:${sessionToken}`), 5000).catch(() => undefined);
+    }
+    await withTimeout(kv.del(`customer_session_active:${uid}`), 5000).catch(() => undefined);
   } catch (userDeleteError) {
     console.warn(`⚠️ Could not delete user KV for ${uid}:`, userDeleteError);
   }
@@ -788,6 +815,19 @@ customerApp.post("/customers", async (c) => {
         existingCustomerId: existingCustomer.id,
         message: `A customer with email "${email}" is already registered`,
       }, 409); // 409 Conflict
+    }
+
+    const existingPhone = (Array.isArray(allCustomers) ? allCustomers : []).find((c) => {
+      if (!c?.phone) return false;
+      const a = String(c.phone).replace(/\D/g, "");
+      const b = String(phone).replace(/\D/g, "");
+      return a.length >= 8 && a === b;
+    });
+    if (existingPhone) {
+      return c.json({
+        error: "Customer with this phone number already exists",
+        existingCustomerId: existingPhone.id,
+      }, 409);
     }
     
     // Generate customer ID

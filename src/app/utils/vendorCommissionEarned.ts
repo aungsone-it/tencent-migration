@@ -77,7 +77,7 @@ function isOrderPaymentCollected(order: any): boolean {
   if (pay === "unpaid" || pay === "pending" || pay === "pending-verification") return false;
 
   if (isCodPaymentMethod(order)) {
-    return COD_COLLECTED_STATUSES.has(st) || pay === "paid";
+    return COD_COLLECTED_STATUSES.has(st);
   }
 
   if (isKpayPaymentMethod(order)) {
@@ -121,6 +121,9 @@ export function lineItemBelongsToVendor(
   if (idCandidates.some((x) => String(x).trim() === vid)) return true;
   const sel = item.product?.selectedVendors ?? item.selectedVendors;
   if (Array.isArray(sel) && sel.some((x: unknown) => String(x).trim() === vid)) return true;
+  const hasExplicitVendor =
+    idCandidates.length > 0 || (Array.isArray(sel) && sel.length > 0);
+  if (hasExplicitVendor) return false;
   if (catalog && (catalog.ids.size > 0 || catalog.skus.size > 0)) {
     const pid = item.productId != null ? String(item.productId).trim() : "";
     const sku = item.sku != null ? String(item.sku).trim() : "";
@@ -236,12 +239,29 @@ export function computeVendorPayoutEarned(
     if (!isVendorOrderWithdrawable(order)) continue;
 
     const lineItems = Array.isArray(order.items) ? order.items : [];
+    let matchedAnyLine = false;
     for (const item of lineItems) {
       if (!lineItemBelongsToVendor(item, vendorId, catalog)) continue;
+      matchedAnyLine = true;
       const gross = orderLineGross(item);
       const net = orderLineNetAfterDiscount(gross, order);
       const pct = lineCommissionPercent(item, products, contractPct);
       payout += Math.max(0, net - (net * pct) / 100);
+    }
+
+    const orderVendor =
+      order.vendorId != null
+        ? String(order.vendorId).trim()
+        : order.vendor != null
+          ? String(order.vendor).trim()
+          : "";
+    if (!matchedAnyLine && lineItems.length > 0 && orderVendor && orderVendor === String(vendorId).trim()) {
+      for (const item of lineItems) {
+        const gross = orderLineGross(item);
+        const net = orderLineNetAfterDiscount(gross, order);
+        const pct = lineCommissionPercent(item, products, contractPct);
+        payout += Math.max(0, net - (net * pct) / 100);
+      }
     }
   }
 

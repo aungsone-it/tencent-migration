@@ -10,6 +10,7 @@ import { Input } from './ui/input';
 import { usePlatformBranding } from '../hooks/usePlatformBranding';
 import { buildSuperAdminDocumentTitle } from '../utils/superAdminDocumentTitle';
 import { SUPER_ADMIN_SETUP_COMPLETE_EVENT } from './AppRouter';
+import { AdminAuthBrandMark } from './AdminAuthBrandMark';
 import { isValidEmail } from '../../utils/helpers';
 import { PolicyAgreementLabel } from './PolicyAgreementLabel';
 
@@ -247,11 +248,7 @@ export function Setup() {
       </div>
 
       <div className="w-full max-w-xl relative z-10">
-        <div className="flex justify-center mb-6">
-          <div className="text-4xl font-bold text-slate-900 drop-shadow-2xl">
-            SECURE
-          </div>
-        </div>
+        <AdminAuthBrandMark />
 
         {children}
 

@@ -406,6 +406,7 @@ export interface AuthResponse {
   success: boolean;
   user: User;
   message: string;
+  sessionToken?: string;
 }
 
 export interface ProfileResponse {

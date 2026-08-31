@@ -42,6 +42,24 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 30000): Promise<T
   ]);
 }
 
+/** Insert a key only if it does not already exist. Returns false on conflict. */
+export const setIfAbsent = async (key: string, value: any): Promise<boolean> => {
+  const { error } = await withTimeout(
+    supabaseClient.from("kv_store_16010b6f").insert({
+      key,
+      value,
+    }),
+    15000
+  );
+  if (!error) return true;
+  const code = String((error as { code?: string }).code || "");
+  const message = String(error.message || "");
+  if (code === "23505" || /duplicate key|unique constraint/i.test(message)) {
+    return false;
+  }
+  throw new Error(error.message);
+};
+
 // Set stores a key-value pair in the database.
 export const set = async (key: string, value: any): Promise<void> => {
   const { error } = await withTimeout(

@@ -192,6 +192,18 @@ export default defineConfig(({ mode }) => {
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 
+  server:
+    mode === 'development'
+      ? {
+          proxy: {
+            '/api/make-server-16010b6f': {
+              target: `http://127.0.0.1:${process.env.LOCAL_API_PORT || 8787}`,
+              changeOrigin: true,
+            },
+          },
+        }
+      : undefined,
+
   // Build configuration - keep it simple for Figma Make
   build: {
     emptyOutDir: true,

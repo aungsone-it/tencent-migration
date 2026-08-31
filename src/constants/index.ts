@@ -380,9 +380,9 @@ export const SUCCESS_MESSAGES = {
 // ============================================
 
 export const BRANDING = {
-  APP_NAME: 'SECURE',
-  SYSTEM_NAME: 'SECURE',
-  ADMIN_DOCUMENT_TITLE: 'SECURE DASHBOARD',
+  APP_NAME: 'MIGOO',
+  SYSTEM_NAME: 'MIGOO',
+  ADMIN_DOCUMENT_TITLE: 'MIGOO DASHBOARD',
   TAGLINE: 'Modern E-commerce Platform',
-  COPYRIGHT: `© ${new Date().getFullYear()} SECURE. All rights reserved.`,
+  COPYRIGHT: `© ${new Date().getFullYear()} MIGOO. All rights reserved.`,
 } as const;

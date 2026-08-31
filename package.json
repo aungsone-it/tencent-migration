@@ -6,6 +6,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
+    "dev:api": "node scripts/run-local-api.mjs",
+    "dev:local": "VITE_CLOUDBASE_API_BASE_URL=/api/make-server-16010b6f vite",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare:cloudbase-functions": "node scripts/prepare-cloudbase-functions.mjs",

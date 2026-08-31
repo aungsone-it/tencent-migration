@@ -13,7 +13,7 @@
 
   function normalizeStoreName(name) {
     var raw = String(name || "").trim();
-    if (!raw || /^secure\s+e-?commerce$/i.test(raw)) return "SECURE";
+    if (!raw || /^secure(\s+e-?commerce)?$/i.test(raw)) return "MIGOO";
     return raw;
   }
 
@@ -195,7 +195,7 @@
     if (!data || typeof data !== "object") return;
     var logo = typeof data.storeLogo === "string" ? data.storeLogo.trim() : "";
     var name = normalizeStoreName(
-      typeof data.storeName === "string" ? data.storeName : "SECURE"
+      typeof data.storeName === "string" ? data.storeName : "MIGOO"
     );
     applyTitle(name);
     if (!logo) {
@@ -236,7 +236,7 @@
           storeName:
             typeof data.storeName === "string" && normalizeStoreName(data.storeName).trim()
               ? normalizeStoreName(data.storeName)
-              : "SECURE",
+              : "MIGOO",
         };
         writeCache(next);
         applyBranding(next);

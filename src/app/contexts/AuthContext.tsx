@@ -578,6 +578,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             error: 'Cannot connect to server. Please check if the Tencent CloudBase function is deployed and running.' 
           };
         }
+        if (/connection timeout|Connection terminated|Database query timed out|Request timeout/i.test(error.message)) {
+          return {
+            success: false,
+            error:
+              'The admin server could not reach the database. Wait a moment and try again. If this persists, redeploy make-server-16010b6f in the Tencent CloudBase console.',
+          };
+        }
         // Handle invalid credentials error
         if (error.message.includes('Invalid login credentials') || error.message.includes('invalid_credentials')) {
           return { 

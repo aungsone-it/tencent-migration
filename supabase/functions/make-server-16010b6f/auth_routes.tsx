@@ -13,6 +13,7 @@ import {
 } from "./staff_activity_helpers.tsx";
 import { queueCustomerReadModelSync, queueVendorReadModelSync } from "./read_model.ts";
 import { linkGuestOrdersToUser } from "./guest_order_linking.ts";
+import { issueCustomerSessionToken } from "./customer_session_guard.tsx";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import {
   buildSesFromAddress,
@@ -118,12 +119,11 @@ async function tryStaffLogin(
     await setStaffPassword(staffUser, password, Boolean(staffUser.tempPassword));
   }
 
-  const refreshed = (await findStaffUserByEmail(emailLower)) || staffUser;
-  if (isStaffAccountInactive(refreshed)) {
+  if (isStaffAccountInactive(staffUser)) {
     return { error: "This account has been deactivated. Please contact your administrator." };
   }
 
-  const { password: _password, ...safeUser } = refreshed;
+  const { password: _password, ...safeUser } = staffUser;
   return { user: safeUser };
 }
 
@@ -2552,10 +2552,12 @@ authApp.post("/login", async (c) => {
       authUser.id,
       String(authUser.email || "").trim().toLowerCase()
     );
+    const sessionToken = await issueCustomerSessionToken(authUser.id);
 
     return c.json({
       success: true,
       user: userResponse,
+      sessionToken,
       session: {
         access_token: authSession?.access_token,
         refresh_token: authSession?.refresh_token,
@@ -2647,7 +2649,10 @@ authApp.post("/customer/:userId/profile-image", async (c) => {
 authApp.post("/send-register-phone-otp", async (c) => {
   try {
     if (!PHONE_OTP_ENABLED) {
-      return c.json({ error: "Phone SMS verification is temporarily disabled" }, 503);
+      return c.json({
+        error: "Phone SMS verification is temporarily disabled",
+        code: "PHONE_OTP_DISABLED",
+      }, 503);
     }
     const { phone } = await c.req.json();
 
@@ -2737,7 +2742,10 @@ authApp.post("/send-register-phone-otp", async (c) => {
 authApp.post("/verify-register-phone-otp", async (c) => {
   try {
     if (!PHONE_OTP_ENABLED) {
-      return c.json({ error: "Phone SMS verification is temporarily disabled" }, 503);
+      return c.json({
+        error: "Phone SMS verification is temporarily disabled",
+        code: "PHONE_OTP_DISABLED",
+      }, 503);
     }
     const { phone, otp } = await c.req.json();
 
@@ -2837,6 +2845,7 @@ authApp.post("/register", async (c) => {
       }, 400);
     }
 
+    let phoneVerified = false;
     if (PHONE_OTP_ENABLED) {
       if (!phoneVerificationToken?.trim()) {
         return c.json({
@@ -2861,6 +2870,7 @@ authApp.post("/register", async (c) => {
       }
 
       await kv.del(phoneVerificationTokenKey(String(phoneVerificationToken).trim()));
+      phoneVerified = true;
     }
 
     const emailTrimmed = String(email || "").trim();
@@ -2967,6 +2977,7 @@ authApp.post("/register", async (c) => {
       name: name,
       email: displayEmail,
       phone: normalizedPhone,
+      phoneVerified,
       location: "",
       address: "",
       city: "",
@@ -2997,9 +3008,11 @@ authApp.post("/register", async (c) => {
     queueCustomerReadModelSync(customerId, customer);
     console.log(`✅ Customer record created: ${customerId}`);
 
-    await linkGuestOrdersToUser(authAccount.userId, normalizedPhone).catch((err) => {
-      console.warn("[auth] guest order merge on register failed:", err);
-    });
+    if (phoneVerified) {
+      await linkGuestOrdersToUser(authAccount.userId, normalizedPhone).catch((err) => {
+        console.warn("[auth] guest order merge on register failed:", err);
+      });
+    }
 
     // Prepare user object for frontend - IMPORTANT: Ensure id is the Supabase userId (UUID)
     // so profile fetching works correctly. Store the customerId separately.
@@ -3008,10 +3021,12 @@ authApp.post("/register", async (c) => {
       authAccount.userId,
       authEmail.toLowerCase()
     );
+    const sessionToken = await issueCustomerSessionToken(authAccount.userId);
 
     return c.json({
       success: true,
       user: userResponse,
+      sessionToken,
     });
   } catch (error: any) {
     console.error("Registration error:", error);

@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { usePlatformBranding } from '../hooks/usePlatformBranding';
 import { buildSuperAdminDocumentTitle } from '../utils/superAdminDocumentTitle';
 import { freeLocalStorageForAuth } from '../utils/persistedLocalCache';
+import { AdminAuthBrandMark } from './AdminAuthBrandMark';
 
 export function Login() {
   const { login } = useAuth();
@@ -105,11 +106,7 @@ export function Login() {
 
       <div className="w-full max-w-[400px] relative z-10">
         {/* Logo Section */}
-        <div className="flex justify-center mb-6">
-          <div className="text-4xl font-bold text-slate-900 drop-shadow-2xl">
-            SECURE
-          </div>
-        </div>
+        <AdminAuthBrandMark />
 
         {/* Clean White Login Card */}
         <div className="bg-white rounded-3xl shadow-xl border border-slate-200 p-8">

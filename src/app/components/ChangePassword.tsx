@@ -8,6 +8,7 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { usePlatformBranding } from '../hooks/usePlatformBranding';
 import { buildSuperAdminDocumentTitle } from '../utils/superAdminDocumentTitle';
+import { AdminAuthBrandMark } from './AdminAuthBrandMark';
 
 export function ChangePassword() {
   const { changePassword } = useAuth();
@@ -80,11 +81,7 @@ export function ChangePassword() {
       </div>
 
       <div className="w-full max-w-[400px] relative z-10">
-        <div className="flex justify-center mb-6">
-          <div className="text-4xl font-bold text-slate-900 dark:text-white drop-shadow-2xl">
-            SECURE
-          </div>
-        </div>
+        <AdminAuthBrandMark />
 
         <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-700 p-8">
           <div className="mb-8">

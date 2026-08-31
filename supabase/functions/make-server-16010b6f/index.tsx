@@ -39,6 +39,7 @@ import {
   postVendorCommissionWithdraw,
 } from "./vendor_commission_withdraw.tsx";
 import { issueVendorSessionToken, revokeVendorSession } from "./vendor_session_guard.tsx";
+import { assertCustomerSession } from "./customer_session_guard.tsx";
 import {
   deletePwaCheckoutDraft,
   resolveMerchantOrderIdFromOrder,
@@ -349,6 +350,7 @@ app.use("*", cors({
     "x-cloudbase-publishable-key",
     "x-admin-operation-secret",
     "x-vendor-session",
+    "x-customer-session",
   ],
   exposeHeaders: ["Content-Length"],
   maxAge: 86400,
@@ -1648,6 +1650,99 @@ function isSyntheticStorefrontAuthEmail(email: string): boolean {
   return String(email || "").toLowerCase().endsWith(`@${STOREFRONT_PHONE_AUTH_EMAIL_DOMAIN}`);
 }
 
+function normalizeStorefrontPhone(raw: string): string | null {
+  const normalized = String(raw || "").replace(/[\s\-]/g, "");
+  if (!/^(\+959|09)\d{9}$/.test(normalized)) return null;
+  if (normalized.startsWith("09")) return `+95${normalized.slice(1)}`;
+  return normalized;
+}
+
+function storefrontPhoneKey(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  return normalizeStorefrontPhone(s) || s.replace(/\D/g, "");
+}
+
+function storefrontEmailKey(raw: unknown): string {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s || isSyntheticStorefrontAuthEmail(s)) return "";
+  return s;
+}
+
+function profileIdentityChanged(
+  body: { phone?: unknown; email?: unknown },
+  existing: { phone?: unknown; email?: unknown } | null | undefined,
+): boolean {
+  if (!existing) return false;
+  if (typeof body.phone === "string" && storefrontPhoneKey(body.phone) !== storefrontPhoneKey(existing.phone)) {
+    return true;
+  }
+  if (body.email !== undefined && storefrontEmailKey(body.email) !== storefrontEmailKey(existing.email)) {
+    return true;
+  }
+  return false;
+}
+
+async function loadStorefrontProfileIdentity(userId: string): Promise<{ phone?: string; email?: string } | null> {
+  const pick = (value: unknown): string => String(value ?? "").trim();
+  let phone = "";
+  let email = "";
+  let found = false;
+
+  const apply = (record: { phone?: unknown; email?: unknown } | null | undefined) => {
+    if (!record || typeof record !== "object") return;
+    found = true;
+    if (!phone && pick(record.phone)) phone = pick(record.phone);
+    if (!email && pick(record.email)) email = pick(record.email);
+  };
+
+  const authKv = await withTimeout(kv.get(`auth:user:${userId}`), 5000).catch(() => null);
+  apply(authKv && typeof authKv === "object" ? authKv as { phone?: unknown; email?: unknown } : null);
+
+  const customerAuth = await withTimeout(kv.get(`customer_auth:${userId}`), 5000).catch(() => null);
+  apply(customerAuth && typeof customerAuth === "object" ? customerAuth as { phone?: unknown; email?: unknown } : null);
+
+  if (!phone || !email) {
+    const allCustomers = await withTimeout(kv.getByPrefix("customer:"), 5000);
+    const customer = Array.isArray(allCustomers)
+      ? allCustomers.find((c: any) => c != null && String(c.userId || "") === userId)
+      : null;
+    apply(customer);
+  }
+
+  if (!phone || !email) {
+    const userIdData = await withTimeout(kv.get(`userId:${userId}`), 5000).catch(() => null);
+    if (userIdData?.email) {
+      const existingUser = await withTimeout(kv.get(`user:${userIdData.email}`), 5000).catch(() => null);
+      apply(existingUser && typeof existingUser === "object" ? existingUser as { phone?: unknown; email?: unknown } : null);
+    }
+  }
+
+  return found ? { phone, email } : null;
+}
+
+async function syncCustomerAuthPhoneIndex(userId: string, rawPhone: string): Promise<string | null> {
+  const phone = normalizeStorefrontPhone(rawPhone);
+  const rec = await withTimeout(kv.get(`customer_auth:${userId}`), 5000).catch(() => null);
+  if (!rec || typeof rec !== "object") return phone;
+  const prev = normalizeStorefrontPhone(String((rec as { phone?: string }).phone || ""));
+  if (prev && prev !== phone) {
+    await withTimeout(kv.del(`customer_auth_phone:${prev}`), 5000).catch(() => undefined);
+  }
+  await withTimeout(
+    kv.set(`customer_auth:${userId}`, {
+      ...(rec as Record<string, unknown>),
+      phone: phone || String(rawPhone || "").trim(),
+      updatedAt: new Date().toISOString(),
+    }),
+    5000,
+  );
+  if (phone) {
+    await withTimeout(kv.set(`customer_auth_phone:${phone}`, { userId }), 5000);
+  }
+  return phone;
+}
+
 async function getSupabaseAuthEmailForProfile(userId: string): Promise<string> {
   try {
     const { data, error } = await supabase.auth.admin.getUserById(userId);
@@ -2115,6 +2210,39 @@ app.post("/make-server-16010b6f/auth/change-password", async (c) => {
     });
     
     if (signInErr || !signInData.user) {
+      const kvIdx = await withTimeout(kv.get(`customer_auth_email:${emailLower}`), 5000);
+      const kvUserId =
+        kvIdx && typeof kvIdx === "object" && typeof (kvIdx as { userId?: string }).userId === "string"
+          ? String((kvIdx as { userId: string }).userId).trim()
+          : "";
+      const kvAuth = kvUserId
+        ? ((await withTimeout(kv.get(`customer_auth:${kvUserId}`), 5000)) as {
+            id?: string;
+            email?: string;
+            password?: string;
+            name?: string;
+            phone?: string;
+            createdAt?: string;
+          } | null)
+        : null;
+      if (kvAuth?.password && kvAuth.id) {
+        const kvOk = await verifyPasswordPlain(currentPassword, kvAuth.password);
+        if (!kvOk) {
+          return c.json({ error: "Current password is incorrect" }, 401);
+        }
+        const hashed = await hashPasswordPlain(newPassword);
+        await withTimeout(
+          kv.set(`customer_auth:${kvAuth.id}`, {
+            ...kvAuth,
+            password: hashed,
+            updatedAt: new Date().toISOString(),
+          }),
+          5000,
+        );
+        console.log(`✅ Password changed successfully (customer_auth KV) for: ${emailTrim}`);
+        return c.json({ success: true, message: "Password changed successfully" });
+      }
+
       console.log(`❌ Supabase sign-in failed for password change:`, signInErr?.message);
       return c.json(
         { error: signInErr?.message?.includes("Invalid") ? "Current password is incorrect" : (signInErr?.message || "Current password is incorrect") },
@@ -2298,6 +2426,12 @@ app.put("/make-server-16010b6f/auth/profile/:userId", async (c) => {
       }
     }
 
+    const existingIdentity = await loadStorefrontProfileIdentity(userId);
+    if (profileIdentityChanged(body, existingIdentity)) {
+      const sessionError = await assertCustomerSession(c, userId);
+      if (sessionError) return sessionError;
+    }
+
     console.log(`📦 Request body:`, { ...body, profileImage: body.profileImage ? '[IMAGE DATA]' : undefined });
     
     // First try to get user by userId mapping
@@ -2420,7 +2554,8 @@ app.put("/make-server-16010b6f/auth/profile/:userId", async (c) => {
           customer.name = body.name.trim();
         }
         if (typeof body.phone === "string") {
-          customer.phone = body.phone.trim();
+          const synced = await syncCustomerAuthPhoneIndex(userId, body.phone);
+          customer.phone = synced || body.phone.trim();
         }
 
         const emailResult = await applyStorefrontProfileEmailUpdate(userId, customer, body.email);
@@ -7408,6 +7543,21 @@ app.post("/make-server-16010b6f/customers", async (c) => {
   }
 });
 
+const CUSTOMER_UPDATABLE_FIELDS = new Set([
+  "name",
+  "email",
+  "phone",
+  "address",
+  "city",
+  "region",
+  "status",
+  "tier",
+  "avatar",
+  "tags",
+  "notes",
+  "preferences",
+]);
+
 app.put("/make-server-16010b6f/customers/:id", async (c) => {
   try {
     const id = c.req.param("id");
@@ -7417,10 +7567,19 @@ app.put("/make-server-16010b6f/customers/:id", async (c) => {
     if (!existingCustomer) {
       return c.json({ error: "Customer not found" }, 404);
     }
+
+    const patches: Record<string, unknown> = {};
+    if (body && typeof body === "object") {
+      for (const key of Object.keys(body as object)) {
+        if (CUSTOMER_UPDATABLE_FIELDS.has(key)) {
+          patches[key] = (body as Record<string, unknown>)[key];
+        }
+      }
+    }
     
     const updatedCustomer = {
       ...existingCustomer,
-      ...body,
+      ...patches,
       id,
       updatedAt: new Date().toISOString(),
     };

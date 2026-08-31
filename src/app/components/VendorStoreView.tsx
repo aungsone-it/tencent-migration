@@ -75,6 +75,11 @@ import {
   resolveCustomerPhone,
 } from "../utils/customerAuthIdentity";
 import {
+  clearCustomerSessionToken,
+  getCustomerSessionHeaders,
+  storeCustomerSessionToken,
+} from "../utils/customerSessionHeaders";
+import {
   applyMetaPixelIdFromPayload,
   initMetaPixel,
   trackMetaAddToCart,
@@ -2500,6 +2505,7 @@ export function VendorStoreView({
       }
       setUser(sessionUser);
       persistMigooUserSession(sessionUser);
+      storeCustomerSessionToken(response.sessionToken);
       notifyMigooUserSessionChanged();
       if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
 
@@ -2523,7 +2529,7 @@ export function VendorStoreView({
     }
   };
 
-  const handleRegister = async (profileImage?: string, _phoneVerificationToken?: string) => {
+  const handleRegister = async (profileImage?: string, phoneVerificationToken?: string) => {
     if (!authForm.password || !authForm.name || !authForm.phone.trim()) {
       toast.error(t("storefront.account.registerRequiredFields"));
       return;
@@ -2537,6 +2543,7 @@ export function VendorStoreView({
         authForm.name,
         authForm.phone.trim(),
         profileImage,
+        phoneVerificationToken,
       );
       const userData = response.user;
 
@@ -2550,6 +2557,7 @@ export function VendorStoreView({
       }
       setUser(sessionUser);
       persistMigooUserSession(sessionUser);
+      storeCustomerSessionToken(response.sessionToken);
       notifyMigooUserSessionChanged();
       if (sessionUser.id) invalidateCustomerOrdersCache(sessionUser.id);
 
@@ -2581,6 +2589,7 @@ export function VendorStoreView({
     audienceTrackedKeyRef.current = "";
     setUser(null);
     localStorage.removeItem('migoo-user');
+    clearCustomerSessionToken();
     notifyMigooUserSessionChanged();
     navigateStoreHome();
     toast.success(t("storefront.account.logout"));
@@ -2729,7 +2738,7 @@ export function VendorStoreView({
           headers: {
             "Content-Type": "application/json",
             ...getCloudBaseRequestHeaders(),
-
+            ...getCustomerSessionHeaders(),
             ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
           },
           body: JSON.stringify(payload),

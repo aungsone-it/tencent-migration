@@ -64,6 +64,8 @@ export const myTranslations: Record<string, string> = {
     'checkout.township': 'မြို့နယ်',
     'checkout.selectTownship': 'မြို့နယ် ရွေးပါ',
     'checkout.selectStateFirst': 'တိုင်း/ပြည်နယ်ကို အရင်ရွေးပါ',
+    'checkout.sellerId': 'Seller ID',
+    'checkout.sellerIdPlaceholder': 'Seller ID ထည့်ပါ',
     'checkout.searchStateRegion': 'တိုင်း/ပြည်နယ် ရှာပါ...',
     'checkout.searchTownship': 'မြို့နယ် ရှာပါ...',
     'checkout.noLocationResults': 'မတွေ့ပါ',

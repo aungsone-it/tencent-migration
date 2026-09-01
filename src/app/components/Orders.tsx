@@ -238,6 +238,7 @@ interface OrderItem {
   city?: string;
   state?: string;
   zipCode?: string;
+  sellerId?: string;
   country?: string;
   trackingNumber?: string;
   notes?: string;
@@ -682,6 +683,7 @@ function mapApiOrdersToOrderItems(apiOrders: any[]): OrderItem[] {
     city: shipping.city,
     state: shipping.state,
     zipCode: shipping.zipCode,
+    sellerId: shipping.sellerId,
     country: shipping.country,
     trackingNumber: order.trackingNumber,
     notes: order.notes,
@@ -2405,6 +2407,14 @@ export function Orders({
                   ))}
                 </div>
               </div>
+
+              {/* Seller ID */}
+              {selectedOrder.sellerId?.trim() && (
+                <div>
+                  <h4 className="font-semibold text-slate-900 mb-2">Seller ID</h4>
+                  <p className="font-medium text-slate-900">{selectedOrder.sellerId.trim()}</p>
+                </div>
+              )}
 
               {/* Notes */}
               {selectedOrder.notes && (

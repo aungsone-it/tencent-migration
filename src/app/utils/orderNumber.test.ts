@@ -1,40 +1,54 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildOrderNumber,
   extractOrderCode,
-  formatOrderNumberDisplay,
   formatInvoiceBarcodeValue,
+  formatOrderNumberDisplay,
+  formatSerialOrderNumber,
   isPrefixedOrderNumber,
   normalizeOrderNumberSearch,
   ORDER_NUMBER_PREFIX,
+  orderNumberSearchTokens,
 } from "./orderNumber";
 
 describe("orderNumber", () => {
-  it("builds MOS-prefixed ids", () => {
-    expect(buildOrderNumber()).toMatch(/^MOS-[A-Z0-9]+$/);
-    expect(buildOrderNumber(ORDER_NUMBER_PREFIX)).toMatch(/^MOS-[A-Z0-9]+$/);
+  it("formats serial order numbers with zero padding", () => {
+    expect(formatSerialOrderNumber(1)).toBe("NOS-00001");
+    expect(formatSerialOrderNumber(999)).toBe("NOS-00999");
+    expect(formatSerialOrderNumber(1000)).toBe("NOS-01000");
+    expect(formatSerialOrderNumber(100001)).toBe("NOS-100001");
+    expect(formatSerialOrderNumber(1, ORDER_NUMBER_PREFIX)).toBe("NOS-00001");
   });
 
-  it("formats display order numbers as MOS-code", () => {
-    expect(formatOrderNumberDisplay("ORD-MRFDNEWI")).toBe("MOS-MRFDNEWI");
+  it("formats display order numbers as NOS-serial", () => {
+    expect(formatOrderNumberDisplay("NOS-00001")).toBe("NOS-00001");
+    expect(formatOrderNumberDisplay("NOS-0001")).toBe("NOS-00001");
+    expect(formatOrderNumberDisplay("MOS-NOS-00001")).toBe("NOS-00001");
+    expect(formatOrderNumberDisplay("MOS-0042")).toBe("NOS-00042");
+    expect(formatOrderNumberDisplay("ORD-1000")).toBe("NOS-01000");
     expect(formatOrderNumberDisplay("MOS-MRFDNEWI")).toBe("MOS-MRFDNEWI");
   });
 
-  it("formats invoice barcode as MOS-code", () => {
-    expect(formatInvoiceBarcodeValue("ORD-MRFDNEWI")).toBe("MOS-MRFDNEWI");
-    expect(formatInvoiceBarcodeValue("MOS-MRFDNEWI")).toBe("MOS-MRFDNEWI");
-    expect(formatInvoiceBarcodeValue("#MOS-MRFAE7K0")).toBe("MOS-MRFAE7K0");
+  it("formats invoice barcode using display format", () => {
+    expect(formatInvoiceBarcodeValue("NOS-00007")).toBe("NOS-00007");
+    expect(formatInvoiceBarcodeValue("#NOS-00010")).toBe("NOS-00010");
   });
 
   it("recognizes legacy and new prefixes for search", () => {
-    expect(isPrefixedOrderNumber("ORD-MRFDNEWI")).toBe(true);
-    expect(isPrefixedOrderNumber("MOS-MRFDNEWI")).toBe(true);
-    expect(normalizeOrderNumberSearch("mos-mrfae7k0")).toBe("MOS-MRFAE7K0");
+    expect(isPrefixedOrderNumber("ORD-00001")).toBe(true);
+    expect(isPrefixedOrderNumber("MOS-00001")).toBe(true);
+    expect(isPrefixedOrderNumber("NOS-00001")).toBe(true);
+    expect(normalizeOrderNumberSearch("nos-00001")).toBe("NOS-00001");
     expect(normalizeOrderNumberSearch("random")).toBe("");
   });
 
-  it("extracts bare order code", () => {
-    expect(extractOrderCode("ORD-MRFDNEWI")).toBe("MRFDNEWI");
+  it("extracts serial or legacy order code", () => {
+    expect(extractOrderCode("NOS-00001")).toBe("00001");
     expect(extractOrderCode("MOS-MRFDNEWI")).toBe("MRFDNEWI");
+  });
+
+  it("builds search tokens for serial numbers", () => {
+    expect(orderNumberSearchTokens("NOS-00001")).toEqual(
+      expect.arrayContaining(["nos-00001", "ord-00001", "mos-00001"])
+    );
   });
 });

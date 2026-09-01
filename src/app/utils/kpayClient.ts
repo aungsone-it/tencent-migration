@@ -1,4 +1,4 @@
-import { buildOrderNumber, ORDER_NUMBER_PREFIX } from "./orderNumber";
+import { fetchNextOrderNumber } from "./orderNumber";
 import { resolveVendorPathSlug } from "./vendorStorePaths";
 import {
   isLocalDevHostname,
@@ -351,8 +351,8 @@ function readProviderErrorDetails(data: Record<string, any>): {
   };
 }
 
-export function buildMerchantOrderId(prefix = ORDER_NUMBER_PREFIX): string {
-  return buildOrderNumber(prefix);
+export async function buildMerchantOrderId(): Promise<string> {
+  return fetchNextOrderNumber();
 }
 
 export async function createKPayQrSession(params: CreateKPayQrParams): Promise<KPaySession> {
@@ -360,10 +360,11 @@ export async function createKPayQrSession(params: CreateKPayQrParams): Promise<K
     projectId: _projectId,
     publicAnonKey: _publicAnonKey,
     amount,
-    merchantOrderId = buildMerchantOrderId("KPAY"),
+    merchantOrderId: merchantOrderIdParam,
     currency = "MMK",
     notifyUrl,
   } = params;
+  const merchantOrderId = merchantOrderIdParam || (await buildMerchantOrderId());
   const response = await fetch(
     `${API_ROOT}/kpay/create-qr`,
     {
@@ -636,7 +637,7 @@ export async function startKPayPwa(params: StartKPayPwaParams): Promise<KPayPwaS
     projectId: _projectId,
     publicAnonKey: _publicAnonKey,
     amount,
-    merchantOrderId = buildMerchantOrderId(),
+    merchantOrderId: merchantOrderIdParam,
     currency = "MMK",
     title,
     notifyUrl,
@@ -646,6 +647,7 @@ export async function startKPayPwa(params: StartKPayPwaParams): Promise<KPayPwaS
     storefrontOrigin,
     draftOrder,
   } = params;
+  const merchantOrderId = merchantOrderIdParam || (await buildMerchantOrderId());
 
   const response = await fetch(
     `${API_ROOT}/kpay/pwa/start`,

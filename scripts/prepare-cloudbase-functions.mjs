@@ -232,6 +232,13 @@ writeFunctionPackage("make-server-16010b6f", (dest) => {
     path.join(dest, "index.js"),
     wrapperSource("./app.cjs", "/make-server-16010b6f"),
   );
+  const install = spawnSync("npm", ["install", "--omit=dev"], {
+    cwd: dest,
+    stdio: "inherit",
+  });
+  if (install.status !== 0) {
+    throw new Error("npm install failed for make-server-16010b6f");
+  }
 });
 
 writeFunctionPackage("kpay-webhook", (dest) => {
@@ -242,6 +249,13 @@ writeFunctionPackage("kpay-webhook", (dest) => {
     path.join(dest, "index.js"),
     wrapperSource("./app.cjs", ""),
   );
+  const install = spawnSync("npm", ["install", "--omit=dev"], {
+    cwd: dest,
+    stdio: "inherit",
+  });
+  if (install.status !== 0) {
+    throw new Error("npm install failed for kpay-webhook");
+  }
 });
 
 console.log(`Prepared CloudBase functions in ${path.relative(root, outRoot)}`);

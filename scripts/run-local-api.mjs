@@ -16,13 +16,34 @@ const fnDir = path.join(root, ".cloudbase", "functions", "make-server-16010b6f")
 const port = Number(process.env.LOCAL_API_PORT || 8787);
 
 function ensureBundle() {
-  if (!fs.existsSync(path.join(fnDir, "index.js"))) {
+  const bundleEntry = path.join(fnDir, "index.js");
+  const bundledApp = path.join(fnDir, "app.cjs");
+  const sourceIndex = path.join(root, "supabase", "functions", "make-server-16010b6f", "index.tsx");
+  const orderNumberModule = path.join(root, "supabase", "functions", "make-server-16010b6f", "order_number.ts");
+  const sourceMtime = Math.max(
+    fs.existsSync(sourceIndex) ? fs.statSync(sourceIndex).mtimeMs : 0,
+    fs.existsSync(orderNumberModule) ? fs.statSync(orderNumberModule).mtimeMs : 0,
+  );
+  const bundleMtime = fs.existsSync(bundledApp) ? fs.statSync(bundledApp).mtimeMs : 0;
+  const needsRebuild = !fs.existsSync(bundleEntry) || sourceMtime > bundleMtime;
+
+  if (needsRebuild) {
     console.log("Preparing CloudBase function bundle…");
     const r = spawnSync("node", ["scripts/prepare-cloudbase-functions.mjs"], {
       cwd: root,
       stdio: "inherit",
     });
     if (r.status !== 0) process.exit(r.status || 1);
+  }
+
+  const nodeModules = path.join(fnDir, "node_modules", "pg");
+  if (!fs.existsSync(nodeModules)) {
+    console.log("Installing CloudBase function dependencies (pg)…");
+    const install = spawnSync("npm", ["install", "--omit=dev"], {
+      cwd: fnDir,
+      stdio: "inherit",
+    });
+    if (install.status !== 0) process.exit(install.status || 1);
   }
 }
 

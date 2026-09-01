@@ -257,6 +257,8 @@ export const enTranslations: Record<string, string> = {
     'checkout.township': 'Township',
     'checkout.selectTownship': 'Select township',
     'checkout.selectStateFirst': 'Select state/region first',
+    'checkout.sellerId': 'Seller ID',
+    'checkout.sellerIdPlaceholder': 'Enter your seller ID',
     'checkout.searchStateRegion': 'Search state/region...',
     'checkout.searchTownship': 'Search township...',
     'checkout.noLocationResults': 'No results found',

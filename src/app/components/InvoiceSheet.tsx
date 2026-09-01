@@ -16,6 +16,7 @@ export interface InvoiceSheetOrder {
   date: string;
   customer: string | { fullName?: string; name?: string };
   phone?: string;
+  sellerId?: string;
   shippingAddress?: string;
   products?: InvoiceLineItem[];
   items?: InvoiceLineItem[];
@@ -134,6 +135,9 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
           </p>
         ))}
         {order.phone && <p className="phone-line">Tel: {order.phone}</p>}
+        {order.sellerId?.trim() && (
+          <p className="phone-line">Seller ID: {order.sellerId.trim()}</p>
+        )}
         {deliveryCompany && (
           <p className="delivery-line">Delivery: {deliveryCompany}</p>
         )}

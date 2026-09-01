@@ -238,6 +238,8 @@ export const zhTranslations: Record<string, string> = {
     'checkout.township': '镇区',
     'checkout.selectTownship': '选择镇区',
     'checkout.selectStateFirst': '请先选择省/地区',
+    'checkout.sellerId': 'Seller ID',
+    'checkout.sellerIdPlaceholder': '请输入 Seller ID',
     'checkout.notes': '备注',
     'checkout.notesPlaceholder': '添加备注...',
     'checkout.payment': '支付',

@@ -59,8 +59,9 @@ import {
   assertDestructiveOperationAllowed,
 } from "./admin_operation_guard.tsx";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
-import { applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
+import { applyNormalizedShippingToOrderBody, normalizeOrderShippingFields } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
+import { allocateNextOrderNumber, canonicalizeOrderNumber, noteOrderNumberUsed } from "./order_number.ts";
 import {
   mergeMetaCapiAccessTokenOnSave,
   queueMetaCapiPurchaseFromOrder,
@@ -3852,6 +3853,39 @@ function resolveProductFreeShippingForVendor(
   return false;
 }
 
+async function resolveOrderFreeShippingVendorContext(body: any): Promise<{
+  vendorId: string;
+  vendorRecord: any;
+  vendorTokens: Set<string>;
+} | null> {
+  const rawCandidate =
+    String(body?.vendorId || "").trim() ||
+    (Array.isArray(body?.items)
+      ? String(body.items[0]?.vendorId || body.items[0]?.vendor || "").trim()
+      : "") ||
+    String(body?.vendor || "").trim();
+  if (!rawCandidate) return null;
+
+  let vendorId = await resolveVendorIdFromSlugOrId(rawCandidate);
+  if (!vendorId || vendorId === rawCandidate) {
+    const lower = rawCandidate.toLowerCase();
+    if (lower !== rawCandidate) {
+      const resolvedLower = await resolveVendorIdFromSlugOrId(lower);
+      if (resolvedLower) vendorId = resolvedLower;
+    }
+  }
+  if (!vendorId) return null;
+
+  const vendorRecord = await withTimeout(kv.get(`vendor:${vendorId}`), 5000).catch(() => null);
+  const vendorTokens = vendorMatchTokens(vendorId, vendorRecord, [rawCandidate, rawCandidate.toLowerCase()]);
+  return { vendorId, vendorRecord, vendorTokens };
+}
+
+function checkoutPayloadClaimsFreeShipping(body: any): boolean {
+  if (!Array.isArray(body?.items) || body.items.length === 0) return false;
+  return body.items.every((item) => item?.freeShipping === true);
+}
+
 function stripVendorFreeShippingKeys(
   map: Record<string, boolean>,
   vendorTokens: Set<string>
@@ -5535,7 +5569,7 @@ async function reconcileReadModelOrdersPage(
     if (!lookup) continue;
     const resolved = await resolveOrderStorage(lookup);
     if (resolved) {
-      kept.push(row);
+      kept.push({ ...row, ...adminListShippingPatchFromOrder(resolved.record as Record<string, unknown>) });
       continue;
     }
     removed += 1;
@@ -5689,6 +5723,64 @@ function dedupeOrdersByCanonical(rows: any[]): any[] {
   return merged;
 }
 
+function mapOrderToAdminListRow(order: any) {
+  const shipping = normalizeOrderShippingFields(order);
+  return {
+    id: order.id || "",
+    orderNumber: order.orderNumber || "",
+    customer: order.customer || "",
+    email: order.email || "",
+    phone: order.phone || "",
+    vendor: order.vendor || "",
+    status: order.status || "pending",
+    paymentStatus: order.paymentStatus || "pending",
+    shippingStatus: order.shippingStatus || "pending",
+    paymentMethod: order.paymentMethod || "",
+    total: order.total || 0,
+    subtotal: order.subtotal,
+    discount: order.discount,
+    items: order.items || [],
+    shippingAddress: order.shippingAddress || shipping.shippingAddress || "",
+    address: shipping.address,
+    city: shipping.city,
+    state: shipping.state,
+    zipCode: shipping.zipCode,
+    sellerId: shipping.sellerId,
+    country: shipping.country,
+    shippingInfo: order.shippingInfo,
+    trackingNumber: order.trackingNumber,
+    notes: order.notes,
+    deliveryService: order.deliveryService,
+    deliveryServiceLogo: order.deliveryServiceLogo,
+    deliveryPartnerName: order.deliveryPartnerName,
+    shippingFee: order.shippingFee ?? order.shippingCost ?? order.shipping,
+    inventoryDeducted: order.inventoryDeducted === true,
+    refundStatus: String(order?.kpay?.refund?.status || "").trim().toLowerCase(),
+    refundRequestNo: String(order?.kpay?.refund?.refundRequestNo || "").trim(),
+    refundAmount: Number(order?.kpay?.refund?.amount || 0) || 0,
+    refundedAt: String(order?.kpay?.refund?.refundedAt || order?.kpay?.refund?.failedAt || "").trim(),
+    kpay: order.kpay,
+    date: order.date || order.createdAt || new Date().toISOString(),
+    createdAt: order.createdAt || new Date().toISOString(),
+    updatedAt: order.updatedAt || new Date().toISOString(),
+  };
+}
+
+function adminListShippingPatchFromOrder(order: Record<string, unknown>): Record<string, unknown> {
+  const shipping = normalizeOrderShippingFields(order);
+  return {
+    address: shipping.address,
+    city: shipping.city,
+    state: shipping.state,
+    zipCode: shipping.zipCode,
+    sellerId: shipping.sellerId,
+    country: shipping.country,
+    shippingAddress: shipping.shippingAddress || order.shippingAddress,
+    shippingInfo: order.shippingInfo,
+    notes: order.notes,
+  };
+}
+
 app.get("/make-server-16010b6f/orders", async (c) => {
   try {
     // Check if client is still connected
@@ -5750,40 +5842,18 @@ app.get("/make-server-16010b6f/orders", async (c) => {
       
       console.log(`📊 Found ${validOrders.length} orders in database`);
       
-      const minimalOrders = dedupeOrdersByCanonical(validOrders.map(order => {
-        try {
-          return {
-            id: order.id || '',
-            orderNumber: order.orderNumber || '',
-            customer: order.customer || '',
-            email: order.email || '',
-            phone: order.phone || '',
-            vendor: order.vendor || '',
-            status: order.status || 'pending',
-            paymentStatus: order.paymentStatus || 'pending',
-            shippingStatus: order.shippingStatus || 'pending',
-            paymentMethod: order.paymentMethod || '',
-            total: order.total || 0,
-            items: order.items || [],
-            shippingAddress: order.shippingAddress || '',
-            trackingNumber: order.trackingNumber,
-            notes: order.notes,
-            deliveryService: order.deliveryService,
-            deliveryServiceLogo: order.deliveryServiceLogo,
-            inventoryDeducted: order.inventoryDeducted === true,
-            refundStatus: String(order?.kpay?.refund?.status || "").trim().toLowerCase(),
-            refundRequestNo: String(order?.kpay?.refund?.refundRequestNo || "").trim(),
-            refundAmount: Number(order?.kpay?.refund?.amount || 0) || 0,
-            refundedAt: String(order?.kpay?.refund?.refundedAt || order?.kpay?.refund?.failedAt || "").trim(),
-            date: order.date || order.createdAt || new Date().toISOString(),
-            createdAt: order.createdAt || new Date().toISOString(),
-            updatedAt: order.updatedAt || new Date().toISOString(),
-          };
-        } catch (mapError) {
-          console.error("❌ Error mapping order:", mapError);
-          return null;
-        }
-      }).filter(o => o !== null));
+      const minimalOrders = dedupeOrdersByCanonical(
+        validOrders
+          .map((order) => {
+            try {
+              return mapOrderToAdminListRow(order);
+            } catch (mapError) {
+              console.error("❌ Error mapping order:", mapError);
+              return null;
+            }
+          })
+          .filter((o) => o !== null)
+      );
       
       const response = {
         orders: minimalOrders,
@@ -5818,6 +5888,19 @@ app.get("/make-server-16010b6f/orders", async (c) => {
       total: 0,
       warning: "Orders temporarily unavailable"
     }, 200);
+  }
+});
+
+app.get("/make-server-16010b6f/orders/next-number", async (c) => {
+  try {
+    const orderNumber = await allocateNextOrderNumber();
+    return c.json({ success: true, orderNumber });
+  } catch (error) {
+    console.error("❌ Error allocating order number:", error);
+    return c.json(
+      { success: false, error: "Failed to allocate order number", details: String(error) },
+      500
+    );
   }
 });
 
@@ -6428,8 +6511,20 @@ app.post("/make-server-16010b6f/orders", async (c) => {
   try {
     console.log("📦 Creating new order...");
     const body = await c.req.json();
-    const requestedOrderNumber =
+    let requestedOrderNumber =
       String(body?.orderNumber || body?.kpay?.merchantOrderId || "").trim();
+
+    if (requestedOrderNumber) {
+      requestedOrderNumber = canonicalizeOrderNumber(requestedOrderNumber);
+      body.orderNumber = requestedOrderNumber;
+    }
+
+    if (!requestedOrderNumber) {
+      requestedOrderNumber = await allocateNextOrderNumber();
+      body.orderNumber = requestedOrderNumber;
+    } else {
+      await noteOrderNumberUsed(requestedOrderNumber);
+    }
 
     // Idempotency guard: prevent duplicate creates for the same logical order (especially PWA retries).
     if (requestedOrderNumber) {
@@ -6437,7 +6532,12 @@ app.post("/make-server-16010b6f/orders", async (c) => {
       if (typeof mappedId === "string" && mappedId.trim()) {
         const existingByMap = await withTimeout(kv.get(`order:${mappedId}`), 5000).catch(() => null);
         if (existingByMap && typeof existingByMap === "object") {
-          return c.json({ success: true, order: existingByMap, duplicateIgnored: true }, 200);
+          return c.json({
+            success: true,
+            orderNumber: (existingByMap as any).orderNumber,
+            order: existingByMap,
+            duplicateIgnored: true,
+          }, 200);
         }
       }
       // Backward-compatible fallback for older rows without order_num mapping
@@ -6450,7 +6550,12 @@ app.post("/make-server-16010b6f/orders", async (c) => {
         if (eid) {
           await withTimeout(kv.set(`order_num:${requestedOrderNumber}`, eid), 5000).catch(() => {});
         }
-        return c.json({ success: true, order: existing, duplicateIgnored: true }, 200);
+        return c.json({
+          success: true,
+          orderNumber: (existing as any).orderNumber,
+          order: existing,
+          duplicateIgnored: true,
+        }, 200);
       }
     }
 
@@ -6558,24 +6663,36 @@ app.post("/make-server-16010b6f/orders", async (c) => {
 
       const claimedShipping =
         Number(body.shippingFee ?? body.shippingCost ?? body.shipping ?? 0) || 0;
-      const vendorIdForShipping = String(body.vendorId || body.vendor || "").trim();
-      if (claimedShipping === 0 && vendorIdForShipping) {
-        const vendorRecord = await withTimeout(kv.get(`vendor:${vendorIdForShipping}`), 5000).catch(() => null);
-        const vendorAccess = vendorHasFreeShippingAccess(vendorRecord);
-        let allItemsFree = vendorAccess;
-        if (allItemsFree) {
+      if (claimedShipping === 0) {
+        const checkoutFreeShippingClaim = body?.checkoutFreeShipping === true;
+        const shippingVendorCtx = await resolveOrderFreeShippingVendorContext(body);
+        const vendorAccess = vendorHasFreeShippingAccess(shippingVendorCtx?.vendorRecord);
+        const payloadAllFree = checkoutPayloadClaimsFreeShipping(body);
+        let allItemsFree = checkoutFreeShippingClaim || Boolean(shippingVendorCtx && vendorAccess && payloadAllFree);
+
+        if (!allItemsFree && shippingVendorCtx && vendorAccess) {
+          allItemsFree = true;
           for (const item of body.items) {
+            if (item?.freeShipping === true) continue;
             const resolved = resolveProductForLineItem(item, allProductsForValidation);
             if (!resolved) {
               allItemsFree = false;
               break;
             }
-            if (!resolveProductFreeShippingForVendor(resolved.product, vendorIdForShipping, true)) {
+            if (
+              !resolveProductFreeShippingForVendor(
+                resolved.product,
+                shippingVendorCtx.vendorId,
+                true,
+                shippingVendorCtx.vendorTokens
+              )
+            ) {
               allItemsFree = false;
               break;
             }
           }
         }
+
         if (!allItemsFree) {
           return c.json(
             {
@@ -6596,6 +6713,7 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     
     const orderData = {
       ...applyNormalizedShippingToOrderBody(slimOrderCreateBody(body)),
+      orderNumber: requestedOrderNumber,
       id,
       total: parsedTotal,
       subtotal: parsedSubtotal,
@@ -6622,10 +6740,13 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     
     console.log(`✅ Order ${orderData.orderNumber} created successfully`);
 
+    await noteOrderNumberUsed(orderData.orderNumber);
+
     queueMetaCapiPurchaseFromOrder(orderData);
     
     return c.json({ 
       success: true,
+      orderNumber: orderData.orderNumber,
       order: orderData,
       message: "Order created successfully"
     }, 201);

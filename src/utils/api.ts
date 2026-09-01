@@ -327,6 +327,13 @@ export const productsApi = {
 
 export const ordersApi = {
   /**
+   * Allocate the next serial order number (NOS-0001, NOS-0002, …).
+   */
+  getNextNumber: async (): Promise<{ success: boolean; orderNumber: string }> => {
+    return apiClient.get<{ success: boolean; orderNumber: string }>("/orders/next-number");
+  },
+
+  /**
    * Get all orders with retry logic
    */
   getAll: async (): Promise<OrdersResponse> => {

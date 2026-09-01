@@ -11,6 +11,7 @@ import { ApiError } from "../../utils/api-client";
 import { useInvoicePrintJob } from "../utils/invoicePrintSession";
 import { toInvoiceSheetOrder } from "../utils/invoiceOrderMapper";
 import { formatOrderNumberDisplay } from "../utils/orderNumber";
+import { extractOrderShippingFields } from "../utils/orderShippingAddress";
 import type { InvoiceSheetOrder } from "./InvoiceSheet";
 import {
   refreshAdminInventoryAfterOrderStatusPut,
@@ -70,6 +71,7 @@ interface OrderItem {
   city?: string;
   state?: string;
   zipCode?: string;
+  sellerId?: string;
   country?: string;
   trackingNumber?: string;
   notes?: string;
@@ -162,6 +164,7 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
     deriveShippingStatusFromOrder(order)
   );
   const [statusSaving, setStatusSaving] = useState(false);
+  const [resolvedSellerId, setResolvedSellerId] = useState("");
   const orderProducts = (Array.isArray(order.products) ? order.products : []).filter(
     (p): p is Product => !!p && typeof p === "object"
   );
@@ -170,6 +173,40 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
   );
   const paymentBadgeStatus = paymentStatus;
   const shippingBadgeStatus = shippingStatus;
+  const displaySellerId = useMemo(() => {
+    if (resolvedSellerId) return resolvedSellerId;
+    const direct = String(order.sellerId || "").trim();
+    if (direct) return direct;
+    const shipping = extractOrderShippingFields(order as Record<string, unknown>);
+    return String(shipping.sellerId || order.zipCode || shipping.zipCode || "").trim();
+  }, [order, resolvedSellerId]);
+
+  useEffect(() => {
+    const fromList =
+      String(order.sellerId || "").trim() ||
+      extractOrderShippingFields(order as Record<string, unknown>).sellerId ||
+      String(order.zipCode || "").trim();
+    if (fromList) {
+      setResolvedSellerId(fromList);
+      return;
+    }
+
+    const lookup = String(order.orderNumber || order.id || "").trim();
+    if (!lookup) return;
+
+    void (async () => {
+      try {
+        const response = await ordersApi.getById(lookup);
+        const full = response?.order as Record<string, unknown> | undefined;
+        if (!full) return;
+        const shipping = extractOrderShippingFields(full);
+        const sellerId = String(shipping.sellerId || full.zipCode || shipping.zipCode || "").trim();
+        if (sellerId) setResolvedSellerId(sellerId);
+      } catch {
+        // Non-fatal — list payload may already include sellerId after backend refresh.
+      }
+    })();
+  }, [order.id, order.orderNumber, order.sellerId, order.zipCode]);
 
   useEffect(() => {
     setOrderStatus(normalizeOrderStatus(order.status));
@@ -217,8 +254,9 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
 
   const invoiceSheetOrder = useMemo(() => toInvoiceSheetOrder({
     ...order,
+    sellerId: displaySellerId || order.sellerId,
     products: orderProducts,
-  }), [order, orderProducts]);
+  }), [order, orderProducts, displaySellerId]);
 
   const clearPrintOrders = useCallback(() => setPrintOrders(null), []);
 
@@ -352,7 +390,7 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
               <div className="h-6 w-px bg-slate-200" />
               <div>
                 <h1 className="text-2xl font-semibold text-slate-900">
-                  Order {formatOrderNumberDisplay(order.orderNumber)}
+                  {formatOrderNumberDisplay(order.orderNumber)}
                 </h1>
                 <p className="text-sm text-slate-500 mt-1">
                   Placed on {order.date}
@@ -539,6 +577,19 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Seller ID — above order notes */}
+              {displaySellerId && (
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                      <Package className="w-5 h-5" />
+                      Seller ID
+                    </h3>
+                    <p className="font-medium text-slate-900">{displaySellerId}</p>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Notes Card */}
               {order.notes && (

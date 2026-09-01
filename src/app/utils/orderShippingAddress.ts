@@ -3,6 +3,7 @@ export type OrderShippingFields = {
   city?: string;
   state?: string;
   zipCode?: string;
+  sellerId?: string;
   country?: string;
   shippingAddress?: string;
 };
@@ -35,10 +36,11 @@ export function extractOrderShippingFields(
   const city = pickText(order.city, ship.city, customer.city);
   const state = pickText(order.state, ship.state, customer.state, order.region, ship.region);
   const zipCode = pickText(order.zipCode, ship.zipCode, customer.zipCode, order.postalCode);
+  const sellerId = pickText(order.sellerId, ship.sellerId, order.zipCode, ship.zipCode);
   const country = pickText(order.country, ship.country, customer.country);
   const shippingAddress = pickText(order.shippingAddress);
 
-  return { address, city, state, zipCode, country, shippingAddress };
+  return { address, city, state, zipCode, sellerId, country, shippingAddress };
 }
 
 export function buildOrderShippingAddressLine(fields: OrderShippingFields): string {

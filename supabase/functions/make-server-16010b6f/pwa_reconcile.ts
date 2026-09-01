@@ -58,10 +58,10 @@ function draftMatchesVendorFilter(
 function orderIdLookupVariants(id: string): string[] {
   const trimmed = text(id).toUpperCase();
   if (!trimmed) return [];
-  const match = trimmed.match(/^(ORD|MOS)-(.+)$/);
+  const match = trimmed.match(/^(ORD|MOS|NOS)-(.+)$/);
   if (!match) return [trimmed];
   const code = match[2];
-  return [`ORD-${code}`, `MOS-${code}`];
+  return [`ORD-${code}`, `MOS-${code}`, `NOS-${code}`];
 }
 
 export async function listOrphanedPwaDrafts(options?: {

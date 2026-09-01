@@ -16,7 +16,7 @@ export function resolveMerchantOrderIdFromOrder(order: Record<string, unknown>):
   const fromKpay = text(kpay?.merchantOrderId);
   if (fromKpay) return fromKpay;
   const orderNumber = text(order.orderNumber);
-  if (/^(ORD|MOS)-/i.test(orderNumber)) return orderNumber;
+  if (/^(ORD|MOS|NOS)-/i.test(orderNumber)) return orderNumber;
   return "";
 }
 
@@ -182,7 +182,8 @@ function buildOrderBodyFromDraft(
     address: ship.address || "",
     city: ship.city || "",
     state: ship.state || "",
-    zipCode: ship.zipCode || "",
+    zipCode: ship.zipCode || ship.sellerId || "",
+    sellerId: ship.sellerId || ship.zipCode || "",
     country: ship.country || "",
   });
 
@@ -212,6 +213,7 @@ function buildOrderBodyFromDraft(
     city: shipping.city,
     state: shipping.state,
     zipCode: shipping.zipCode,
+    sellerId: shipping.sellerId,
     country: shipping.country,
     shippingAddress: shipping.shippingAddress,
     notes: d.notes || "",

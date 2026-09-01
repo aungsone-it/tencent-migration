@@ -6,6 +6,8 @@ export function toInvoiceSheetOrder(order: {
   date: string;
   customer: string | { fullName?: string; name?: string };
   phone?: string;
+  sellerId?: string;
+  zipCode?: string;
   shippingAddress?: string;
   products?: InvoiceSheetOrder["products"];
   items?: InvoiceSheetOrder["items"];
@@ -37,6 +39,7 @@ export function toInvoiceSheetOrder(order: {
     date: order.date,
     customer: order.customer,
     phone: order.phone,
+    sellerId: String(order.sellerId || order.zipCode || "").trim() || undefined,
     shippingAddress: order.shippingAddress,
     products: order.products,
     items: order.items,

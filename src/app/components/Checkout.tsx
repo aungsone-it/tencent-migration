@@ -20,13 +20,6 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
 import { MyanmarSearchableSelect } from "./MyanmarSearchableSelect";
 import { useCart } from "./CartContext";
 import {
@@ -51,7 +44,7 @@ import {
   startKPayPwa,
   KPAY_PWA_PENDING_STORAGE_KEY,
 } from "../utils/kpayClient";
-import { buildOrderNumber, formatOrderNumberDisplay } from "../utils/orderNumber";
+import { fetchNextOrderNumber, formatOrderNumberDisplay, resolveCreatedOrderNumber } from "../utils/orderNumber";
 import { slimOrderCreatePayload } from "../utils/orderCreatePayload";
 import { resolveVendorSubdomainStoreSlug } from "../utils/vendorSubdomainHooks";
 import { useResolvedVendorHostSlug } from "../utils/vendorHostResolution";
@@ -523,13 +516,13 @@ function buildPwaFinalizeOrderPayload(
     address: d.shippingInfo?.address || "",
     city: d.shippingInfo?.city || "",
     state: d.shippingInfo?.state || "",
-    zipCode: d.shippingInfo?.zipCode || "",
+    zipCode: d.shippingInfo?.zipCode || d.shippingInfo?.sellerId || "",
+    sellerId: d.shippingInfo?.sellerId || d.shippingInfo?.zipCode || "",
     country: d.shippingInfo?.country || "",
     shippingAddress: [
       d.shippingInfo?.address || "",
       d.shippingInfo?.city || "",
       d.shippingInfo?.state || "",
-      d.shippingInfo?.zipCode || "",
       d.shippingInfo?.country || "",
     ]
       .filter(Boolean)
@@ -975,7 +968,10 @@ export function Checkout({
       address: initialSummarySnapshot?.shippingInfo?.address || "",
       city: initialCity,
       state: initialState,
-      zipCode: initialSummarySnapshot?.shippingInfo?.zipCode || "",
+      zipCode:
+        initialSummarySnapshot?.shippingInfo?.sellerId ||
+        initialSummarySnapshot?.shippingInfo?.zipCode ||
+        "",
       country: initialSummarySnapshot?.shippingInfo?.country || "",
     };
   });
@@ -1320,10 +1316,15 @@ export function Checkout({
 
   useEffect(() => {
     setSelectedDeliveryPartnerId((current) => {
-      if (logisticsQuotes.some((quote) => quote.partner.id === current)) {
-        return current;
+      const normalizedCurrent = String(current || "").trim();
+      if (
+        normalizedCurrent &&
+        logisticsQuotes.some((quote) => String(quote.partner.id) === normalizedCurrent)
+      ) {
+        return normalizedCurrent;
       }
-      return logisticsQuotes[0]?.partner.id ?? "";
+      const firstPartnerId = logisticsQuotes[0]?.partner.id;
+      return firstPartnerId ? String(firstPartnerId) : "";
     });
   }, [logisticsQuotes]);
 
@@ -1345,7 +1346,10 @@ export function Checkout({
 
   const hasSelectedRegion = Boolean(checkoutRegionKey);
   const hasSelectedTownship = Boolean(String(shippingInfo.city || "").trim());
-  const showDeliveryPartnerSelect = false;
+  const showDeliveryPartnerSelect =
+    hasSelectedRegion &&
+    hasSelectedTownship &&
+    logisticsQuotes.length > 0;
   const shippingUnavailable = hasSelectedRegion && hasSelectedTownship && !logisticsQuote;
   const checkoutItems = buyNowOverride?.items?.length
     ? buyNowOverride.items
@@ -1392,6 +1396,26 @@ export function Checkout({
     );
   }, [logisticsQuote?.estimatedDays, t]);
 
+  const deliveryPartnerSelectOptions = useMemo(
+    () =>
+      logisticsQuotes
+        .filter((quote) => String(quote.partner?.id || "").trim())
+        .map((quote) => {
+          const priceLabel =
+            formatCheckoutShippingLabel(quote, formatStorefrontPrice) || t("checkout.free");
+          const etaLabel = quote.estimatedDays
+            ? formatEstimatedDeliveryLabel(quote.estimatedDays, (days) =>
+                t("checkout.withinDays").replace("{days}", String(days))
+              )
+            : null;
+          const label = etaLabel
+            ? `${quote.partner.name} — ${priceLabel} (${etaLabel})`
+            : `${quote.partner.name} — ${priceLabel}`;
+          return { id: String(quote.partner.id), label };
+        }),
+    [logisticsQuotes, formatStorefrontPrice, t]
+  );
+
   const codPaymentAvailable =
     paymentSelectionEnabled && Boolean(logisticsQuote?.codSupported);
 
@@ -1404,6 +1428,12 @@ export function Checkout({
     if (paymentMethod !== "COD") return;
     if (!codPaymentAvailable) setPaymentMethod("None");
   }, [paymentMethod, codPaymentAvailable]);
+
+  const handleSelectDeliveryPartner = (partnerId: string) => {
+    if (!partnerId) return;
+    setSelectedDeliveryPartnerId(partnerId);
+    setPaymentMethod("None");
+  };
 
   useEffect(() => {
     if (step !== "success" || !orderNumber) return;
@@ -1859,6 +1889,7 @@ export function Checkout({
     if (!shippingInfo.address.trim()) missingFields.push(t("checkout.address"));
     if (!shippingInfo.state.trim()) missingFields.push(t("checkout.stateRegion"));
     if (!shippingInfo.city.trim()) missingFields.push(t("checkout.township"));
+    if (!shippingInfo.zipCode.trim()) missingFields.push(t("checkout.sellerId"));
     if (showDeliveryPartnerSelect && !selectedDeliveryPartnerId && !isFreeShippingCheckout) {
       missingFields.push(t("checkout.deliveryMethod"));
     }
@@ -1942,7 +1973,7 @@ export function Checkout({
       }
       const orderEmail = resolveOrderEmail();
       setKpayPwaLoading(true);
-      const merchantOrderId = buildMerchantOrderId();
+      const merchantOrderId = await buildMerchantOrderId();
       const originPath =
         typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       const storefrontOrigin =
@@ -1975,7 +2006,7 @@ export function Checkout({
         notes: orderNote,
         vendor: vendorName || storeName,
         vendorId: vendorId || undefined,
-        shippingInfo: { ...shippingInfo },
+        shippingInfo: { ...shippingInfo, sellerId: shippingInfo.zipCode.trim() },
         items: checkoutItems.map((item) => ({
           productId: item.productId || item.id,
           sku: item.sku,
@@ -2060,7 +2091,7 @@ export function Checkout({
         return;
       }
       setKpayLoading(true);
-      const merchantOrderId = buildMerchantOrderId();
+      const merchantOrderId = await buildMerchantOrderId();
       const session = await createKPayQrSession({
         projectId,
         publicAnonKey,
@@ -2188,7 +2219,6 @@ export function Checkout({
       }
 
       toast.info("Processing payment...", { duration: 2000 });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
       toast.success("💳 Payment Successful!", { duration: 3000 });
     } else if (paymentMethod === "KPay") {
       if (!canSubmitKPayOrder) {
@@ -2219,17 +2249,32 @@ export function Checkout({
     setConfirmedCoupon(appliedCoupon);
     setConfirmedDiscount(discountAmount);
 
-    // Generate order number
-    const orderNum =
+    // Allocate serial order number (NOS-00001, NOS-00002, …) before create when possible.
+    let orderNum =
       paymentMethod === "KPay" && latestKpaySession?.merchantOrderId
         ? latestKpaySession.merchantOrderId
-        : buildOrderNumber();
-    setOrderNumber(orderNum);
+        : "";
+    if (!orderNum) {
+      try {
+        orderNum = await fetchNextOrderNumber();
+      } catch (orderNumberError) {
+        console.warn("Order number pre-allocation failed:", orderNumberError);
+      }
+    }
+    if (!orderNum) {
+      setLoading(false);
+      toast.error(
+        "Could not allocate an order number. Rebuild the backend zip (npm run deploy:functions:zip), upload it, and restart the local API (npm run dev:api) if testing on localhost."
+      );
+      return;
+    }
+
+    let placedOrderNumber = orderNum;
 
     try {
       // 🔥 Save order to backend with vendor information
       const orderData: any = {
-        orderNumber: orderNum,
+        ...(orderNum ? { orderNumber: orderNum } : {}),
         userId: effectiveUser?.id ?? null,
         customer: shippingInfo.fullName,
         customerName: shippingInfo.fullName,
@@ -2262,6 +2307,7 @@ export function Checkout({
         shippingFee,
         shippingCost: shippingFee,
         shipping: shippingFee,
+        checkoutFreeShipping: isFreeShippingCheckout,
         deliveryPartnerId: logisticsQuote?.partner.id || null,
         deliveryPartnerName: logisticsQuote?.partner.name || null,
         deliveryService: logisticsQuote?.partner.name || null,
@@ -2269,7 +2315,8 @@ export function Checkout({
         estimatedDelivery: estimatedDeliveryLabel,
         codFee: 0,
         date: new Date().toISOString(),
-        vendor: vendorName || storeName, // 🔥 Add vendor name to order
+        vendor: vendorName || storeName,
+        vendorId: vendorId || checkoutItems[0]?.vendorId || checkoutItems[0]?.vendor || undefined,
         // 🎫 Include coupon information for tracking
         couponCode: appliedCoupon?.campaign?.code || null,
         couponId: appliedCoupon?.campaign?.id || null,
@@ -2281,8 +2328,9 @@ export function Checkout({
           quantity: item.quantity,
           price: item.price,
           image: item.image,
-          vendorId: vendorId || item.vendor || item.vendorId, // 🔥 Include vendor ID from props or item
+          vendorId: vendorId || item.vendor || item.vendorId,
           vendor: vendorId || item.vendor || item.vendorId,
+          ...(item.freeShipping === true ? { freeShipping: true } : {}),
           commissionRate:
             typeof item.commissionRate === "number" && Number.isFinite(item.commissionRate)
               ? item.commissionRate
@@ -2291,13 +2339,13 @@ export function Checkout({
         address: shippingInfo.address,
         city: shippingInfo.city,
         state: shippingInfo.state,
-        zipCode: shippingInfo.zipCode,
+        zipCode: shippingInfo.zipCode.trim(),
+        sellerId: shippingInfo.zipCode.trim(),
         country: shippingInfo.country,
         shippingAddress: [
           shippingInfo.address,
           shippingInfo.city,
           shippingInfo.state,
-          shippingInfo.zipCode?.trim(),
           shippingInfo.country,
         ]
           .filter(Boolean)
@@ -2330,7 +2378,7 @@ export function Checkout({
         }
       );
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
 
       // 🚨 CHECK FOR STOCK ERRORS
       if (!response.ok || result.error === 'Insufficient stock') {
@@ -2358,109 +2406,107 @@ export function Checkout({
       }
 
       notifyAdminOrdersUpdated("storefront-checkout-order-created");
-      
-      // 🔥 Save shipping address to database for future use
-      if (effectiveUser?.id) {
-        try {
-          
-          // Create address object
-          const newAddress = {
-            id: `addr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            recipientName: shippingInfo.fullName,
-            phone: normalizedShippingPhone || shippingInfo.phone.trim(),
-            addressLine1: shippingInfo.address,
-            city: shippingInfo.city,
-            state: shippingInfo.state,
-            zipCode: shippingInfo.zipCode,
-            isDefault: false, // User can set default later in profile
-            createdAt: new Date().toISOString(),
-          };
-          
-          // Get existing addresses
-          const addressResponse = await fetch(
-            `${cloudbaseApiBaseUrl}/customers/${effectiveUser.id}/addresses`,
-            {
-              headers: {
-                ...getCloudBaseRequestHeaders(),
 
-                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-              },
-            }
-          );
-          
-          let existingAddresses: any[] = [];
-          if (addressResponse.ok) {
-            const addressData = await addressResponse.json();
-            existingAddresses = addressData.addresses || [];
-          }
-          
-          // Check if this address already exists
-          const addressExists = existingAddresses.some(addr =>
-            addr.addressLine1 === newAddress.addressLine1 &&
-            addr.city === newAddress.city &&
-            addr.state === newAddress.state &&
-            addr.zipCode === newAddress.zipCode
-          );
-          
-          // Only save if it's a new address
-          if (!addressExists) {
-            const updatedAddresses = [...existingAddresses, newAddress];
-            
-            await fetch(
-              `${cloudbaseApiBaseUrl}/customers/${effectiveUser.id}/addresses`,
+      const createdOk =
+        response.ok && result?.success !== false && !result?.error;
+      let resolvedOrderNumber = resolveCreatedOrderNumber(result, orderNum);
+      if (!resolvedOrderNumber && createdOk && orderNum) {
+        resolvedOrderNumber = orderNum;
+      }
+      if (!resolvedOrderNumber) {
+        setLoading(false);
+        toast.error(
+          orderNum
+            ? "Failed to place order: server did not confirm the order number. Please try again."
+            : "Failed to place order: could not allocate an order number. Redeploy the backend and restart the local API (npm run dev:api)."
+        );
+        return;
+      }
+      setOrderNumber(resolvedOrderNumber);
+      placedOrderNumber = resolvedOrderNumber;
+
+      // Non-blocking: save address and track coupon after order is placed.
+      if (effectiveUser?.id) {
+        const userId = effectiveUser.id;
+        const addressSnapshot = {
+          recipientName: shippingInfo.fullName,
+          phone: normalizedShippingPhone || shippingInfo.phone.trim(),
+          addressLine1: shippingInfo.address,
+          city: shippingInfo.city,
+          state: shippingInfo.state,
+          zipCode: shippingInfo.zipCode.trim(),
+          sellerId: shippingInfo.zipCode.trim(),
+        };
+        void (async () => {
+          try {
+            const newAddress = {
+              id: `addr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+              ...addressSnapshot,
+              isDefault: false,
+              createdAt: new Date().toISOString(),
+            };
+            const addressResponse = await fetch(
+              `${cloudbaseApiBaseUrl}/customers/${userId}/addresses`,
               {
-                method: 'POST',
                 headers: {
                   ...getCloudBaseRequestHeaders(),
-
                   ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-                  'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ addresses: updatedAddresses }),
               }
             );
-            
-          } else {
-          }
-        } catch (addressError) {
-          console.error('❌ Failed to save address:', addressError);
-          // Don't fail the order if address saving fails
-        }
-      }
-      
-      // 🎫 Track coupon usage if a coupon was applied
-      
-      if (appliedCoupon?.campaign?.id) {
-        try {
-          
-          const incrementResponse = await fetch(
-            `${cloudbaseApiBaseUrl}/campaigns/${appliedCoupon.campaign.id}/increment`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...getCloudBaseRequestHeaders(),
-
-                ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-              },
-              body: JSON.stringify({
-                revenue: discountAmount // Track the discount amount (how much customer saved)
-              })
+            let existingAddresses: any[] = [];
+            if (addressResponse.ok) {
+              const addressData = await addressResponse.json();
+              existingAddresses = addressData.addresses || [];
             }
-          );
-          
-          
-          if (incrementResponse.ok) {
-            const incrementData = await incrementResponse.json();
-          } else {
-            const errorText = await incrementResponse.text();
-            console.error('❌ Failed to track coupon usage:', errorText);
+            const addressExists = existingAddresses.some(
+              (addr) =>
+                addr.addressLine1 === newAddress.addressLine1 &&
+                addr.city === newAddress.city &&
+                addr.state === newAddress.state &&
+                addr.zipCode === newAddress.zipCode
+            );
+            if (!addressExists) {
+              await fetch(`${cloudbaseApiBaseUrl}/customers/${userId}/addresses`, {
+                method: "POST",
+                headers: {
+                  ...getCloudBaseRequestHeaders(),
+                  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ addresses: [...existingAddresses, newAddress] }),
+              });
+            }
+          } catch (addressError) {
+            console.error("❌ Failed to save address:", addressError);
           }
-        } catch (couponError) {
-          console.error('❌ Error tracking coupon usage:', couponError);
-          // Don't fail the order if coupon tracking fails
-        }
-      } else {
+        })();
+      }
+
+      if (appliedCoupon?.campaign?.id) {
+        const campaignId = appliedCoupon.campaign.id;
+        void (async () => {
+          try {
+            const incrementResponse = await fetch(
+              `${cloudbaseApiBaseUrl}/campaigns/${campaignId}/increment`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...getCloudBaseRequestHeaders(),
+                  ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+                },
+                body: JSON.stringify({ revenue: discountAmount }),
+              }
+            );
+            if (!incrementResponse.ok) {
+              const errorText = await incrementResponse.text();
+              console.error("❌ Failed to track coupon usage:", errorText);
+            }
+          } catch (couponError) {
+            console.error("❌ Error tracking coupon usage:", couponError);
+          }
+        })();
       }
     } catch (error) {
       console.error("❌ Failed to save order:", error);
@@ -2478,13 +2524,10 @@ export function Checkout({
       onOrderPlacedSuccess?.({ userId: placedUserId });
     }
 
-    // Simulate payment processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
     setLoading(false);
     try {
       const snapshot: CheckoutSummarySnapshot = {
-        orderNumber: orderNum,
+        orderNumber: placedOrderNumber,
         items: checkoutItems,
         total: finalTotal,
         orderNote,
@@ -2702,10 +2745,16 @@ export function Checkout({
                     <p className="text-sm font-medium text-slate-900">{confirmedDeliveryPartnerName}</p>
                   </div>
                 )}
+                {shippingInfo.zipCode.trim() && (
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{t("checkout.sellerId")}</p>
+                    <p className="text-sm font-medium text-slate-900">{shippingInfo.zipCode.trim()}</p>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{t("checkout.deliveryAddress")}</p>
                   <p className="text-sm font-medium text-slate-900">
-                    {[shippingInfo.address, shippingInfo.city, shippingInfo.state, shippingInfo.zipCode, shippingInfo.country]
+                    {[shippingInfo.address, shippingInfo.city, shippingInfo.state, shippingInfo.country]
                       .filter(Boolean)
                       .join(", ")}
                   </p>
@@ -2883,6 +2932,20 @@ export function Checkout({
                     />
                   </div>
                   <div>
+                    <Label htmlFor="vs-seller-id" className={checkoutLabelClass}>
+                      {t("checkout.sellerId")} *
+                    </Label>
+                    <Input
+                      id="vs-seller-id"
+                      type="text"
+                      autoComplete="off"
+                      placeholder={t("checkout.sellerIdPlaceholder")}
+                      value={shippingInfo.zipCode}
+                      onChange={(e) => setShippingInfo({ ...shippingInfo, zipCode: e.target.value })}
+                      className={checkoutInputClass}
+                    />
+                  </div>
+                  <div>
                     <div className="mb-1.5 flex items-baseline justify-between">
                       <Label htmlFor="vs-notes" className="text-sm font-medium text-slate-800">
                         {t("checkout.notes")}
@@ -2899,6 +2962,39 @@ export function Checkout({
                   </div>
                 </div>
               </div>
+
+              {showDeliveryPartnerSelect && (
+                <div>
+                  <Label htmlFor="vs-delivery-partner" className={checkoutLabelClass}>
+                    {t("checkout.deliveryMethod")}
+                    {!isFreeShippingCheckout && " *"}
+                  </Label>
+                  {deliveryPartnerSelectOptions.length > 1 && (
+                    <p className="mb-3 text-xs text-slate-500">{t("checkout.deliveryMethodDescription")}</p>
+                  )}
+                  <select
+                    id="vs-delivery-partner"
+                    value={selectedDeliveryPartnerId}
+                    onChange={(event) => handleSelectDeliveryPartner(event.target.value)}
+                    required={!isFreeShippingCheckout}
+                    className={`${checkoutInputClass} w-full cursor-pointer appearance-auto px-3 pr-10`}
+                  >
+                    {!selectedDeliveryPartnerId && (
+                      <option value="" disabled>
+                        {t("checkout.selectDeliveryMethod")}
+                      </option>
+                    )}
+                    {deliveryPartnerSelectOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {logisticsQuote?.codSupported && paymentSelectionEnabled && selectedDeliveryPartnerId && (
+                    <p className="mt-1.5 text-xs text-emerald-700">{t("checkout.codAvailable")}</p>
+                  )}
+                </div>
+              )}
 
               {/* Payment */}
               <div>
@@ -3171,6 +3267,13 @@ export function Checkout({
                   </span>
                 </div>
 
+                {logisticsQuote && shippingMethodComplete && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">{t("checkout.deliveryPartner")}</span>
+                    <span className="font-medium text-slate-900">{logisticsQuote.partner.name}</span>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-sm font-semibold text-slate-900">{t("checkout.total")}</span>
                   <span className="text-base font-bold text-slate-900">{formatStorefrontPrice(finalTotal)}</span>
@@ -3180,7 +3283,8 @@ export function Checkout({
 
               <Button
                 type="button"
-                className="mt-4 flex h-11 w-full shrink-0 items-center justify-center rounded-xl border-2 border-orange-500 bg-transparent text-sm font-semibold leading-normal text-slate-900 transition-all duration-300 hover:border-green-600 hover:bg-green-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-orange-500 disabled:hover:bg-transparent disabled:hover:text-slate-900"
+                variant="outline"
+                className="mt-4 flex h-11 w-full shrink-0 items-center justify-center rounded-xl border-2 border-slate-900 bg-slate-900 text-sm font-semibold leading-normal text-white transition-colors hover:bg-white hover:text-slate-900 hover:border-slate-900 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-slate-900 disabled:hover:text-white"
                 size="lg"
                 onClick={
                   paymentMethod === "KPay-PWA"

@@ -7,6 +7,7 @@ export type NormalizedOrderShipping = {
   city: string;
   state: string;
   zipCode: string;
+  sellerId: string;
   country: string;
   shippingAddress: string;
 };
@@ -26,11 +27,13 @@ export function normalizeOrderShippingFields(
     text(body.state) || text(ship.state) || text(body.region) || text(ship.region);
   const zipCode =
     text(body.zipCode) || text(ship.zipCode) || text(body.postalCode) || text(ship.postalCode);
+  const sellerId =
+    text(body.sellerId) || text(ship.sellerId) || zipCode;
   const country = text(body.country) || text(ship.country);
-  const parts = [address, city, state, zipCode, country].filter(Boolean);
+  const parts = [address, city, state, country].filter(Boolean);
   const shippingAddress = text(body.shippingAddress) || parts.join(", ");
 
-  return { address, city, state, zipCode, country, shippingAddress };
+  return { address, city, state, zipCode, sellerId, country, shippingAddress };
 }
 
 export function applyNormalizedShippingToOrderBody(

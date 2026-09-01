@@ -322,6 +322,8 @@ export const myTranslations: Record<string, string> = {
     'cart.proceedToCheckout': 'ငွေပေးချေရန်',
 
     'chat.typeMessage': 'မက်ဆေ့ချ်ရေးပါ...',
+    'chat.addEmoji': 'အီမိုဂျီ ထည့်ပါ',
+    'chat.uploadImage': 'ပုံတင်ပါ',
     'chat.send': 'ပို့ရန်',
 
     'floatingChat.support': 'အကူအညီ',

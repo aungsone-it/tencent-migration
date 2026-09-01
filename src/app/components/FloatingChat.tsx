@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { MessageCircle, X, Send, Image as ImageIcon, Loader2, MessageCircleMore, Phone } from "lucide-react";
+import { MessageCircle, X, Send, Image as ImageIcon, Loader2, MessageCircleMore, Phone, Smile } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Textarea } from "./ui/textarea";
@@ -38,6 +38,7 @@ import {
 } from "../utils/chatLocalCache";
 import { useChatNotification } from "../contexts/ChatNotificationContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { EmojiPicker, type EmojiClickData } from "./EmojiPickerLazy";
 import {
   getOrCreateGuestChatId,
   guestDisplayName,
@@ -334,6 +335,7 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // Align thread id with Edge canonical keys (slug vs internal id — fixes history + admin realtime).
   useEffect(() => {
@@ -394,6 +396,9 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
   const pollingIntervalRef = useRef<number | null>(null);
   const lsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const lastMessageIdRef = useRef<string | null>(null);
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
@@ -993,6 +998,44 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
     setSelectedImage(null);
   };
 
+  const insertEmoji = (emojiData: EmojiClickData) => {
+    const emoji = emojiData.emoji;
+    const el = messageInputRef.current;
+    if (!el) {
+      setMessageInput((prev) => prev + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? messageInput.length;
+    const end = el.selectionEnd ?? messageInput.length;
+    const next = messageInput.slice(0, start) + emoji + messageInput.slice(end);
+    setMessageInput(next);
+    requestAnimationFrame(() => {
+      const pos = start + emoji.length;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    insertEmoji(emojiData);
+  };
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        emojiPickerRef.current?.contains(target) ||
+        emojiButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setShowEmojiPicker(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showEmojiPicker]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1205,6 +1248,7 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
 
               <div className="space-y-2">
                 <Textarea
+                  ref={messageInputRef}
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -1217,9 +1261,10 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
                     <Button
                       variant="ghost"
                       size="sm"
+                      type="button"
                       className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700"
                       onClick={() => fileInputRef.current?.click()}
-                      title="Upload image"
+                      title={t("chat.uploadImage")}
                     >
                       {uploadingImage ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -1227,6 +1272,33 @@ export function FloatingChat({ customerName = "Guest", customerEmail = "", onUnr
                         <ImageIcon className="w-4 h-4" />
                       )}
                     </Button>
+                    <div className="relative">
+                      <Button
+                        ref={emojiButtonRef}
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700"
+                        onClick={() => setShowEmojiPicker((open) => !open)}
+                        title={t("chat.addEmoji")}
+                        aria-label={t("chat.addEmoji")}
+                        aria-expanded={showEmojiPicker}
+                      >
+                        <Smile className="w-4 h-4" />
+                      </Button>
+                      {showEmojiPicker && (
+                        <div
+                          ref={emojiPickerRef}
+                          className="absolute bottom-full right-0 mb-2 z-50 rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden"
+                        >
+                          <EmojiPicker
+                            onEmojiClick={handleEmojiClick}
+                            width={280}
+                            height={320}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <Button
                     onClick={handleSendMessage}

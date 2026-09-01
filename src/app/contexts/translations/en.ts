@@ -718,6 +718,8 @@ export const enTranslations: Record<string, string> = {
     'chat.preview': 'Preview',
     'chat.uploadingImage': 'Compressing and uploading image...',
     'chat.typeMessage': 'Type your message...',
+    'chat.addEmoji': 'Add emoji',
+    'chat.uploadImage': 'Upload image',
     'chat.send': 'Send',
     'chat.noConversationSelected': 'No conversation selected',
     'chat.chooseConversation': 'Choose a conversation from the list to start chatting',

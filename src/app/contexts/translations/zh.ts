@@ -696,6 +696,8 @@ export const zhTranslations: Record<string, string> = {
     'chat.preview': '预览',
     'chat.uploadingImage': '正在压缩并上传图片...',
     'chat.typeMessage': '输入您的消息...',
+    'chat.addEmoji': '添加表情',
+    'chat.uploadImage': '上传图片',
     'chat.send': '发送',
     'chat.noConversationSelected': '未选择会话',
     'chat.chooseConversation': '从列表中选择一个会话开始聊天',

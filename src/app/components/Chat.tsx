@@ -20,6 +20,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Smile,
 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
 import { Button } from "./ui/button";
@@ -49,6 +50,7 @@ import { buildVendorDisplayLookup, resolveChatVendorLabel } from "../utils/vendo
 import { adminChatContactLabel, enrichGuestConversationsWithDisplayIds, isGuestChatEmail, purgeGuestChatClientData, resolveGuestChatCustomerLabel, resolveGuestChatAvatarUrl, pickGuestCustomerNameForInbox } from "../utils/guestChatIdentity";
 
 import { toast } from "sonner";
+import { EmojiPicker, type EmojiClickData } from "./EmojiPickerLazy";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -395,7 +397,11 @@ export function Chat({
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollingIntervalRef = useRef<number | null>(null);
@@ -1318,6 +1324,44 @@ export function Chat({
     setMessageInput("");
   };
 
+  const insertEmoji = (emojiData: EmojiClickData) => {
+    const emoji = emojiData.emoji;
+    const el = messageInputRef.current;
+    if (!el) {
+      setMessageInput((prev) => prev + emoji);
+      return;
+    }
+    const start = el.selectionStart ?? messageInput.length;
+    const end = el.selectionEnd ?? messageInput.length;
+    const next = messageInput.slice(0, start) + emoji + messageInput.slice(end);
+    setMessageInput(next);
+    requestAnimationFrame(() => {
+      const pos = start + emoji.length;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    insertEmoji(emojiData);
+  };
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        emojiPickerRef.current?.contains(target) ||
+        emojiButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setShowEmojiPicker(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showEmojiPicker]);
+
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -1822,6 +1866,7 @@ export function Chat({
                   className="flex-shrink-0"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingImage}
+                  title={t("chat.uploadImage")}
                 >
                   {uploadingImage ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -1829,8 +1874,37 @@ export function Chat({
                     <ImageIcon className="w-5 h-5" />
                   )}
                 </Button>
+                <div className="relative flex-shrink-0">
+                  <Button
+                    ref={emojiButtonRef}
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="flex-shrink-0"
+                    onClick={() => setShowEmojiPicker((open) => !open)}
+                    title={t("chat.addEmoji")}
+                    aria-label={t("chat.addEmoji")}
+                    aria-expanded={showEmojiPicker}
+                    disabled={uploadingImage}
+                  >
+                    <Smile className="w-5 h-5" />
+                  </Button>
+                  {showEmojiPicker && (
+                    <div
+                      ref={emojiPickerRef}
+                      className="absolute bottom-full left-0 mb-2 z-50 rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden"
+                    >
+                      <EmojiPicker
+                        onEmojiClick={handleEmojiClick}
+                        width={320}
+                        height={360}
+                      />
+                    </div>
+                  )}
+                </div>
                 <div className="flex-1">
                   <Textarea
+                    ref={messageInputRef}
                     id="admin-chat-composer-input"
                     placeholder={t("chat.typeMessage")}
                     value={messageInput}

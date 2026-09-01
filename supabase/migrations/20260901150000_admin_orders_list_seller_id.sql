@@ -1,5 +1,5 @@
--- SQL-backed admin orders page from app_orders.
--- Edge uses this when available and falls back to KV scans when not applied yet.
+-- Include seller ID and structured shipping fields on the admin orders list RPC.
+-- CREATE OR REPLACE so already-deployed databases pick this up.
 
 CREATE OR REPLACE FUNCTION public.rpc_admin_orders_page(
   p_page int DEFAULT 1,

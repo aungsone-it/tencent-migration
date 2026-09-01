@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from "react";
 import type { DateRange } from "react-day-picker";
 import { Download, Eye, Printer, Package, Clock, CheckCircle, XCircle, Calendar, TrendingUp, DollarSign, ShoppingCart, X, Truck, CreditCard, MapPin, Phone, Mail, FileText, User, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
@@ -60,6 +60,9 @@ import {
 import {
   adminOrdersUpdatedStorageKey,
   readAdminOrdersUpdatedStorageEvent,
+  createAdminOrdersRealtimeRefetchScheduler,
+  shouldRetryAdminOrdersRealtime,
+  type AdminOrdersLoadOptions,
 } from "../utils/adminOrdersRealtime";
 import { useAdminOrdersResyncOnVisible } from "../hooks/useAdminOrdersResyncOnVisible";
 import { PwaOrphanedOrdersRecovery } from "./PwaOrphanedOrdersRecovery";
@@ -90,6 +93,7 @@ import {
 import {
   buildOrderShippingAddressLine,
   extractOrderShippingFields,
+  resolveOrderSellerId,
 } from "../utils/orderShippingAddress";
 import { OrderShippingAddressBlock } from "./OrderShippingAddressBlock";
 import { buildOrderExportCsv } from "../utils/orderExportCsv";
@@ -203,6 +207,43 @@ function aggregatesBreakdownLooksStale(
   if (sum > 0) return false;
   // All-zero breakdown with orders in the filtered set — only trust page rows when they cover the full total.
   return rows.length > 0 && total <= rows.length;
+}
+
+function adminOrdersRowsSnapshotEqual(prev: OrderItem[], next: OrderItem[]): boolean {
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i++) {
+    const a = prev[i];
+    const b = next[i];
+    if (getOrderListRowKey(a) !== getOrderListRowKey(b)) return false;
+    if (a.status !== b.status) return false;
+    if (a.total !== b.total) return false;
+    if (a.paymentStatus !== b.paymentStatus) return false;
+    if (a.shippingStatus !== b.shippingStatus) return false;
+    if (a.updatedAt !== b.updatedAt) return false;
+    if (a.items !== b.items) return false;
+  }
+  return true;
+}
+
+type AdminOrdersAggregatesSnapshot = AdminOrdersPagePayload["aggregates"];
+
+function adminOrdersAggregatesEqual(
+  prev: AdminOrdersAggregatesSnapshot | undefined,
+  next: AdminOrdersAggregatesSnapshot | undefined,
+): boolean {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  const prevBreakdown = prev.statusBreakdown;
+  const nextBreakdown = next.statusBreakdown;
+  return (
+    prev.filteredCount === next.filteredCount &&
+    prev.filteredTotalRevenue === next.filteredTotalRevenue &&
+    prev.filteredAvgOrderValue === next.filteredAvgOrderValue &&
+    prevBreakdown?.pending === nextBreakdown?.pending &&
+    prevBreakdown?.processing === nextBreakdown?.processing &&
+    prevBreakdown?.fulfilled === nextBreakdown?.fulfilled &&
+    prevBreakdown?.cancelled === nextBreakdown?.cancelled
+  );
 }
 
 
@@ -683,7 +724,7 @@ function mapApiOrdersToOrderItems(apiOrders: any[]): OrderItem[] {
     city: shipping.city,
     state: shipping.state,
     zipCode: shipping.zipCode,
-    sellerId: shipping.sellerId,
+    sellerId: resolveOrderSellerId(order),
     country: shipping.country,
     trackingNumber: order.trackingNumber,
     notes: order.notes,
@@ -907,13 +948,16 @@ export function Orders({
   }, []);
 
   const loadOrders = useCallback(
-    async (forceRefresh = false) => {
+    async (forceRefresh = false, options?: AdminOrdersLoadOptions) => {
+      const silent = options?.silent === true;
       let showLoadingTimer: ReturnType<typeof setTimeout> | null = null;
       const shouldBlockUi = !forceRefresh && !hasHydratedOrdersRef.current;
       if (shouldBlockUi) {
         showLoadingTimer = setTimeout(() => setIsLoading(true), 300);
       }
-      setListRefreshing(forceRefresh);
+      if (!silent) {
+        setListRefreshing(forceRefresh);
+      }
       try {
         const payload = await getCachedAdminOrdersPage(
           {
@@ -934,16 +978,32 @@ export function Orders({
           toast.warning(payload.warning, { duration: 4000 });
         }
 
-        setOrders(
-          applyPendingStatusDrafts(
-            dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems(payload.orders || []))
-          )
+        const nextOrders = applyPendingStatusDrafts(
+          dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems(payload.orders || []))
         );
-        setOrdersTotal(payload.total);
-        setOrdersHasMore(!!payload.hasMore);
-        setOrdersAggregates(payload.aggregates);
+        const nextTotal = payload.total;
+        const nextHasMore = !!payload.hasMore;
+        const nextAggregates = payload.aggregates;
+
+        const applyPayload = () => {
+          setOrders((prev) =>
+            silent && adminOrdersRowsSnapshotEqual(prev, nextOrders) ? prev : nextOrders
+          );
+          setOrdersTotal((prev) => (silent && prev === nextTotal ? prev : nextTotal));
+          setOrdersHasMore((prev) => (silent && prev === nextHasMore ? prev : nextHasMore));
+          setOrdersAggregates((prev) =>
+            silent && adminOrdersAggregatesEqual(prev, nextAggregates) ? prev : nextAggregates
+          );
+        };
+
+        if (silent) {
+          startTransition(applyPayload);
+        } else {
+          applyPayload();
+        }
       } catch (error: any) {
         console.error("Failed to load orders:", error);
+        if (silent) return;
         if (error.message?.includes("Failed to fetch")) {
           toast.error(
             "Cannot connect to server. The Edge Function may still be deploying. Please wait 30 seconds and refresh the page.",
@@ -961,7 +1021,7 @@ export function Orders({
       } finally {
         if (showLoadingTimer) clearTimeout(showLoadingTimer);
         if (shouldBlockUi) setIsLoading(false);
-        setListRefreshing(false);
+        if (!silent) setListRefreshing(false);
       }
     },
     [
@@ -1061,7 +1121,21 @@ export function Orders({
   }, []);
 
   /** Refetch when storefront/admin creates or mutates orders (same tab + other tabs via storage). */
+  const realtimeSchedulerRef = useRef<ReturnType<typeof createAdminOrdersRealtimeRefetchScheduler> | null>(
+    null,
+  );
+
   useEffect(() => {
+    realtimeSchedulerRef.current = createAdminOrdersRealtimeRefetchScheduler((force, opts) =>
+      loadOrders(force, opts),
+    );
+    return () => realtimeSchedulerRef.current?.cancel();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    const refresh = (retry = false) => {
+      realtimeSchedulerRef.current?.schedule(retry);
+    };
     const bump = (ev: Event) => {
       const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
       // Local optimistic status patches already updated the visible rows — skip full refetch blink.
@@ -1073,7 +1147,7 @@ export function Orders({
       ) {
         return;
       }
-      void loadOrders(true);
+      refresh(shouldRetryAdminOrdersRealtime(reason));
     };
     const onStorage = (e: StorageEvent) => {
       if (e.key !== adminOrdersUpdatedStorageKey()) return;
@@ -1084,18 +1158,19 @@ export function Orders({
       ) {
         return;
       }
-      void loadOrders(true);
+      refresh(shouldRetryAdminOrdersRealtime(payload?.reason));
     };
     window.addEventListener("adminOrdersUpdated", bump);
     window.addEventListener("storage", onStorage);
     return () => {
+      realtimeSchedulerRef.current?.cancel();
       window.removeEventListener("adminOrdersUpdated", bump);
       window.removeEventListener("storage", onStorage);
     };
   }, [loadOrders]);
 
   useAdminOrdersResyncOnVisible(() => {
-    void loadOrders(true);
+    void loadOrders(true, { silent: true });
   });
 
   const uniqueVendors =
@@ -1509,14 +1584,51 @@ export function Orders({
   const hasActiveFilters = searchQuery || statusFilter !== "all" || paymentFilter !== "all" || vendorFilter !== "all" || dateFrom || dateTo;
 
   const exportOrders = () => {
-    const csvContent = buildOrderExportCsv(displayOrders);
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `orders_${format(new Date(), "yyyy-MM-dd")}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    void (async () => {
+      const rows = [...displayOrders];
+      const missingSellerId = rows.filter(
+        (order) => !resolveOrderSellerId(order as Record<string, unknown>),
+      );
+
+      if (missingSellerId.length > 0) {
+        await Promise.all(
+          missingSellerId.map(async (order) => {
+            const lookup = String(order.orderNumber || order.id || "").trim();
+            if (!lookup) return;
+            try {
+              const response = await ordersApi.getById(lookup);
+              const full = response?.order as Record<string, unknown> | undefined;
+              if (!full) return;
+              const shipping = extractOrderShippingFields(full);
+              const sellerId = resolveOrderSellerId(full);
+              if (!sellerId) return;
+              const rowKey = getOrderListRowKey(order);
+              const idx = rows.findIndex((row) => getOrderListRowKey(row) === rowKey);
+              if (idx < 0) return;
+              rows[idx] = {
+                ...rows[idx],
+                sellerId,
+                zipCode: shipping.zipCode || rows[idx].zipCode,
+                address: rows[idx].address || shipping.address,
+                city: rows[idx].city || shipping.city,
+                state: rows[idx].state || shipping.state,
+              };
+            } catch {
+              /* keep row without seller ID */
+            }
+          }),
+        );
+      }
+
+      const csvContent = buildOrderExportCsv(rows);
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `orders_${format(new Date(), "yyyy-MM-dd")}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    })();
   };
 
   const performOrderDeletes = async (rowsToDelete: OrderItem[]) => {

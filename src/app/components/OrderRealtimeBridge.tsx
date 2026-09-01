@@ -16,7 +16,8 @@ import {
   type StaffSessionRevokedPayload,
 } from "../utils/staffSessionRealtime";
 
-const PULSE_POLL_MS = 5_000;
+const PULSE_POLL_MS = 2_000;
+const PULSE_DEBOUNCE_MS = 350;
 
 type PulseCounter = {
   bump: number;
@@ -41,10 +42,19 @@ function counterChanged(previous: PulseCounter | null | undefined, next: PulseCo
  */
 export function OrderRealtimeBridge() {
   const previousRef = useRef<PulseSnapshot | null>(null);
+  const ordersPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let disposed = false;
     let inFlight = false;
+
+    const scheduleOrdersPulse = () => {
+      if (ordersPulseTimerRef.current) clearTimeout(ordersPulseTimerRef.current);
+      ordersPulseTimerRef.current = setTimeout(() => {
+        ordersPulseTimerRef.current = null;
+        if (!disposed) notifyAdminOrdersUpdated("realtime-order-pulse");
+      }, PULSE_DEBOUNCE_MS);
+    };
 
     const fanOutDomain = (domain: string, counter?: PulseCounter) => {
       if (domain === "products") {
@@ -99,7 +109,7 @@ export function OrderRealtimeBridge() {
         if (!previous) return;
 
         if (counterChanged(previous.orders, next.orders)) {
-          notifyAdminOrdersUpdated("realtime-order-pulse");
+          scheduleOrdersPulse();
         }
         if (counterChanged(previous.vendorApplications, next.vendorApplications)) {
           window.dispatchEvent(new CustomEvent("vendorDataUpdated"));
@@ -130,6 +140,7 @@ export function OrderRealtimeBridge() {
 
     return () => {
       disposed = true;
+      if (ordersPulseTimerRef.current) clearTimeout(ordersPulseTimerRef.current);
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
     };

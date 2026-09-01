@@ -1690,6 +1690,18 @@ BEGIN
             'total', total_num,
             'items', coalesce(raw->'items', '[]'::jsonb),
             'shippingAddress', coalesce(raw->>'shippingAddress', ''),
+            'address', coalesce(raw->>'address', raw#>>'{shippingInfo,address}', ''),
+            'city', coalesce(raw->>'city', raw#>>'{shippingInfo,city}', ''),
+            'state', coalesce(raw->>'state', raw#>>'{shippingInfo,state}', raw->>'region', raw#>>'{shippingInfo,region}', ''),
+            'zipCode', coalesce(raw->>'zipCode', raw#>>'{shippingInfo,zipCode}', ''),
+            'sellerId', coalesce(
+              nullif(raw->>'sellerId', ''),
+              nullif(raw#>>'{shippingInfo,sellerId}', ''),
+              nullif(raw->>'zipCode', ''),
+              nullif(raw#>>'{shippingInfo,zipCode}', ''),
+              ''
+            ),
+            'shippingInfo', coalesce(raw->'shippingInfo', '{}'::jsonb),
             'trackingNumber', raw->>'trackingNumber',
             'notes', raw->>'notes',
             'deliveryService', raw->>'deliveryService',

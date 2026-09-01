@@ -139,12 +139,25 @@ export function writeAppliedCouponToStorage(coupon: AppliedCoupon | null): void 
   }
 }
 
+/** Map not-found / legacy API errors to a generic invalid message (no available-code hints). */
+export function isInvalidCouponCodeError(error: string | null | undefined): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return (
+    lower === "invalid coupon code" ||
+    lower.startsWith("invalid coupon code.") ||
+    lower.includes("available codes")
+  );
+}
+
 export async function validateAndApplyCouponCode(args: {
   code: string;
   cartItems: CartCouponItem[];
   cartTotal: number;
+  invalidMessage?: string;
 }): Promise<{ coupon: AppliedCoupon | null; error: string | null }> {
   const code = args.code.trim().toUpperCase();
+  const invalidMessage = args.invalidMessage || "Invalid coupon code";
   if (!code) {
     return { coupon: null, error: "Please enter a coupon code" };
   }
@@ -170,27 +183,14 @@ export async function validateAndApplyCouponCode(args: {
 
     const data = await response.json();
     if (!data.valid) {
-      return { coupon: null, error: data.error || "Invalid coupon code" };
+      const apiError = typeof data.error === "string" ? data.error : "";
+      return {
+        coupon: null,
+        error: isInvalidCouponCodeError(apiError) ? invalidMessage : apiError || invalidMessage,
+      };
     }
 
-    let campaign: CouponCampaignRules = data.campaign || {};
-    if (campaign.id) {
-      try {
-        const detailRes = await fetch(`${cloudbaseApiBaseUrl}/campaigns/${campaign.id}`, {
-          headers: {
-            ...getCloudBaseRequestHeaders(),
-            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-          },
-        });
-        if (detailRes.ok) {
-          const detailData = await detailRes.json();
-          campaign = { ...campaign, ...(detailData.campaign || {}) };
-        }
-      } catch {
-        /* use partial campaign rules if detail fetch fails */
-      }
-    }
-
+    const campaign: CouponCampaignRules = data.campaign || {};
     const eligibilityError = getCouponEligibilityError(campaign, cartItems, cartTotal);
     if (eligibilityError) {
       return { coupon: null, error: eligibilityError };

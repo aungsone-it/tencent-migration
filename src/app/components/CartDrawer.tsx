@@ -110,6 +110,7 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
       code,
       cartTotal: totalPrice,
       cartItems: cartCouponItems,
+      invalidMessage: t("cart.couponInvalid"),
     });
 
     if (coupon) {

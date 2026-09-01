@@ -487,6 +487,24 @@ export function queueOrderReadModelSync(orderId: string, orderValue: unknown): v
   enqueueReadModelWork(syncOrderReadModel(orderId, orderValue));
 }
 
+/** Second pulse after read-model sync so admin pollers refetch once SQL rows exist. */
+export async function bumpOrderPulse(): Promise<void> {
+  await bestEffort("bump order pulse", async () => {
+    const { data, error } = await readModelClient
+      .from("app_order_pulse")
+      .select("bump")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) throw error;
+    const nextBump = (Number((data as { bump?: unknown } | null)?.bump) || 0) + 1;
+    const { error: updateError } = await readModelClient
+      .from("app_order_pulse")
+      .update({ bump: nextBump, updated_at: new Date().toISOString() })
+      .eq("id", 1);
+    if (updateError) throw updateError;
+  });
+}
+
 export function queueOrderReadModelDelete(orderId: string): void {
   enqueueReadModelWork(deleteOrderReadModel(orderId));
 }

@@ -75,6 +75,7 @@ import {
   queueOrderReadModelDelete,
   queueOrderReadModelSync,
   syncOrderReadModel,
+  bumpOrderPulse,
   queueProductReadModelDelete,
   queueProductReadModelSync,
   queueVendorReadModelDelete,
@@ -5590,7 +5591,9 @@ async function reconcileReadModelOrdersPage(
     }
   }
 
-  if (removed === 0) return body;
+  if (removed === 0) {
+    return { ...body, orders: kept, readModelReconciled: 0 };
+  }
 
   const prevTotal = Number(body.total ?? orders.length);
   const nextTotal = Math.max(0, prevTotal - removed);
@@ -5625,6 +5628,74 @@ async function reconcileReadModelOrdersPage(
   };
 }
 
+function adminOrdersPageHasNoFilters(
+  opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>,
+): boolean {
+  return (
+    !opts.q &&
+    opts.status === "all" &&
+    opts.payment === "all" &&
+    opts.vendor === "all" &&
+    !opts.dateFrom &&
+    !opts.dateTo
+  );
+}
+
+/** Merge very recent KV orders missing from SQL page (read-model sync race on create). */
+async function augmentReadModelPageWithRecentKvOrders(
+  pageBody: Record<string, unknown>,
+  opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>,
+): Promise<Record<string, unknown>> {
+  if (opts.page !== 1 || opts.sort !== "newest" || !adminOrdersPageHasNoFilters(opts)) {
+    return pageBody;
+  }
+
+  const pageOrders = Array.isArray(pageBody.orders) ? (pageBody.orders as Record<string, unknown>[]) : [];
+  const aliasSet = new Set<string>();
+  for (const row of pageOrders) {
+    for (const k of orderAliasKeys(row)) aliasSet.add(k);
+  }
+
+  let kvRows: unknown[] = [];
+  try {
+    kvRows = await withTimeout(kv.getByPrefix("order:"), 5000);
+  } catch {
+    return pageBody;
+  }
+
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  const missingKvRows = (Array.isArray(kvRows) ? kvRows : [])
+    .filter((row) => row != null && typeof row === "object")
+    .map((row) => {
+      try {
+        return mapOrderToAdminListRow(row);
+      } catch {
+        return null;
+      }
+    })
+    .filter((row): row is Record<string, unknown> => row != null)
+    .filter((row) => {
+      if (orderAliasKeys(row).some((k) => aliasSet.has(k))) return false;
+      return orderFreshness(row) >= cutoff;
+    });
+
+  if (missingKvRows.length === 0) return pageBody;
+
+  const combined = dedupeOrdersByCanonical([...missingKvRows, ...pageOrders]);
+  const filtered = filterSortOrdersAdmin(combined, opts);
+  const aggregates = buildAdminOrdersAggregates(filtered);
+  const slice = filtered.slice(0, opts.pageSize);
+
+  return {
+    ...pageBody,
+    orders: slice,
+    total: Math.max(Number(pageBody.total ?? 0), filtered.length),
+    hasMore: opts.pageSize < filtered.length,
+    aggregates,
+    kvAugmented: missingKvRows.length,
+  };
+}
+
 async function jsonAdminOrdersPageFromReadModel(
   opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>
 ): Promise<Record<string, unknown> | null> {
@@ -5652,7 +5723,9 @@ async function jsonAdminOrdersPageFromReadModel(
       return null;
     }
     const pageBody = {
-      orders: Array.isArray(body.orders) ? body.orders : [],
+      orders: (Array.isArray(body.orders) ? body.orders : []).map((row) =>
+        mapOrderToAdminListRow(row)
+      ),
       total: Number(body.total ?? 0),
       page: Number(body.page ?? opts.page),
       pageSize: Number(body.pageSize ?? opts.pageSize),
@@ -5794,8 +5867,12 @@ app.get("/make-server-16010b6f/orders", async (c) => {
     const pageOpts = parseAdminOrdersPageQuery(c);
 
     if (pageOpts) {
-      const readModelBody = await jsonAdminOrdersPageFromReadModel(pageOpts);
+      const bustCache = String(c.req.query("_") || "").trim().length > 0;
+      let readModelBody = await jsonAdminOrdersPageFromReadModel(pageOpts);
       if (readModelBody) {
+        if (bustCache) {
+          readModelBody = await augmentReadModelPageWithRecentKvOrders(readModelBody, pageOpts);
+        }
         return c.json(readModelBody);
       }
     }
@@ -6730,10 +6807,13 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     console.log(`💾 Saving order ${orderData.orderNumber} with total: ${orderData.total}, discount: ${orderData.discount}, couponCode: ${orderData.couponCode || 'NONE'} (inventory unchanged until ready-to-ship/fulfilled)`);
     
     await withTimeout(kv.set(`order:${id}`, orderData), 5000);
-    queueOrderReadModelSync(id, orderData);
     if (requestedOrderNumber) {
       await withTimeout(kv.set(`order_num:${requestedOrderNumber}`, id), 5000).catch(() => {});
     }
+
+    // Sync SQL read model before admin realtime refetch (KV trigger bumps pulse earlier).
+    await syncOrderReadModel(id, orderData);
+    await bumpOrderPulse();
     
     // Clear cache when order is created
     clearCache('orders_minimal');
@@ -6996,6 +7076,7 @@ app.put("/make-server-16010b6f/orders/:id", async (c) => {
     
     await withTimeout(kv.set(storageKey, updatedOrder), 5000);
     await syncOrderReadModel(orderKvId, updatedOrder);
+    await bumpOrderPulse();
 
     const nextPaymentStatus = String(updatedOrder.paymentStatus || "").toLowerCase();
     const nextKpayStatus = String((updatedOrder.kpay as Record<string, unknown> | undefined)?.status || "")
@@ -7118,6 +7199,7 @@ app.delete("/make-server-16010b6f/orders/:id", async (c) => {
     // Purge SQL read-model rows so paginated admin list does not resurrect deleted orders on refresh.
     try {
       await deleteOrderReadModel(canonicalId, canonicalOrderNumber, { strict: true });
+      await bumpOrderPulse();
     } catch (readModelErr) {
       console.warn(
         `⚠️ SQL read-model delete failed for ${canonicalOrderNumber || canonicalId}:`,
@@ -10026,12 +10108,6 @@ app.post("/make-server-16010b6f/campaigns/validate", async (c) => {
     
     console.log(`📋 Total campaigns found: ${validCampaigns.length}`);
     
-    // Log all available coupon codes for debugging
-    const availableCoupons = validCampaigns
-      .filter(c => c.code && c.code.trim())
-      .map(c => ({ code: c.code, status: c.status, type: c.type }));
-    console.log(`🎫 Available coupons in database:`, JSON.stringify(availableCoupons, null, 2));
-    
     // Find campaign by code (case-insensitive)
     const campaign = validCampaigns.find(c => 
       c.code && c.code.trim().toLowerCase() === code.trim().toLowerCase()
@@ -10039,10 +10115,9 @@ app.post("/make-server-16010b6f/campaigns/validate", async (c) => {
     
     if (!campaign) {
       console.log(`❌ Coupon code not found: "${code}"`);
-      console.log(`💡 Available codes: ${availableCoupons.map(c => c.code).join(', ') || 'none'}`);
       return c.json({ 
         valid: false, 
-        error: `Invalid coupon code. Available codes: ${availableCoupons.map(c => c.code).join(', ') || 'none'}` 
+        error: "Invalid coupon code",
       });
     }
     

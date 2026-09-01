@@ -59,6 +59,74 @@ export function consumeSuperAdminFinancesSessionStale(): boolean {
   }
 }
 
+/** Stagger refetches while SQL read model catches up after KV order writes. */
+export const ADMIN_ORDERS_REALTIME_RETRY_MS = 2000;
+
+export type AdminOrdersLoadOptions = { silent?: boolean };
+
+/** Debounce rapid pulses and refetch in the background without UI blink. */
+export function createAdminOrdersRealtimeRefetchScheduler(
+  load: (forceRefresh: boolean, options?: AdminOrdersLoadOptions) => void | Promise<void>,
+) {
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let inFlight = false;
+  let queued = false;
+
+  const run = () => {
+    if (inFlight) {
+      queued = true;
+      return;
+    }
+    inFlight = true;
+    queued = false;
+    void Promise.resolve(load(true, { silent: true })).finally(() => {
+      inFlight = false;
+      if (queued) run();
+    });
+  };
+
+  return {
+    schedule(withRetry = false) {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        run();
+        if (retryTimer) clearTimeout(retryTimer);
+        if (withRetry) {
+          retryTimer = setTimeout(() => run(), ADMIN_ORDERS_REALTIME_RETRY_MS);
+        }
+      }, 400);
+    },
+    cancel() {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (retryTimer) clearTimeout(retryTimer);
+      debounceTimer = null;
+      retryTimer = null;
+      queued = false;
+    },
+  };
+}
+
+/** @deprecated Prefer createAdminOrdersRealtimeRefetchScheduler for stable background refresh. */
+export function scheduleAdminOrdersRealtimeRefetch(
+  load: (forceRefresh: boolean, options?: AdminOrdersLoadOptions) => void | Promise<void>,
+  withRetries = false,
+): () => void {
+  const scheduler = createAdminOrdersRealtimeRefetchScheduler(load);
+  scheduler.schedule(withRetries);
+  return () => scheduler.cancel();
+}
+
+export function shouldRetryAdminOrdersRealtime(reason: string | undefined): boolean {
+  return (
+    reason === "realtime-order-pulse" ||
+    reason === "storefront-checkout-order-created" ||
+    reason === "storefront-order-created" ||
+    reason === "pwa-checkout-order-created"
+  );
+}
+
 /** Broadcast order mutations to this tab + other tabs (via storage event). */
 export function notifyAdminOrdersUpdated(
   reason = "orders-mutated",
@@ -68,6 +136,7 @@ export function notifyAdminOrdersUpdated(
   if (
     reason === "storefront-order-created" ||
     reason === "storefront-checkout-order-created" ||
+    reason === "pwa-checkout-order-created" ||
     reason === "invalidate-admin-orders-cache" ||
     reason === "realtime-order-pulse" ||
     reason === "remove-admin-orders" ||

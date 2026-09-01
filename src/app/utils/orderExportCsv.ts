@@ -1,4 +1,5 @@
 import { formatOrderNumberDisplay } from "./orderNumber";
+import { resolveOrderSellerId } from "./orderShippingAddress";
 
 export type OrderExportInput = {
   orderNumber: string;
@@ -6,6 +7,8 @@ export type OrderExportInput = {
   createdAt?: string;
   customer: string;
   phone: string;
+  sellerId?: string;
+  zipCode?: string;
   address?: string;
   city?: string;
   state?: string;
@@ -30,6 +33,7 @@ const EXPORT_HEADERS = [
   "Mi Code",
   "Name",
   "Phone",
+  "Seller ID",
   "address",
   "city",
   "SKU",
@@ -153,6 +157,7 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
     const deliveryDate = formatExportDeliveryDate(order);
     const status = mapExportStatus(order);
     const customerName = String(order.customer || "").trim();
+    const sellerId = resolveOrderSellerId(order as Record<string, unknown>);
 
     for (const item of buildExportLineItems(order)) {
       lines.push(
@@ -162,6 +167,7 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
           escapeCsvField(formatOrderNumberDisplay(order.orderNumber)),
           escapeCsvField(customerName),
           excelTextField(order.phone),
+          excelTextField(sellerId),
           escapeCsvField(address),
           escapeCsvField(city),
           escapeCsvField(item.sku),

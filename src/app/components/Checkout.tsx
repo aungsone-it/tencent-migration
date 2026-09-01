@@ -1855,6 +1855,7 @@ export function Checkout({
       code: codeToApply,
       cartTotal: payableSubtotal,
       cartItems: checkoutItems,
+      invalidMessage: t("cart.couponInvalid"),
     });
 
     if (coupon) {
@@ -1862,7 +1863,7 @@ export function Checkout({
       writeAppliedCouponToStorage(coupon);
       setCouponError("");
     } else {
-      setCouponError(error || "Invalid coupon code");
+      setCouponError(error || t("cart.couponInvalid"));
       setAppliedCoupon(null);
       writeAppliedCouponToStorage(null);
     }
@@ -2404,8 +2405,6 @@ export function Checkout({
         return; // Stop order process
       }
 
-      notifyAdminOrdersUpdated("storefront-checkout-order-created");
-
       const createdOk =
         response.ok && result?.success !== false && !result?.error;
       let resolvedOrderNumber = resolveCreatedOrderNumber(result, orderNum);
@@ -2421,6 +2420,9 @@ export function Checkout({
         );
         return;
       }
+
+      notifyAdminOrdersUpdated("storefront-checkout-order-created");
+
       setOrderNumber(resolvedOrderNumber);
       placedOrderNumber = resolvedOrderNumber;
 

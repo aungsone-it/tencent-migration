@@ -56,10 +56,10 @@ export function BackToTop({
           onClick={scrollToTop}
           className={`back-to-top-fab ${
             aboveStickyPurchaseBar ? "back-to-top-fab--above-sticky" : ""
-          } w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 shadow-2xl transition-all duration-300 hover:scale-110 flex items-center justify-center p-1.5 animate-fade-in-right`}
+          } w-10 h-10 md:w-12 md:h-12 rounded-full border border-slate-200 bg-white text-slate-900 shadow-lg transition-all duration-300 hover:scale-110 hover:bg-slate-900 hover:text-white hover:border-slate-900 flex items-center justify-center p-1.5 animate-fade-in-right`}
           size="icon"
         >
-          <ArrowUp className="w-5 h-5 md:w-6 md:h-6 text-white" strokeWidth={2.5} />
+          <ArrowUp className="w-5 h-5 md:w-6 md:h-6" strokeWidth={2.5} />
         </Button>
       )}
     </>

@@ -10,10 +10,22 @@ export type OrderShippingFields = {
 
 function pickText(...values: unknown[]): string {
   for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const text = String(value).trim();
+      if (text) return text;
+    }
     const text = String(value ?? "").trim();
     if (text) return text;
   }
   return "";
+}
+
+/** Seller ID from order root, shippingInfo, or legacy zipCode field. */
+export function resolveOrderSellerId(
+  order: Record<string, unknown> | null | undefined,
+): string {
+  const shipping = extractOrderShippingFields(order);
+  return String(shipping.sellerId || shipping.zipCode || "").trim();
 }
 
 /** Normalize shipping fields from a stored order or API payload. */

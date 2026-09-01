@@ -556,7 +556,7 @@ const revenueChartData = [
 const COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 /** Toggle to show the toolbar Delete button next to Export on admin Orders. */
-const SHOW_ORDERS_DELETE_BUTTON = true;
+const SHOW_ORDERS_DELETE_BUTTON = false;
 
 const getStatusBadge = (status: OrderStatus | string, t: (key: string) => string) => {
   const variants = {

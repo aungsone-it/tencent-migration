@@ -1,12 +1,21 @@
-import { X, Minus, Plus, Trash2, ArrowRight } from "lucide-react";
+import { X, Minus, Plus, Trash2, ArrowRight, Tag } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import { Separator } from "./ui/separator";
 import { useCart } from "./CartContext";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
 import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
+import { CouponInput } from "./CouponInput";
+import {
+  computeCouponDiscountAmount,
+  getCouponEligibilityError,
+  readAppliedCouponFromStorage,
+  validateAndApplyCouponCode,
+  writeAppliedCouponToStorage,
+  type AppliedCoupon,
+} from "../utils/couponEligibility";
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -24,6 +33,48 @@ function formatMmk(amount: number): string {
 export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal }: CartDrawerProps) {
   const { items, removeFromCart, updateQuantity, totalItems, totalPrice, clearCart } = useCart();
   const { t } = useLanguage();
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(
+    () => readAppliedCouponFromStorage(),
+  );
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+
+  const cartCouponItems = useMemo(
+    () =>
+      items.map((item) => ({
+        id: item.id,
+        sku: item.sku || item.id,
+        price: Number(item.price) || 0,
+        quantity: Number(item.quantity) || 0,
+      })),
+    [items],
+  );
+
+  const discountAmount = useMemo(() => {
+    if (!appliedCoupon?.campaign) return 0;
+    return computeCouponDiscountAmount(appliedCoupon.campaign, cartCouponItems, totalPrice);
+  }, [appliedCoupon, cartCouponItems, totalPrice]);
+
+  const finalTotal = Math.max(totalPrice - discountAmount, 0);
+
+  useEffect(() => {
+    if (isOpen) {
+      setAppliedCoupon(readAppliedCouponFromStorage());
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!appliedCoupon?.campaign) return;
+    const eligibilityError = getCouponEligibilityError(
+      appliedCoupon.campaign,
+      cartCouponItems,
+      totalPrice,
+    );
+    if (!eligibilityError) return;
+    setAppliedCoupon(null);
+    setCouponError("");
+    writeAppliedCouponToStorage(null);
+  }, [appliedCoupon, cartCouponItems, totalPrice]);
 
   useEffect(() => {
     if (isOpen) {
@@ -51,6 +102,36 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
     }
   }, [isOpen]);
 
+  const handleApplyCoupon = async (code: string) => {
+    setCouponLoading(true);
+    setCouponError("");
+
+    const { coupon, error } = await validateAndApplyCouponCode({
+      code,
+      cartTotal: totalPrice,
+      cartItems: cartCouponItems,
+    });
+
+    if (coupon) {
+      setAppliedCoupon(coupon);
+      writeAppliedCouponToStorage(coupon);
+      setCouponError("");
+      toast.success(t("cart.couponApplied"));
+    } else {
+      setAppliedCoupon(null);
+      writeAppliedCouponToStorage(null);
+      setCouponError(error || t("cart.couponInvalid"));
+    }
+
+    setCouponLoading(false);
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError("");
+    writeAppliedCouponToStorage(null);
+  };
+
   if (!isOpen) return null;
 
   const itemCountLabel =
@@ -76,14 +157,9 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
       >
         {/* Navy header — same structure as main marketplace cart sidebar */}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-800/50 bg-gradient-to-r from-slate-800 to-slate-700 px-4 py-4 text-white">
-          <div>
-            <h2 id="cart-drawer-title" className="text-xl font-semibold">
-              {t("cart.title")}
-            </h2>
-            <p className="text-sm text-slate-300">
-              {totalItems} {totalItems === 1 ? t("cart.item") : t("cart.items")}
-            </p>
-          </div>
+          <h2 id="cart-drawer-title" className="text-xl font-semibold">
+            {t("cart.title")}
+          </h2>
           <Button
             type="button"
             variant="ghost"
@@ -117,6 +193,7 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
                   className="h-auto gap-1 px-2 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700"
                   onClick={() => {
                     clearCart();
+                    handleRemoveCoupon();
                     toast.success(t("cart.cleared"));
                   }}
                 >
@@ -190,6 +267,52 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
 
         {items.length > 0 && (
           <div className="shrink-0 space-y-4 border-t border-slate-200 bg-slate-50 p-6">
+            <div className="space-y-3">
+              {appliedCoupon ? (
+                <div className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <Tag className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {appliedCoupon.campaign?.name || appliedCoupon.campaign?.code}
+                      </p>
+                      <p className="text-xs text-emerald-700">
+                        {appliedCoupon.campaign?.code}
+                        {appliedCoupon.campaign?.discountType === "percentage"
+                          ? ` · ${appliedCoupon.campaign?.discount}% ${t("checkout.discount").toLowerCase()}`
+                          : appliedCoupon.campaign?.discountType === "fixed"
+                            ? ` · ${formatMmk(Number(appliedCoupon.campaign?.discount) || 0)} ${t("checkout.discount").toLowerCase()}`
+                            : ""}
+                        {discountAmount > 0 && ` · ${t("checkout.saved")} ${formatMmk(discountAmount)}`}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveCoupon}
+                    className="rounded p-1 text-slate-500 hover:bg-emerald-100 hover:text-slate-700"
+                    aria-label={t("cart.removeCoupon")}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    {t("marketing.couponCode")}
+                  </p>
+                  <CouponInput
+                    onApply={(code) => void handleApplyCoupon(code)}
+                    loading={couponLoading}
+                    error={couponError}
+                    onErrorClear={() => setCouponError("")}
+                    variant="cart"
+                  />
+                  {couponError && <p className="text-xs text-red-600">{couponError}</p>}
+                </div>
+              )}
+            </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">
@@ -198,12 +321,21 @@ export function CartDrawer({ isOpen, onClose, onCheckout, user, onShowAuthModal 
                 <span className="font-medium text-slate-900">{formatMmk(totalPrice)}</span>
               </div>
 
+              {appliedCoupon && discountAmount > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">
+                    {t("checkout.discount")} ({appliedCoupon.campaign?.code})
+                  </span>
+                  <span className="font-medium text-emerald-600">-{formatMmk(discountAmount)}</span>
+                </div>
+              )}
+
               <Separator />
 
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-900">{t("cart.total")}</span>
                 <p className="text-right text-xl font-bold text-slate-900">
-                  {formatMmk(totalPrice)}
+                  {formatMmk(finalTotal)}
                 </p>
               </div>
             </div>

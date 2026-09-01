@@ -2145,4 +2145,7 @@ export const enTranslations: Record<string, string> = {
     'cart.total': 'Total',
     'cart.checkoutUnavailable': 'Checkout is not available',
     'cart.proceedToCheckout': 'Proceed to Checkout',
+    'cart.couponApplied': 'Coupon applied',
+    'cart.couponInvalid': 'Invalid coupon code',
+    'cart.removeCoupon': 'Remove coupon',
 };

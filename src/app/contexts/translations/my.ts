@@ -303,7 +303,7 @@ export const myTranslations: Record<string, string> = {
     'storefront.product.removedFromWishlist': '{name} ကို ဆန္ဒစာရင်းမှ ဖယ်ပြီးပါပြီ',
     'storefront.product.readMore': 'ပိုကြည့်ရန်',
 
-    'cart.title': 'ဝယ်ယူမှုလှည်း',
+    'cart.title': 'တွန်းလှည်း',
     'cart.item': 'ခု',
     'cart.items': 'ခု',
     'cart.itemInCart': 'လှည်းထဲတွင် {count} ခု',
@@ -316,10 +316,13 @@ export const myTranslations: Record<string, string> = {
     'cart.cleared': 'လှည်းရှင်းပြီးပါပြီ',
     'cart.removeItem': 'ပစ္စည်းဖယ်ရန်',
     'cart.maxStockReached': 'လက်ကျန်အများဆုံးရောက်ရှိပြီး',
-    'cart.subtotalItems': 'ကြားပေါင်း ({count} ခု)',
+    'cart.subtotalItems': 'ကျသင့်ငွေ',
     'cart.total': 'စုစုပေါင်း',
     'cart.checkoutUnavailable': 'ငွေပေးချေရန် မရနိုင်ပါ',
     'cart.proceedToCheckout': 'ငွေပေးချေရန်',
+    'cart.couponApplied': 'ကူပွန် အသုံးပြုပြီးပါပြီ',
+    'cart.couponInvalid': 'ကူပွန် မမှန်ကန်ပါ',
+    'cart.removeCoupon': 'ကူပွန် ဖယ်ရှားရန်',
 
     'chat.typeMessage': 'မက်ဆေ့ချ်ရေးပါ...',
     'chat.addEmoji': 'အီမိုဂျီ ထည့်ပါ',

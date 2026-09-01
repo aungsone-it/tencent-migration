@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "./ui/button";
+import { CouponInput } from "./CouponInput";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
@@ -88,6 +89,14 @@ import {
   checkoutQualifiesForFreeShipping,
   resolveEffectiveCheckoutShippingFee,
 } from "../utils/freeShipping";
+import {
+  computeCouponDiscountAmount,
+  getCouponEligibilityError,
+  readAppliedCouponFromStorage,
+  validateAndApplyCouponCode,
+  writeAppliedCouponToStorage,
+  type AppliedCoupon,
+} from "../utils/couponEligibility";
 
 /** Storefront customer session only — never staff AuthContext. */
 function getMigooCustomerFromStorage(): {
@@ -1220,19 +1229,14 @@ export function Checkout({
     };
   }, [kpaySession?.merchantOrderId, paymentMethod]);
 
-  // Coupon UI removed — keep state null so orders never apply legacy persisted codes
-  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
-  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(
+    () => readAppliedCouponFromStorage(),
+  );
+  const [couponCode, setCouponCode] = useState(
+    () => readAppliedCouponFromStorage()?.campaign?.code || "",
+  );
   const [couponError, setCouponError] = useState("");
   const [couponLoading, setCouponLoading] = useState(false);
-
-  useEffect(() => {
-    localStorage.removeItem("migoo-applied-coupon");
-  }, []);
-  
-  // Calculate discount first; payable subtotal is computed from the same source as UI summary
-  // so payment amount won't briefly drop to 0 while cart context is rehydrating.
-  const discountAmount = appliedCoupon?.campaign?.discountAmount || 0;
 
   const [orderNumber, setOrderNumber] = useState(initialSummarySnapshot?.orderNumber || "");
   const [confirmedItems, setConfirmedItems] = useState<any[]>(initialSummarySnapshot?.items || []);
@@ -1377,7 +1381,29 @@ export function Checkout({
   const summaryDisplayItems = checkoutItems;
   const summaryDisplayTotal = checkoutSubtotal;
   const payableSubtotal = Math.max(Number(summaryDisplayTotal || 0), 0);
+
+  const discountAmount = useMemo(() => {
+    const campaign = appliedCoupon?.campaign;
+    if (!campaign) return 0;
+    if (getCouponEligibilityError(campaign, checkoutItems, payableSubtotal)) return 0;
+    return computeCouponDiscountAmount(campaign, checkoutItems, payableSubtotal);
+  }, [appliedCoupon, payableSubtotal, checkoutItems]);
+
   const finalTotal = Math.max(payableSubtotal - discountAmount + shippingFee, 0);
+
+  useEffect(() => {
+    if (!appliedCoupon?.campaign) return;
+    const eligibilityError = getCouponEligibilityError(
+      appliedCoupon.campaign,
+      checkoutItems,
+      payableSubtotal,
+    );
+    if (!eligibilityError) return;
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponError(eligibilityError);
+    writeAppliedCouponToStorage(null);
+  }, [appliedCoupon, checkoutItems, payableSubtotal]);
 
   const shippingSummaryLabel = useMemo(() => {
     if (!checkoutRegionKey) return t("checkout.selectRegionForShipping");
@@ -1814,58 +1840,34 @@ export function Checkout({
   ]);
 
   // Apply coupon code
-  const handleApplyCoupon = async () => {
-    if (!couponCode.trim()) {
+  const handleApplyCoupon = async (codeOverride?: string) => {
+    const codeToApply = (codeOverride ?? couponCode).trim();
+    if (!codeToApply) {
       setCouponError("Please enter a coupon code");
       return;
     }
 
+    setCouponCode(codeToApply);
     setCouponLoading(true);
     setCouponError("");
 
-    try {
-      const code = couponCode.trim().toUpperCase();
-      
-      const response = await fetch(
-        `${cloudbaseApiBaseUrl}/campaigns/validate`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...getCloudBaseRequestHeaders(),
+    const { coupon, error } = await validateAndApplyCouponCode({
+      code: codeToApply,
+      cartTotal: payableSubtotal,
+      cartItems: checkoutItems,
+    });
 
-            ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-          },
-          body: JSON.stringify({
-            code: code, // 🔧 FIX: Send uppercased code to match database
-            cartTotal: totalPrice,
-            cartItems: items.map(item => ({
-              id: item.id,
-              sku: item.sku || item.id,
-              price: item.price,
-              quantity: item.quantity
-            }))
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.valid) {
-        setAppliedCoupon(data);
-        setCouponError("");
-      } else {
-        console.error('❌ Coupon validation failed:', data.error);
-        setCouponError(data.error || "Invalid coupon code");
-        setAppliedCoupon(null);
-      }
-    } catch (error) {
-      console.error("❌ Error applying coupon:", error);
-      setCouponError("Failed to apply coupon. Please try again.");
+    if (coupon) {
+      setAppliedCoupon(coupon);
+      writeAppliedCouponToStorage(coupon);
+      setCouponError("");
+    } else {
+      setCouponError(error || "Invalid coupon code");
       setAppliedCoupon(null);
-    } finally {
-      setCouponLoading(false);
+      writeAppliedCouponToStorage(null);
     }
+
+    setCouponLoading(false);
   };
 
   // Remove applied coupon
@@ -1873,6 +1875,7 @@ export function Checkout({
     setAppliedCoupon(null);
     setCouponCode("");
     setCouponError("");
+    writeAppliedCouponToStorage(null);
   };
 
   const resolveOrderEmail = () =>
@@ -2552,7 +2555,10 @@ export function Checkout({
     if (!buyNowOverride?.items?.length) {
       setTimeout(() => {
         clearCart();
+        writeAppliedCouponToStorage(null);
       }, 500);
+    } else {
+      writeAppliedCouponToStorage(null);
     }
   };
 
@@ -3242,11 +3248,68 @@ export function Checkout({
                 ))}
               </div>
 
+              <div className="border-t border-slate-200 pt-4">
+                {appliedCoupon ? (
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <Tag className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {appliedCoupon.campaign?.name || appliedCoupon.campaign?.code}
+                        </p>
+                        <p className="text-xs text-emerald-700">
+                          {appliedCoupon.campaign?.code}
+                          {appliedCoupon.campaign?.discountType === "percentage"
+                            ? ` · ${appliedCoupon.campaign?.discount}% ${t("checkout.discount").toLowerCase()}`
+                            : appliedCoupon.campaign?.discountType === "fixed"
+                              ? ` · ${formatStorefrontPrice(Number(appliedCoupon.campaign?.discount) || 0)} ${t("checkout.discount").toLowerCase()}`
+                              : ""}
+                          {discountAmount > 0 && ` · ${t("checkout.saved")} ${formatStorefrontPrice(discountAmount)}`}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemoveCoupon}
+                      className="rounded p-1 text-slate-500 hover:bg-emerald-100 hover:text-slate-700"
+                      aria-label="Remove coupon"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      {t("marketing.couponCode")}
+                    </p>
+                    <CouponInput
+                      onApply={(code) => void handleApplyCoupon(code)}
+                      loading={couponLoading}
+                      error={couponError}
+                      onErrorClear={() => setCouponError("")}
+                      variant="checkout"
+                    />
+                    {couponError && (
+                      <p className="text-xs text-red-600">{couponError}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-3 border-t border-slate-200 pt-4">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.subtotal")}</span>
                   <span className="font-semibold text-slate-900">{formatStorefrontPrice(summaryDisplayTotal)}</span>
                 </div>
+
+                {appliedCoupon && discountAmount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">
+                      {t("checkout.discount")} ({appliedCoupon.campaign?.code})
+                    </span>
+                    <span className="font-medium text-emerald-600">-{formatStorefrontPrice(discountAmount)}</span>
+                  </div>
+                )}
 
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">{t("checkout.shipping")}</span>

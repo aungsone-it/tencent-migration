@@ -10110,34 +10110,48 @@ app.post("/make-server-16010b6f/campaigns/validate", async (c) => {
       console.log(`✅ Cart contains eligible products`);
     }
     
+    // Check minimum quantity
+    const totalQuantity = cartItems.reduce(
+      (sum: number, item: any) => sum + (Number(item.quantity) || 0),
+      0,
+    );
+    if (Number(campaign.minQuantity) > 1 && totalQuantity < Number(campaign.minQuantity)) {
+      console.log(`❌ Minimum quantity not met: ${totalQuantity} < ${campaign.minQuantity}`);
+      return c.json({
+        valid: false,
+        error: `Minimum ${campaign.minQuantity} items required in cart`,
+      });
+    }
+
     // Calculate discount based on eligible items
     let discountAmount = 0;
-    let eligibleTotal = cartTotal;
+    let eligibleTotal = Number(cartTotal) || 0;
     
     // If specific products, calculate total of only eligible items
     if (campaign.productScope === "specific" && campaign.specificProducts && campaign.specificProducts.length > 0) {
       const eligibleSkus = campaign.specificProducts.map((sku: string) => sku.toUpperCase());
       eligibleTotal = cartItems
         .filter((item: any) => eligibleSkus.includes((item.sku || item.id || '').toUpperCase()))
-        .reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0);
+        .reduce((sum: number, item: any) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 0), 0);
       
       console.log(`💵 Eligible items total: $${eligibleTotal.toFixed(2)}`);
     }
     
     // Check minimum order amount (based on eligible items)
-    if (campaign.minAmount && eligibleTotal < campaign.minAmount) {
+    if (Number(campaign.minAmount) > 0 && eligibleTotal < Number(campaign.minAmount)) {
       console.log(`❌ Minimum amount not met: ${eligibleTotal} < ${campaign.minAmount}`);
       return c.json({ 
         valid: false, 
-        error: `Minimum order amount is $${campaign.minAmount}` 
+        error: `Minimum order amount is ${Number(campaign.minAmount).toLocaleString()} Ks` 
       });
     }
     
     // Calculate discount
+    const discountValue = Number(campaign.discount) || 0;
     if (campaign.discountType === "percentage") {
-      discountAmount = (eligibleTotal * campaign.discount) / 100;
+      discountAmount = (eligibleTotal * discountValue) / 100;
     } else if (campaign.discountType === "fixed") {
-      discountAmount = campaign.discount;
+      discountAmount = discountValue;
     }
     
     // Ensure discount doesn't exceed eligible total
@@ -10154,6 +10168,8 @@ app.post("/make-server-16010b6f/campaigns/validate", async (c) => {
         discount: campaign.discount,
         discountType: campaign.discountType,
         discountAmount: discountAmount,
+        minQuantity: Number(campaign.minQuantity) || 1,
+        minAmount: Number(campaign.minAmount) || 0,
         productScope: campaign.productScope || 'all',
         specificProducts: campaign.specificProducts || [],
       },

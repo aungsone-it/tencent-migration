@@ -46,6 +46,18 @@ function escapeCsvField(v: unknown): string {
   return s;
 }
 
+/**
+ * Force Excel / WPS on Windows to keep phone numbers as text.
+ * Bare values like +959679748413 become scientific notation (9.5968E+11).
+ * CSV formula `="value"` displays the literal string.
+ */
+function excelTextField(v: unknown): string {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  const inner = s.replace(/"/g, '""');
+  return `"=""${inner}"""`;
+}
+
 function formatExportOrderDate(dateStr: string): string {
   const raw = String(dateStr || "").trim();
   if (!raw) return "";
@@ -89,24 +101,35 @@ function mapExportStatus(order: OrderExportInput): string {
   return status || "instock";
 }
 
+function uniqueAddressParts(...parts: string[]): string {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of parts) {
+    const part = String(raw || "").trim();
+    if (!part) continue;
+    const key = part.toLowerCase();
+    if (seen.has(key)) continue;
+    if (out.some((existing) => existing.includes(part))) continue;
+    seen.add(key);
+    out.push(part);
+  }
+  return out.join(", ");
+}
+
 function resolveExportAddress(order: OrderExportInput): string {
   const street = String(order.address || "").trim();
-  if (street) return street;
+  const township = String(order.city || "").trim();
+  const region = String(order.state || "").trim();
+  const structured = uniqueAddressParts(street, township, region);
   const combined = String(order.shippingAddress || "").trim();
-  if (!combined) return "";
-  const city = String(order.city || "").trim();
-  if (city && combined.includes(city)) {
-    return combined.replace(city, "").replace(/,\s*$/, "").trim();
+  if (combined && (!structured || combined.length > structured.length)) {
+    return combined;
   }
-  return combined.split(",")[0]?.trim() || combined;
+  return structured;
 }
 
 function resolveExportCity(order: OrderExportInput): string {
-  const city = String(order.city || "").trim();
-  if (city) return city;
-  const state = String(order.state || "").trim();
-  if (state) return state;
-  return "";
+  return String(order.city || "").trim();
 }
 
 function buildExportLineItems(order: OrderExportInput) {
@@ -138,7 +161,7 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
           escapeCsvField(orderDate),
           escapeCsvField(formatOrderNumberDisplay(order.orderNumber)),
           escapeCsvField(customerName),
-          escapeCsvField(order.phone),
+          excelTextField(order.phone),
           escapeCsvField(address),
           escapeCsvField(city),
           escapeCsvField(item.sku),

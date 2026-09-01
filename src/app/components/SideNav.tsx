@@ -1,7 +1,7 @@
 // Side Navigation Component - Main navigation menu
 import { useState, useEffect } from "react";
 import { Link } from "react-router";
-import { Home, Package, ShoppingCart, Store, Video, MessageSquare, Users, DollarSign, Truck, FileText, Settings, ChevronDown, Crown } from "lucide-react";
+import { Home, Package, ShoppingCart, Store, Video, MessageSquare, Users, DollarSign, Truck, FileText, Settings, ChevronDown, Crown, Megaphone } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -237,8 +237,7 @@ export function SideNav({
     { icon: Store, label: "Vendor", badge: badgeCounts?.vendor || 0 },
     // TEMPORARILY HIDDEN - Collaborator Navigation
     // { icon: UserCheck, label: "Collaborator", badge: badgeCounts?.collaborator || 0 },
-    // HIDDEN — Promo Setting (campaigns/coupons not used in current storefront)
-    // { icon: Megaphone, label: "Promo Setting" },
+    { icon: Megaphone, label: "Promo Setting" },
     // TEMPORARILY HIDDEN - Live stream Navigation
     // { icon: Video, label: "Live stream" },
     { icon: MessageSquare, label: "Chat", badge: badgeCounts?.chat || 0 },

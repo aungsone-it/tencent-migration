@@ -1401,19 +1401,15 @@ export function Checkout({
       logisticsQuotes
         .filter((quote) => String(quote.partner?.id || "").trim())
         .map((quote) => {
-          const priceLabel =
-            formatCheckoutShippingLabel(quote, formatStorefrontPrice) || t("checkout.free");
-          const etaLabel = quote.estimatedDays
-            ? formatEstimatedDeliveryLabel(quote.estimatedDays, (days) =>
-                t("checkout.withinDays").replace("{days}", String(days))
-              )
-            : null;
-          const label = etaLabel
-            ? `${quote.partner.name} — ${priceLabel} (${etaLabel})`
-            : `${quote.partner.name} — ${priceLabel}`;
-          return { id: String(quote.partner.id), label };
+          const priceLabel = isFreeShippingCheckout
+            ? t("checkout.free")
+            : formatCheckoutShippingLabel(quote, formatStorefrontPrice) || t("checkout.free");
+          return {
+            id: String(quote.partner.id),
+            label: `${quote.partner.name} — ${priceLabel}`,
+          };
         }),
-    [logisticsQuotes, formatStorefrontPrice, t]
+    [logisticsQuotes, formatStorefrontPrice, isFreeShippingCheckout, t]
   );
 
   const codPaymentAvailable =

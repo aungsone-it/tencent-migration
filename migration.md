@@ -15,7 +15,7 @@ Status document for the NEXA platform backend cutover. **Runtime target: Tencent
 | Auth cutover | **Partial** | CloudBase Auth enabled; user password migration may need reset flow |
 | Image uploads (runtime) | **Done** | New uploads → TencentDB KV storage backend (`kv_storage_backend.ts`); URLs in entity JSON. Client compress ~500KB |
 | Legacy Supabase Storage URLs | **Partial** | Imported KV may still reference old Supabase URLs — re-upload via admin or batch fix |
-| Chat KV | **Deferred** | Historical `chat:*` not imported; chat handlers run on TCB KV (empty until backfill) |
+| Chat KV | **Live on TCB** | Historical Supabase `chat:*` not imported; new messages write to TCB KV. See [docs/CHAT.md](docs/CHAT.md) |
 | Supabase decommission | **Pending** | Only after production validation on TCB |
 
 ## Target architecture
@@ -84,7 +84,18 @@ SOURCE_POSTGRES_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
 |------|--------|
 | `kpay_txn:*` | KPay already running on TCB |
 | `kpay_pwa_draft:*` | Orphan drafts reconciled via admin recovery UI |
-| `chat:*` | Separate backfill planned — API already on TCB |
+| `chat:*` | Historical messages not imported — **new** chat works on TCB KV from first customer message |
+
+## Local API development
+
+For backend work without uploading function zips:
+
+```bash
+npm run dev:api      # Terminal 1 — local make-server on :8787
+npm run dev:local    # Terminal 2 — Vite with proxy to local API
+```
+
+See [README.md § Local Development](README.md#local-development).
 
 ## Remaining risks
 
@@ -97,6 +108,7 @@ SOURCE_POSTGRES_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
 ## Related docs
 
 - [README.md](README.md) — product overview + script index
+- [docs/CHAT.md](docs/CHAT.md) — chat system (FloatingChat + admin)
 - [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) — greenfield TCB deploy
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — hosting checklist
 - [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) — post-deploy validation

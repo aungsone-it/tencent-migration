@@ -86,10 +86,10 @@ Toggles only affect `vendorFreeShipping[yourVendorId]`. Other vendors’ flags o
 
 | Cart contents | Delivery method select | Shipping line | Payment unlock |
 |---------------|------------------------|---------------|----------------|
-| All items free shipping | **Disabled** (grayed out), shows FREE label | **FREE** / အခမဲ့ | After region + township |
-| Mixed or none free | Enabled (when multiple carriers) | Quoted fee from logistics | After region + township + carrier |
+| All items free shipping | **Enabled** — partner dropdown shows `{name} — FREE` (no MMK quote, no ETA/duration text) | **FREE** / အခမဲ့ | After region + township + partner |
+| Mixed or none free | Enabled — shows quoted MMK fee from logistics | Quoted fee | After region + township + carrier |
 
-Server validates on order create: `shippingFee === 0` is rejected unless every line item resolves as free shipping for that vendor in KV (not trusting client flags alone).
+Client sends `checkoutFreeShipping: true` and per-line `freeShipping` flags when the cart qualifies. Server validates on order create: `shippingFee === 0` is rejected unless every line item resolves as free shipping for that vendor in KV (not trusting client flags alone).
 
 ---
 

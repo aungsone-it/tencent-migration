@@ -44,7 +44,9 @@ All major entities are stored as JSON documents in `kv_store_16010b6f`:
 | Key prefix | Entity |
 |------------|--------|
 | `product:` | Products — includes optional `vendorFreeShipping: { [vendorId]: true }` for per-vendor free shipping |
-| `order:` | Orders |
+| `order:` | Orders — `orderNumber` uses serial **`NOS-00001`** format; counter key `order_serial_counter` in KV |
+| `order_serial_counter` | Global serial allocator for NOS order numbers |
+| `order_serial_reservation:{NOS-00001}` | Short-lived reservation during allocation |
 | `customer:` | Customer profiles |
 | `vendor:` | Vendor records — includes optional `freeShippingEnabled` (super-admin feature gate) |
 | `vendor_application:` | Vendor applications |
@@ -58,6 +60,7 @@ All major entities are stored as JSON documents in `kv_store_16010b6f`:
 | `customer:{uid}:cart` | Signed-in cart |
 | `wishlist:{uid}` | Wishlist |
 | `chat:message:` | Chat messages |
+| `chat:conversation:` | Chat conversation metadata (customer, vendor, unread) |
 | `staff:activity:{userId}` | Per-staff audit log (max 150 entries per user) |
 | `staff:activity:global-feed` | Platform-wide admin activity feed (max 500 entries) |
 
@@ -151,7 +154,18 @@ Uses server pagination + category filter (see `fetchVendorProducts` in `module-c
 | `GET` | `/vendor/categories-details/:vendorId` | Category rows include `freeShippingEnabledCount` / `freeShippingTotalCount` |
 | `GET` | `/vendor/products-admin/:vendorId` | Products include derived `freeShipping` boolean |
 
-Order create rejects `shippingFee === 0` unless every line item resolves as free shipping for that vendor in KV. Client helpers: `src/app/utils/freeShipping.ts`. Full reference: [FREE_SHIPPING.md](./FREE_SHIPPING.md).
+Order create rejects `shippingFee === 0` unless every line item resolves as free shipping for that vendor in KV (or client sends `checkoutFreeShipping: true` with matching line flags). Client helpers: `src/app/utils/freeShipping.ts`. Checkout delivery dropdown shows **FREE** labels (no quoted fee or ETA) when all items qualify. Full reference: [FREE_SHIPPING.md](./FREE_SHIPPING.md).
+
+**Order numbers (serial):**
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/orders/next-number` | Pre-allocate next serial (`NOS-00001`, `NOS-00002`, …) before checkout POST |
+| `POST` | `/orders` | Creates order; accepts pre-allocated `orderNumber` or allocates server-side |
+
+Implementation: `order_number.ts` — KV counter `order_serial_counter`, reservation keys, bootstrap from existing `order:*` rows. Display helper unwraps legacy stacked prefixes (`MOS-NOS-00001` → `NOS-00001`). Client: `src/app/utils/orderNumber.ts`.
+
+**Checkout Seller ID:** Required on vendor checkout; stored on order as `sellerId` (alias `zipCode` for legacy compatibility). Shown in admin order detail and print invoice.
 
 **Vendor commission wallet & KBZPay withdrawal** (vendor session required — `x-vendor-session`):
 
@@ -223,6 +237,7 @@ KV writes bump the appropriate pulse row (via DB triggers in migrations). The br
 | Location | Channel | Filter |
 |----------|---------|--------|
 | `Checkout` | `kpay-txn-{orderId}` | Filtered `kpay_txn:{id}` ✓ |
+| `FloatingChat` / admin `Chat` | BroadcastChannel + optional Realtime | Inbox pings, conversation messages — see [CHAT.md](./CHAT.md) |
 | Signed-in cart/wishlist | `customer:{uid}:cart`, etc. | Filtered ✓ |
 | `VendorStoreView` | Product/policy listeners | Scoped to vendor catalog where configured |
 
@@ -330,6 +345,7 @@ Functions (source → package → deploy):
 | [PAYMENTS.md](./PAYMENTS.md) | KBZPay flows |
 | [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md) | Commission rates (0% default), vendor KBZPay withdrawal |
 | [FREE_SHIPPING.md](./FREE_SHIPPING.md) | Per-vendor free shipping — KV model, API, checkout |
+| [CHAT.md](./CHAT.md) | FloatingChat, admin Chat, guest phone, emoji picker |
 | [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) | LCP, client cache |
 | [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md) | Read-model deploy validation |
 | [LEGACY_DOCS.md](./LEGACY_DOCS.md) | Outdated root markdown files |

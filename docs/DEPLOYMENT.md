@@ -14,6 +14,17 @@ Use this document with [TCB_CONSOLE_SETUP.md](./TCB_CONSOLE_SETUP.md) for the fu
 - EdgeOne (or other static host) with SPA fallback
 - For CLI deploy: `@cloudbase/cli` (`npx tcb`) logged into the **international** route
 
+### Local development options
+
+| Mode | Commands | When to use |
+|------|----------|-------------|
+| **Remote API** | `npm run dev` | UI-only changes; hits CloudBase from `.env` |
+| **Local API** | Terminal 1: `npm run dev:api` · Terminal 2: `npm run dev:local` | Backend/API changes without uploading function zip |
+
+Local API runs bundled `make-server-16010b6f` on port **8787** (`LOCAL_API_PORT` to override). Vite proxies `/api/make-server-16010b6f` → local server. Requires `TENCENT_DATABASE_URL` in `.env` when endpoints need DB access. Source changes under `supabase/functions/make-server-16010b6f/` trigger auto-rebundle on restart.
+
+See [README.md § Local Development](../README.md#local-development).
+
 ## 2) What to deploy when
 
 | You changed | Deploy | Do **not** need |

@@ -12,6 +12,18 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 - **Vendor-admin portal** — `/vendor/:slug/admin/*` (and legacy `/store/:slug/admin/*` redirects where configured)
 - **CloudBase/Tencent Edge backend** — auth, orders, products, payments, notifications
 
+## Recent Updates (September 2026)
+
+| Area | What shipped |
+|------|----------------|
+| **Chat emoji picker** | Native Unicode emoji in **FloatingChat** (storefront) and **admin Chat** — smile icon beside image upload; lazy `emoji-picker-react` chunk — see [docs/CHAT.md](docs/CHAT.md) |
+| **Guest phone modal** | After a guest’s **first successful chat message**, FloatingChat prompts for Myanmar phone (`+959…` / `09…`); saved locally and sent on later messages |
+| **Order numbers (NOS serial)** | Sequential **`NOS-00001`**, **`NOS-00002`**, … via KV counter + `GET /orders/next-number`; legacy `ORD-` / `MOS-` normalized on display |
+| **Seller ID at checkout** | Required field on vendor checkout (stored as `sellerId` / `zipCode`); shown on admin order detail, vendor orders, and print invoice |
+| **Free shipping checkout UI** | When cart qualifies, delivery dropdown shows **အခမဲ့ / FREE** (not quoted MMK fee); shipping duration hidden from partner labels |
+| **Local API dev** | `npm run dev:api` (function on `:8787`) + `npm run dev:local` (Vite proxies to local API) — see [Local Development](#local-development) |
+| **Orders toolbar** | Bulk **Delete** button hidden in super-admin Orders (handler retained) |
+
 ## Recent Updates (July 2026)
 
 | Area | What shipped |
@@ -85,7 +97,9 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
   - **Path-based (local dev / apex)** — `/vendor/:storeSlug/*`
 - Terms and privacy: `/terms`, `/privacy` on vendor hosts; `/vendor/:slug/terms` on path-based URLs
 - Bilingual storefront UI: English / Burmese. Admin language switching remains English / Simplified Chinese.
-- **Free shipping** (when vendor enabled by platform): cart items marked free shipping show **0 MMK** delivery when the cart contains only those items; mixed carts use normal logistics quotes
+- **Free shipping** (when vendor enabled by platform): cart items marked free shipping show **0 MMK** delivery when the cart contains only those items; mixed carts use normal logistics quotes; checkout dropdown labels show **FREE** without ETA when all items qualify
+- **Seller ID** — required at checkout (vendor-specific field for fulfillment tracking)
+- **FloatingChat** — customer support bubble with image upload, emoji picker, and guest phone collection after first message — see [docs/CHAT.md](docs/CHAT.md)
 - Store phone contact: desktop hover menu asks whether to **Dial** or open **Viber**; mobile menu shows both actions.
 - **Add to Home** — floating button above chat; Android Chrome can show native install prompt; iOS uses Safari Share → Add to Home Screen (see [docs/VENDOR_ADD_TO_HOME.md](docs/VENDOR_ADD_TO_HOME.md))
 
@@ -109,7 +123,8 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 ### Super Admin
 
 - Dashboard, products, categories, inventory, orders, customers, chat, marketing, finances, settings
-- **Orders:** paginated SQL read model; KBZPay **orphaned draft recovery** (amber panel when paid drafts lack orders); status changes and recover use optimistic UI (no full-list blink)
+- **Orders:** paginated SQL read model; serial order numbers **`NOS-00001`** format; **Seller ID** on order detail and invoice; KBZPay **orphaned draft recovery** (amber panel when paid drafts lack orders); status changes and recover use optimistic UI (no full-list blink); bulk Delete hidden in toolbar
+- **Chat:** customer inbox at `/admin/chat` — emoji + image in composer; guest phone and display codes in conversation list — see [docs/CHAT.md](docs/CHAT.md)
 - Vendor management (**Review applications** only), promotions, collaborator flows
 - **Vendor free shipping:** grant per-vendor feature access; view free-shipping product counts on vendor profile
 - **Settings → General** — platform name, logo, support contact (formerly split with Appearance; Appearance tab is hidden)
@@ -206,12 +221,29 @@ Full backend reference: [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND
 
 ## Local Development
 
+### Standard (remote CloudBase API)
+
 ```bash
 npm install
+cp .env.example .env   # fill VITE_CLOUDBASE_PUBLISHABLE_KEY
 npm run dev
 ```
 
 Open a vendor storefront at `http://localhost:5173/vendor/{store-slug}` or configure a local subdomain host.
+
+### Local API (backend changes without cloud deploy)
+
+Use when testing API, checkout, orders, chat, or auth changes against a locally bundled `make-server-16010b6f`:
+
+```bash
+# Terminal 1 — bundles & runs make-server on :8787 (auto-rebuilds when source changes)
+npm run dev:api
+
+# Terminal 2 — Vite proxies /api/make-server-16010b6f → localhost:8787
+npm run dev:local
+```
+
+Requires `.env` with DB URLs if the function needs TencentDB (`TENCENT_DATABASE_URL`). Override port: `LOCAL_API_PORT=8787`.
 
 Build check:
 
@@ -229,7 +261,9 @@ npm test
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Start Vite dev server |
+| `npm run dev` | Start Vite dev server (remote CloudBase API from `.env`) |
+| `npm run dev:api` | Run local `make-server-16010b6f` HTTP shim on `:8787` |
+| `npm run dev:local` | Vite dev server with proxy to local API (`dev:api` must be running) |
 | `npm run build` | Production build |
 | `npm test` | Run Vitest |
 | `npm run test:db` | Test `TENCENT_DATABASE_URL` and `SOURCE_POSTGRES_URL` from `.env` |
@@ -306,6 +340,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/TCB_CONSOLE_SETUP.md](doc
 | [docs/READ_MODEL_ROLLOUT.md](docs/READ_MODEL_ROLLOUT.md) | Read-model deploy validation and monitoring |
 | [docs/PAYMENTS.md](docs/PAYMENTS.md) | KBZPay (production path) |
 | [docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md](docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md) | Commission rates (0% default), vendor KBZPay withdrawal, session auth |
+| [docs/CHAT.md](docs/CHAT.md) | **FloatingChat + admin Chat:** guest phone, emoji picker, KV keys, Realtime |
 | [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md) | Per-vendor free shipping — data model, admin UI, checkout rules |
 | [cloudbase/function-env.template.env](cloudbase/function-env.template.env) | Cloud Function env vars (SES, SMS, KBZPay, storage) |
 | [docs/PERFORMANCE_AND_CACHING.md](docs/PERFORMANCE_AND_CACHING.md) | LCP, client cache, deploy refresh, scroll restore, Realtime scale notes |

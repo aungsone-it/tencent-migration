@@ -21,6 +21,7 @@ The following markdown files live in the **repository root** and are **historica
 | [docs/CLIENT_MANUAL.md](./CLIENT_MANUAL.md) | Frontend client architecture manual (developers) |
 | [docs/VENDOR_ADD_TO_HOME.md](./VENDOR_ADD_TO_HOME.md) | Vendor storefront Add to Home / install shortcut |
 | [docs/FREE_SHIPPING.md](./FREE_SHIPPING.md) | Per-vendor free shipping |
+| [docs/CHAT.md](./CHAT.md) | FloatingChat, admin Chat, guest phone, emoji picker |
 | [.env.example](../.env.example) | Frontend / script environment variable reference |
 | [cloudbase/function-env.template.env](../cloudbase/function-env.template.env) | Cloud Function env vars (SES, SMS, KBZPay, storage) |
 

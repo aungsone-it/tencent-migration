@@ -5,7 +5,7 @@
 
 Use this when onboarding developers, reviewing PRs, or deciding where new logic belongs.
 
-**Related docs:** [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) · [FREE_SHIPPING.md](./FREE_SHIPPING.md) · [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) · [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md)
+**Related docs:** [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) · [FREE_SHIPPING.md](./FREE_SHIPPING.md) · [CHAT.md](./CHAT.md) · [PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) · [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md)
 
 ---
 
@@ -310,7 +310,9 @@ Redirect to apex `/summary` (current: `https://nexa-apex.online/summary` via `KP
 
 **Client rule:** Client never marks an order as paid. It waits for server state.
 
-**Free shipping:** When every cart line qualifies (`checkoutQualifiesForFreeShipping` in `freeShipping.ts`), `Checkout.tsx` sets shipping to **0 MMK**, disables the delivery-partner selector, and still requires region/township. Server order create re-validates zero shipping against product KV.
+**Free shipping:** When every cart line qualifies (`checkoutQualifiesForFreeShipping` in `freeShipping.ts`), `Checkout.tsx` sets shipping to **0 MMK**, delivery dropdown labels show **FREE** (no quoted MMK fee or ETA text), and still requires region/township + delivery partner selection. Server order create re-validates zero shipping against product KV (`checkoutFreeShipping` flag + line item flags).
+
+**Seller ID:** Required text field at checkout; persisted as `sellerId` on the order (legacy alias `zipCode`).
 
 Files: `Checkout.tsx`, `freeShipping.ts`, `kpayClient.ts`, `supabase/functions/.../kpay_routes.tsx`, `pwa_finalize.ts`
 
@@ -393,6 +395,8 @@ Optimistic updates are **UX sugar**, not business logic.
 | Vendor application approve | Status badge | Refetch applications |
 | Wishlist toggle | Heart icon + saved list | Revert toggle |
 | Chat messages | Instant bubble | Server merge wins |
+
+FloatingChat and admin Chat use lazy-loaded `EmojiPickerLazy.tsx` (native Unicode emojis). Guest phone modal appears after first successful guest message. See [CHAT.md](./CHAT.md).
 
 Pattern:
 
@@ -499,7 +503,11 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 | `src/app/utils/deployVersion.ts` | Post-deploy cache purge + hard reload |
 | `src/app/utils/vendorBrowseScroll.ts` | Storefront scroll save/restore |
 | `src/app/components/ScrollController.tsx` | Route-level scroll behavior |
-| `src/app/components/Checkout.tsx` | Checkout + KPay wait loop |
+| `src/app/components/Checkout.tsx` | Checkout + KPay wait loop + Seller ID + free shipping |
+| `src/app/components/FloatingChat.tsx` | Storefront chat widget |
+| `src/app/components/Chat.tsx` | Admin chat inbox |
+| `src/app/components/EmojiPickerLazy.tsx` | Lazy emoji picker (chat composers) |
+| `src/app/utils/orderNumber.ts` | NOS serial order numbers (client) |
 | `src/app/components/Orders.tsx` | Admin orders + optimistic status |
 | `src/app/utils/kpayClient.ts` | KPay API wrapper → server |
 | `utils/tencent/cloudbase.ts` | Env config resolution |
@@ -520,6 +528,7 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 | `customer_routes.tsx` | Customer CRUD + paginated admin |
 | `kpay_routes.tsx` | KBZPay QR + PWA start |
 | `pwa_finalize.ts` | Post-payment order creation |
+| `order_number.ts` | NOS serial allocation (`NOS-00001`, …) |
 | `kv_storage_backend.ts` | Image blob storage in KV |
 | `supabase/functions/kpay-webhook/index.ts` | Payment webhook handler |
 
@@ -534,7 +543,7 @@ Base: `$VITE_CLOUDBASE_API_BASE_URL` → typically `…/v1/functions/make-server
 | Health | `GET /health`, `GET /read-model/validate` |
 | Storefront | `GET /vendor/products/:vendorId`, `GET /vendors/by-slug/:slug` |
 | Products (admin) | `GET/POST/PUT/DELETE /products`, `GET /check-sku/:sku` |
-| Orders | `GET/POST/PUT/DELETE /orders`, `GET /user/:userId/orders` |
+| Orders | `GET /orders/next-number`, `GET/POST/PUT/DELETE /orders`, `GET /user/:userId/orders` |
 | Customers | `GET/POST/PUT /customers` |
 | Auth | `/auth/send-email-otp`, `/auth/verify-otp-and-reset`, `/auth/email-health`, `/auth/*`, `/vendor-auth/*`, `/wishlist/:userId` |
 | Settings | `/settings/general`, upload logo/banner |

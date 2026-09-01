@@ -89,10 +89,25 @@ Commission is deducted from vendor net earnings before KBZPay withdrawal. Full r
 ### Orders
 
 - Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
+- **Order numbers:** serial format **`NOS-00001`**, **`NOS-00002`**, … (allocated via `GET /orders/next-number` at checkout)
+- **Seller ID:** required customer field at vendor checkout; visible on order detail (above notes) and print invoice under customer phone
 - **KBZPay draft recovery:** amber panel lists paid PWA checkouts that never became orders; **Recover order** creates the order and prepends it to the list without a full refetch
 - Status changes (including cancel on recovered KPay orders) use optimistic UI + cache patches
-- Bulk **Delete** is hidden in the toolbar (handler retained for future use)
+- Bulk **Delete** is hidden in the toolbar (`SHOW_ORDERS_DELETE_BUTTON = false`; handler retained for future use)
 - Sidebar badge counts pending orders using normalized status (not raw KV strings)
+
+### Chat
+
+Super-admin **Chat** (`/admin/chat`) — customer conversations from FloatingChat on storefronts and apex.
+
+| Feature | Behavior |
+|---------|----------|
+| **Guest display** | Allocated codes (e.g. `#003346`) + phone when collected |
+| **Composer** | Text, image upload (compressed), emoji picker (native Unicode) |
+| **Phone collection** | Guests prompted for Myanmar phone **after first successful message** (FloatingChat modal) |
+| **Realtime** | Inbox pings + conversation broadcasts; polling fallback |
+
+Full reference: [CHAT.md](./CHAT.md).
 
 ### Typical daily flow
 
@@ -186,7 +201,8 @@ Use **preview / open store** from vendor admin to verify:
 - **scroll position** when opening a product and going back (same category tab)
 - pricing and stock
 - checkout readiness: Cash on Delivery, KBZPay QR, and KBZPay PWA
-- **free shipping:** when all cart items qualify, checkout shows **FREE** delivery and locks the delivery-method selector; mixed carts use normal logistics quotes
+- **Seller ID:** required field at checkout — verify it appears on placed orders in vendor/admin portals
+- **free shipping:** when all cart items qualify, checkout shows **FREE** delivery; delivery partner dropdown shows free label (no quoted MMK fee or duration text); mixed carts use normal logistics quotes
 - storefront contact: phone menu offers native Dial and Viber chat
 - **Add to Home** button (floating, above chat) — test on Android Chrome over HTTPS; verify home-screen icon uses store name/logo
 
@@ -201,7 +217,7 @@ Customers and prospects visiting the marketplace apex see:
 - Platform hero, stats (active vendors, products, customers)
 - **Vendor partner carousel** — active vendors with **store logos**, sorted by **total revenue** (best selling first)
 - Clicking a vendor card opens their storefront: **verified custom domain** → **subdomain** → path `/vendor/:slug`
-- **FloatingChat** bubble for customer support (same component as vendor storefronts)
+- **FloatingChat** bubble for customer support (same component as vendor storefronts) — image upload, emoji picker, guest phone prompt after first message
 
 ## 4) Role and permission notes
 
@@ -219,7 +235,7 @@ Before release windows, confirm:
 - category routes (e.g. `/cosmetic`) show full category catalog without requiring “Load more” on home first
 - order updates sync correctly across admin/vendor/customer views
 - KBZPay return lands on apex `/summary` (current: `nexa-apex.online/summary`) and Continue Shopping returns to the vendor storefront
-- chat and notification flows are healthy
+- chat and notification flows are healthy (admin `/admin/chat` + FloatingChat emoji/image)
 - **Settings → Activities** updates after vendor approve/delete and staff user changes
 - **Landing page** carousel logos load; cards link to correct vendor store URL
 - **Vendor application** form accepts `+959…` / `09…` phones and rejects duplicate emails
@@ -233,6 +249,7 @@ Before release windows, confirm:
 - Backend / scaling: `docs/ARCHITECTURE_AND_BACKEND.md`
 - Free shipping: `docs/FREE_SHIPPING.md`
 - Routing/architecture: `docs/CODE_REVIEW_AND_ROUTING.md`
+- Chat: `docs/CHAT.md`
 - Deployment: `docs/DEPLOYMENT.md`
 - Read-model rollout: `docs/READ_MODEL_ROLLOUT.md`
 - Payments: `docs/PAYMENTS.md`

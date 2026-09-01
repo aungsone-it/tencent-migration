@@ -141,7 +141,8 @@ Details and scale limits: [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKE
 - Throttled badge/profile refresh.
 - Typed timeout/network errors from API client.
 - Early vendor branding: `vendorStorefrontBrandingCache.ts` + `vendor-storefront-head.js`.
-- **RootLayout:** `FloatingChat` lazy-loaded globally — shown on apex landing and storefronts; hidden on admin portals, `/vendor/application`, `/reset-password`, and vendor login routes.
+- **RootLayout:** `FloatingChat` lazy-loaded globally — shown on apex landing and storefronts; hidden on admin portals, `/vendor/application`, `/reset-password`, and vendor login routes. Composer: image upload + emoji picker (`EmojiPickerLazy.tsx`, native Unicode via `emoji-picker-react`); guest phone modal after first successful message.
+- **Admin Chat:** `Chat.tsx` at `/admin/chat` — same emoji + image composer pattern as FloatingChat.
 - **Scroll restore:** `VendorStoreView` saves grid scroll position (window + inner container) when opening a product; restores on browser Back or header back via `vendorBrowseScroll.ts`, `persistedSessionCache.ts`, and `ScrollController.tsx` (skips scroll-to-top between list ↔ product paths).
 - **Add to Home:** `VendorInstallFab` (portal to `document.body`) mounted from `VendorStoreView` above the chat FAB stack; injects per-vendor web manifest + registers `public/sw.js` for Chrome install eligibility. See [VENDOR_ADD_TO_HOME.md](./VENDOR_ADD_TO_HOME.md).
 - **Settings (`Settings.tsx`):** Activities tab with global feed; Appearance tab filtered out; `scrollbar-thin` on nav and main pane.

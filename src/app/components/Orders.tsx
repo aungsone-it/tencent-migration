@@ -96,7 +96,7 @@ import {
   resolveOrderSellerId,
 } from "../utils/orderShippingAddress";
 import { OrderShippingAddressBlock } from "./OrderShippingAddressBlock";
-import { buildOrderExportCsv } from "../utils/orderExportCsv";
+import { buildOrderExportSpreadsheetHtml } from "../utils/orderExportCsv";
 
 type OrderStatus = "pending" | "processing" | "fulfilled" | "cancelled" | "ready-to-ship";
 type PaymentStatus = "paid" | "unpaid" | "refunded" | "pending_refund";
@@ -1620,12 +1620,12 @@ export function Orders({
         );
       }
 
-      const csvContent = buildOrderExportCsv(rows);
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+      const spreadsheetHtml = buildOrderExportSpreadsheetHtml(rows);
+      const blob = new Blob([spreadsheetHtml], { type: "application/vnd.ms-excel;charset=utf-8" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `orders_${format(new Date(), "yyyy-MM-dd")}.csv`;
+      a.download = `orders_${format(new Date(), "yyyy-MM-dd")}.xls`;
       a.click();
       window.URL.revokeObjectURL(url);
     })();

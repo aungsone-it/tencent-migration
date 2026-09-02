@@ -55,8 +55,55 @@ function isStaffKvProfile(record: unknown): record is StaffKvUser {
   return Boolean(email) && typeof (record as StaffKvUser).password === "string";
 }
 
+function normalizeStaffEmail(email: unknown): string {
+  return String(email || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[,;.\s]+$/g, "");
+}
+
+async function ensureUserIdInAuthUsersList(userId: string): Promise<boolean> {
+  const id = String(userId || "").trim();
+  if (!id) return false;
+  const raw = await kv.get("auth:users-list");
+  const list = Array.isArray(raw) ? raw.map((entry) => String(entry).trim()).filter(Boolean) : [];
+  if (list.includes(id)) return false;
+  list.push(id);
+  await kv.set("auth:users-list", list);
+  return true;
+}
+
+/** Merge orphan staff profiles (user:email index) into auth:users-list. */
+async function reconcileAuthUsersList(): Promise<string[]> {
+  const idSet = new Set<string>();
+  const raw = await kv.get("auth:users-list");
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const id = String(entry || "").trim();
+      if (id) idSet.add(id);
+    }
+  }
+
+  const emailIndexProfiles = await kv.getByPrefix("user:");
+  for (const profile of Array.isArray(emailIndexProfiles) ? emailIndexProfiles : []) {
+    if (!isStaffKvProfile(profile)) continue;
+    const staff = profile as StaffKvUser;
+    const userId = String(staff.id || "").trim();
+    if (!userId) continue;
+    idSet.add(userId);
+    const authProfile = await kv.get(`auth:user:${userId}`);
+    if (!authProfile || typeof authProfile !== "object") {
+      await kv.set(`auth:user:${userId}`, staff);
+    }
+  }
+
+  const nextList = [...idSet];
+  await kv.set("auth:users-list", nextList);
+  return nextList;
+}
+
 async function findStaffUserByEmail(emailLower: string): Promise<StaffKvUser | null> {
-  const normalized = String(emailLower || "").trim().toLowerCase();
+  const normalized = normalizeStaffEmail(emailLower);
   if (!normalized) return null;
 
   const direct = await kv.get(`user:${normalized}`);
@@ -69,7 +116,7 @@ async function findStaffUserByEmail(emailLower: string): Promise<StaffKvUser | n
       const profile = await kv.get(`auth:user:${uid}`);
       if (
         isStaffKvProfile(profile) &&
-        String((profile as StaffKvUser).email || "").trim().toLowerCase() === normalized
+        normalizeStaffEmail((profile as StaffKvUser).email) === normalized
       ) {
         return profile as StaffKvUser;
       }
@@ -80,12 +127,13 @@ async function findStaffUserByEmail(emailLower: string): Promise<StaffKvUser | n
 
 async function persistStaffUserRecord(user: StaffKvUser): Promise<void> {
   const userId = String(user.id || "").trim();
-  const emailLower = String(user.email || "").trim().toLowerCase();
+  const emailLower = normalizeStaffEmail(user.email);
   if (userId) await kv.set(`auth:user:${userId}`, user);
   if (emailLower) {
     await kv.set(`user:${emailLower}`, user);
     if (userId) await kv.set(`userId:${userId}`, { email: emailLower });
   }
+  if (userId) await ensureUserIdInAuthUsersList(userId);
 }
 
 async function setStaffPassword(user: StaffKvUser, plainPassword: string, tempPassword = false): Promise<void> {
@@ -107,7 +155,7 @@ async function tryStaffLogin(
   email: string,
   password: string,
 ): Promise<{ user: Record<string, unknown> } | { error: string } | null> {
-  const emailLower = String(email || "").trim().toLowerCase();
+  const emailLower = normalizeStaffEmail(email);
   let staffUser = await findStaffUserByEmail(emailLower);
   if (!staffUser?.id) return null;
 
@@ -1509,13 +1557,33 @@ authApp.post("/create-user", async (c) => {
       return c.json({ error: "You cannot assign this role" }, 403);
     }
 
-    const emailLower = String(email || "").trim().toLowerCase();
+    const emailLower = normalizeStaffEmail(email);
     if (!emailLower) {
       return c.json({ error: "Email is required" }, 400);
     }
 
-    if (await findStaffUserByEmail(emailLower)) {
-      return c.json({ error: "A user with this email already exists" }, 409);
+    const existingStaff = await findStaffUserByEmail(emailLower);
+    if (existingStaff) {
+      const existingId = String(existingStaff.id || "").trim();
+      let repaired = false;
+      if (existingId) {
+        const patched =
+          !existingStaff.storeId && storeId
+            ? { ...existingStaff, storeId: String(storeId || "") }
+            : existingStaff;
+        await persistStaffUserRecord(patched);
+        repaired = true;
+      }
+      return c.json(
+        {
+          error: repaired
+            ? "A user with this email already exists and was restored to the users list. Refresh the page."
+            : "A user with this email already exists",
+          existingUserId: existingId || undefined,
+          repaired,
+        },
+        409,
+      );
     }
     if (await findCustomerAuthByEmail(emailLower)) {
       return c.json({ error: "This email is already used by a storefront customer account" }, 409);
@@ -1551,11 +1619,6 @@ authApp.post("/create-user", async (c) => {
 
     await persistStaffUserRecord(kvProfile);
 
-    // Add to users list
-    const users = (await kv.get("auth:users-list")) || [];
-    users.push(userId);
-    await kv.set("auth:users-list", users);
-
     console.log(`✅ User created: ${emailLower} with role ${targetRole}`);
     const createdName = String(name || emailLower || "User").trim();
     const createdMail = emailLower;
@@ -1588,7 +1651,7 @@ authApp.post("/create-user", async (c) => {
 // ============================================
 authApp.get("/users", async (c) => {
   try {
-    const userIds = (await withTimeout(kv.get("auth:users-list"), 30000)) || [];
+    const userIds = await withTimeout(reconcileAuthUsersList(), 30000);
     const users = [];
 
     for (const userId of userIds) {

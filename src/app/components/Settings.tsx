@@ -302,7 +302,11 @@ export function Settings() {
       });
       if (user?.role === "store-owner") {
         const userStoreId = user.storeId || "";
-        return transformedUsers.filter((u: any) => (u.storeId || "") === userStoreId);
+        return transformedUsers.filter((u: any) => {
+          const staffStoreId = String(u.storeId || "");
+          if (!userStoreId) return true;
+          return staffStoreId === userStoreId || staffStoreId === "";
+        });
       }
       return isOwnerRole(user?.role) ? transformedUsers : [];
     },
@@ -1018,11 +1022,14 @@ export function Settings() {
     setCreatedUserEmail("");
   };
 
+  const normalizeStaffEmailInput = (raw: string) =>
+    raw.trim().toLowerCase().replace(/[,;.\s]+$/g, "");
+
   const validateAddUserForm = () => {
     const errors: AddUserFormErrors = {};
     const allowedRoles = assignableRolesForCreator(user?.role);
     const name = userName.trim();
-    const email = userEmail.trim().toLowerCase();
+    const email = normalizeStaffEmailInput(userEmail);
     const phone = userPhone.trim();
     const selectedRole = canonicalizeStaffRoleForSave(userRole);
 
@@ -1104,8 +1111,27 @@ export function Settings() {
       );
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create user');
+        const errorData = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          repaired?: boolean;
+        };
+        const message = errorData.error || "Failed to create user";
+        if (response.status === 409) {
+          invalidateAdminAuthUsersCache();
+          await loadUsers(true);
+          setShowUserDialog(false);
+          setUserName("");
+          setUserEmail("");
+          setUserPhone("");
+          setAddUserFormErrors({});
+          if (errorData.repaired) {
+            toast.info(message);
+          } else {
+            toast.error(message);
+          }
+          return;
+        }
+        throw new Error(message);
       }
 
       const data = await response.json();

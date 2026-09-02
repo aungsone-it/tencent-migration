@@ -38,15 +38,16 @@ const EXPORT_HEADERS = [
   "Seller ID",
   "address",
   "city",
+  "Region",
   "SKU",
   "Order qty",
   "Price",
   "Total",
   "Vendor",
   "Status",
-  "delivery date",
   "logistic",
-];
+  "delivery date",
+] as const;
 
 function escapeCsvField(v: unknown): string {
   const s = String(v ?? "");
@@ -54,10 +55,17 @@ function escapeCsvField(v: unknown): string {
   return s;
 }
 
+function escapeHtml(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /**
  * Force Excel / WPS on Windows to keep phone numbers as text.
  * Bare values like +959679748413 become scientific notation (9.5968E+11).
- * CSV formula `="value"` displays the literal string.
  */
 function excelTextField(v: unknown): string {
   const s = String(v ?? "").trim();
@@ -140,6 +148,10 @@ function resolveExportCity(order: OrderExportInput): string {
   return String(order.city || "").trim();
 }
 
+function resolveExportRegion(order: OrderExportInput): string {
+  return String(order.state || "").trim();
+}
+
 function buildExportLineItems(order: OrderExportInput) {
   const products = Array.isArray(order.products) ? order.products : [];
   if (products.length === 0) {
@@ -156,46 +168,162 @@ function resolveExportOrderTotal(order: OrderExportInput): number {
   return Math.round(Number(order.total) || 0);
 }
 
-/** Fulfillment-style CSV: one row per line item; order header fields only on the first row. */
+type PreparedOrderExport = {
+  orderNo: number;
+  orderDate: string;
+  orderCode: string;
+  customerName: string;
+  phone: string;
+  sellerId: string;
+  address: string;
+  city: string;
+  region: string;
+  vendorName: string;
+  status: string;
+  deliveryDate: string;
+  logistic: string;
+  orderTotal: number;
+  lineItems: Array<{ sku: string; quantity: number; price: number }>;
+};
+
+function prepareOrderExports(orders: OrderExportInput[]): PreparedOrderExport[] {
+  let orderNo = 0;
+  return orders.map((order) => {
+    orderNo += 1;
+    const lineItems = buildExportLineItems(order).map((item) => ({
+      sku: String(item.sku || ""),
+      quantity: Number(item.quantity) || 0,
+      price: Math.round(Number(item.price) || 0),
+    }));
+    return {
+      orderNo,
+      orderDate: formatExportOrderDate(order.date || order.createdAt || ""),
+      orderCode: formatOrderNumberDisplay(order.orderNumber),
+      customerName: String(order.customer || "").trim(),
+      phone: String(order.phone || "").trim(),
+      sellerId: resolveOrderSellerId(order as Record<string, unknown>),
+      address: resolveExportAddress(order),
+      city: resolveExportCity(order),
+      region: resolveExportRegion(order),
+      vendorName: String(order.vendor || "").trim(),
+      status: mapExportStatus(order),
+      deliveryDate: formatExportDeliveryDate(order),
+      logistic: resolveExportLogistic(order),
+      orderTotal: resolveExportOrderTotal(order),
+      lineItems,
+    };
+  });
+}
+
+function rowspanCell(content: string, span: number, extraStyle = ""): string {
+  const style = extraStyle ? ` style="${extraStyle}"` : "";
+  if (span <= 1) return `<td${style}>${content}</td>`;
+  return `<td rowspan="${span}"${style}>${content}</td>`;
+}
+
+/** Excel-compatible HTML with merged cells for multi-item order totals and header fields. */
+export function buildOrderExportSpreadsheetHtml(orders: OrderExportInput[]): string {
+  const prepared = prepareOrderExports(orders);
+  const headerRow = EXPORT_HEADERS.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+  const bodyRows: string[] = [];
+
+  for (const order of prepared) {
+    const span = order.lineItems.length;
+    order.lineItems.forEach((item, itemIndex) => {
+      const isFirstLine = itemIndex === 0;
+      const cells: string[] = [];
+
+      if (isFirstLine) {
+        cells.push(rowspanCell(escapeHtml(order.orderNo), span));
+        cells.push(rowspanCell(escapeHtml(order.orderDate), span));
+      }
+
+      // Mi Code repeats on every line item row.
+      cells.push(`<td>${escapeHtml(order.orderCode)}</td>`);
+
+      if (isFirstLine) {
+        cells.push(rowspanCell(escapeHtml(order.customerName), span));
+        cells.push(
+          rowspanCell(
+            escapeHtml(order.phone),
+            span,
+            "mso-number-format:'\\@';",
+          ),
+        );
+        cells.push(
+          rowspanCell(
+            escapeHtml(order.sellerId),
+            span,
+            "mso-number-format:'\\@';",
+          ),
+        );
+        cells.push(rowspanCell(escapeHtml(order.address), span));
+        cells.push(rowspanCell(escapeHtml(order.city), span));
+        cells.push(rowspanCell(escapeHtml(order.region), span));
+      }
+
+      cells.push(`<td>${escapeHtml(item.sku)}</td>`);
+      cells.push(`<td>${escapeHtml(item.quantity)}</td>`);
+      cells.push(`<td>${escapeHtml(item.price)}</td>`);
+
+      if (isFirstLine) {
+        cells.push(rowspanCell(escapeHtml(order.orderTotal), span));
+      }
+
+      cells.push(`<td>${escapeHtml(order.vendorName)}</td>`);
+      cells.push(`<td>${escapeHtml(order.status)}</td>`);
+
+      if (isFirstLine) {
+        cells.push(rowspanCell(escapeHtml(order.logistic), span));
+        cells.push(rowspanCell(escapeHtml(order.deliveryDate), span));
+      }
+
+      bodyRows.push(`<tr>${cells.join("")}</tr>`);
+    });
+  }
+
+  return [
+    "<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\">",
+    "<head><meta charset=\"utf-8\">",
+    "<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>",
+    "<x:Name>Orders</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>",
+    "</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->",
+    "<style>td,th{border:1px solid #ccc;padding:4px 6px;vertical-align:middle;}</style>",
+    "</head><body><table border=\"1\" cellspacing=\"0\" cellpadding=\"0\">",
+    `<thead><tr>${headerRow}</tr></thead>`,
+    `<tbody>${bodyRows.join("")}</tbody>`,
+    "</table></body></html>",
+  ].join("");
+}
+
+/** Plain CSV fallback — Mi Code on every row; No is order index (blank on continuation rows). */
 export function buildOrderExportCsv(orders: OrderExportInput[]): string {
   const lines: string[] = [EXPORT_HEADERS.join(",")];
-  let rowNo = 1;
+  const prepared = prepareOrderExports(orders);
 
-  for (const order of orders) {
-    const lineItems = buildExportLineItems(order);
-    const address = resolveExportAddress(order);
-    const city = resolveExportCity(order);
-    const vendorName = String(order.vendor || "").trim();
-    const orderDate = formatExportOrderDate(order.date || order.createdAt || "");
-    const deliveryDate = formatExportDeliveryDate(order);
-    const status = mapExportStatus(order);
-    const customerName = String(order.customer || "").trim();
-    const sellerId = resolveOrderSellerId(order as Record<string, unknown>);
-    const logistic = resolveExportLogistic(order);
-    const orderTotal = resolveExportOrderTotal(order);
-    const orderCode = formatOrderNumberDisplay(order.orderNumber);
-
-    lineItems.forEach((item, itemIndex) => {
+  for (const order of prepared) {
+    order.lineItems.forEach((item, itemIndex) => {
       const isFirstLine = itemIndex === 0;
       lines.push(
         [
-          escapeCsvField(rowNo++),
-          isFirstLine ? escapeCsvField(orderDate) : "",
-          isFirstLine ? escapeCsvField(orderCode) : "",
-          isFirstLine ? escapeCsvField(customerName) : "",
+          isFirstLine ? escapeCsvField(order.orderNo) : "",
+          isFirstLine ? escapeCsvField(order.orderDate) : "",
+          escapeCsvField(order.orderCode),
+          isFirstLine ? escapeCsvField(order.customerName) : "",
           isFirstLine ? excelTextField(order.phone) : "",
-          isFirstLine ? excelTextField(sellerId) : "",
-          isFirstLine ? escapeCsvField(address) : "",
-          isFirstLine ? escapeCsvField(city) : "",
+          isFirstLine ? excelTextField(order.sellerId) : "",
+          isFirstLine ? escapeCsvField(order.address) : "",
+          isFirstLine ? escapeCsvField(order.city) : "",
+          isFirstLine ? escapeCsvField(order.region) : "",
           escapeCsvField(item.sku),
           escapeCsvField(item.quantity),
-          escapeCsvField(Math.round(Number(item.price) || 0)),
-          isFirstLine ? escapeCsvField(orderTotal) : "",
-          escapeCsvField(vendorName),
-          escapeCsvField(status),
-          isFirstLine ? escapeCsvField(deliveryDate) : "",
-          isFirstLine ? escapeCsvField(logistic) : "",
-        ].join(",")
+          escapeCsvField(item.price),
+          isFirstLine ? escapeCsvField(order.orderTotal) : "",
+          escapeCsvField(order.vendorName),
+          escapeCsvField(order.status),
+          isFirstLine ? escapeCsvField(order.logistic) : "",
+          isFirstLine ? escapeCsvField(order.deliveryDate) : "",
+        ].join(","),
       );
     });
   }

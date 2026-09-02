@@ -41,6 +41,7 @@ const STAFF_KV_ROLES = new Set([
   "developer",
   "data-entry",
   "warehouse",
+  "customer-services",
   "vendor-admin",
 ]);
 
@@ -107,7 +108,7 @@ async function tryStaffLogin(
   password: string,
 ): Promise<{ user: Record<string, unknown> } | { error: string } | null> {
   const emailLower = String(email || "").trim().toLowerCase();
-  const staffUser = await findStaffUserByEmail(emailLower);
+  let staffUser = await findStaffUserByEmail(emailLower);
   if (!staffUser?.id) return null;
 
   const ok = await verifyPasswordPlain(password, staffUser.password);
@@ -117,6 +118,7 @@ async function tryStaffLogin(
 
   if (typeof staffUser.password === "string" && !isPasswordHashFormat(staffUser.password)) {
     await setStaffPassword(staffUser, password, Boolean(staffUser.tempPassword));
+    staffUser = (await findStaffUserByEmail(emailLower)) || staffUser;
   }
 
   if (isStaffAccountInactive(staffUser)) {
@@ -997,6 +999,7 @@ const CANONICAL_STAFF_ROLES = new Set([
   "administrator",
   "data-entry",
   "warehouse",
+  "customer-services",
 ]);
 
 const OWNER_ROLES = new Set(["super-admin", "store-owner"]);
@@ -1012,7 +1015,9 @@ function canAssignStaffRoleBackend(creatorRole: string, targetRole: string): boo
   if (!CANONICAL_STAFF_ROLES.has(t)) return false;
   const c = String(creatorRole || "").trim();
   if (OWNER_ROLES.has(c)) return true;
-  if (ADMIN_TIER_ROLES.has(c)) return t === "warehouse" || t === "data-entry";
+  if (ADMIN_TIER_ROLES.has(c)) {
+    return t === "warehouse" || t === "data-entry" || t === "customer-services";
+  }
   if (c === "vendor-admin") return true;
   return false;
 }
@@ -1133,7 +1138,8 @@ async function pruneOrphanedStaffProfiles(validAuthIds: Set<string>): Promise<nu
 // Generate random password
 function generatePassword(): string {
   const length = 12;
-  const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
+  // Alphanumeric only — easier to copy/share and avoids special-char paste issues at login.
+  const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let password = "";
   for (let i = 0; i < length; i++) {
     password += charset.charAt(Math.floor(Math.random() * charset.length));
@@ -1535,6 +1541,7 @@ authApp.post("/create-user", async (c) => {
       phone: phoneValue,
       role: targetRole,
       storeId: storeId || "",
+      status: "active",
       tempPassword: true,
       password: await hashPasswordPlain(tempPassword),
       createdBy,

@@ -6,6 +6,8 @@ import { Input } from "./ui/input";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
 import { cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { productsApi } from "../../utils/api";
 import { toast } from "sonner";
@@ -220,6 +222,8 @@ export function Inventory({
   onCommittedSearchQueryChange,
 }: InventoryProps) {
   const { t } = useLanguage();
+  const { user: sessionUser } = useAuth();
+  const inventoryWrite = canWriteSuperAdminSection(sessionUser?.role, "inventory");
   const initialInventoryPayload = useMemo(
     () =>
       moduleCache.peek<AdminProductsPagePayload>(
@@ -793,68 +797,72 @@ export function Inventory({
                       <span className="text-sm text-slate-600 font-mono">{item.sku}</span>
                     </td>
                     <td className="py-3 px-4">
-                      <div className="flex items-center justify-center gap-2">
-                        {/* Quick Decrease by 10 */}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-9 w-9 p-0 border-slate-300 hover:bg-slate-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => quickAdjust(item, -10)}
-                          title="Decrease by 10"
-                        >
-                          <Minus className="w-4 h-4 text-slate-600" />
-                        </Button>
-                        
-                        {/* Stock Input Box */}
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          aria-label={`Stock quantity for ${item.product}`}
-                          value={isEditing ? editValue : String(item.onHand)}
-                          onFocus={(e) => {
-                            startEditing(item);
-                            requestAnimationFrame(() => e.currentTarget.select());
-                          }}
-                          onChange={(e) => {
-                            const next = e.target.value.replace(/[^\d]/g, "");
-                            editValueRef.current = next;
-                            setEditValue(next);
-                            if (editingId !== item.id) {
-                              editingIdRef.current = item.id;
-                              setEditingId(item.id);
-                            }
-                          }}
-                          onBlur={() => {
-                            if (editingIdRef.current !== item.id) return;
-                            void saveQuantity(item);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              (e.currentTarget as HTMLInputElement).blur();
-                            }
-                            if (e.key === "Escape") {
-                              e.preventDefault();
-                              cancelEditing();
-                            }
-                          }}
-                          className="w-20 text-center font-semibold border-slate-300 bg-white"
-                        />
-                        
-                        {/* Quick Increase by 10 */}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-9 w-9 p-0 border-slate-300 hover:bg-slate-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => quickAdjust(item, 10)}
-                          title="Increase by 10"
-                        >
-                          <Plus className="w-4 h-4 text-slate-600" />
-                        </Button>
-                      </div>
+                      {inventoryWrite ? (
+                        <div className="flex items-center justify-center gap-2">
+                          {/* Quick Decrease by 10 */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-9 w-9 p-0 border-slate-300 hover:bg-slate-100"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => quickAdjust(item, -10)}
+                            title="Decrease by 10"
+                          >
+                            <Minus className="w-4 h-4 text-slate-600" />
+                          </Button>
+                          
+                          {/* Stock Input Box */}
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            aria-label={`Stock quantity for ${item.product}`}
+                            value={isEditing ? editValue : String(item.onHand)}
+                            onFocus={(e) => {
+                              startEditing(item);
+                              requestAnimationFrame(() => e.currentTarget.select());
+                            }}
+                            onChange={(e) => {
+                              const next = e.target.value.replace(/[^\d]/g, "");
+                              editValueRef.current = next;
+                              setEditValue(next);
+                              if (editingId !== item.id) {
+                                editingIdRef.current = item.id;
+                                setEditingId(item.id);
+                              }
+                            }}
+                            onBlur={() => {
+                              if (editingIdRef.current !== item.id) return;
+                              void saveQuantity(item);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                cancelEditing();
+                              }
+                            }}
+                            className="w-20 text-center font-semibold border-slate-300 bg-white"
+                          />
+                          
+                          {/* Quick Increase by 10 */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-9 w-9 p-0 border-slate-300 hover:bg-slate-100"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => quickAdjust(item, 10)}
+                            title="Increase by 10"
+                          >
+                            <Plus className="w-4 h-4 text-slate-600" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-sm font-semibold text-slate-900 tabular-nums">{item.onHand}</span>
+                      )}
                     </td>
                   </tr>
                 );

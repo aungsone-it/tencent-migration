@@ -16,6 +16,8 @@ import { getMyanmarRegionLabel, getMyanmarTownshipLabel } from "../utils/myanmar
 import { formatEstimatedDeliveryLabel } from "../utils/checkoutLogistics";
 import { logisticsApiErrorMessage, normalizePartnerStatus, partnerToUpdatePayload } from "../utils/logisticsPartnerForm";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
 
 type LogisticsPartnerProfileProps = {
   slug: string;
@@ -24,6 +26,8 @@ type LogisticsPartnerProfileProps = {
 export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) {
   const navigate = useNavigate();
   const { t, language } = useLanguage();
+  const { user: sessionUser } = useAuth();
+  const logisticsWrite = canWriteSuperAdminSection(sessionUser?.role, "logistics");
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingStatus, setTogglingStatus] = useState(false);
@@ -145,23 +149,27 @@ export function LogisticsPartnerProfile({ slug }: LogisticsPartnerProfileProps) 
           <p className="text-slate-500">{t("logistics.profile.subtitle")}</p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
-            <span className="text-sm text-slate-600">
-              {isActive ? t("logistics.status.active") : t("logistics.status.inactive")}
-            </span>
-            <Switch
-              checked={isActive}
-              disabled={togglingStatus}
-              onCheckedChange={() => void handleToggleStatus()}
-            />
-          </div>
-          <Button
-            className="bg-slate-900 hover:bg-slate-800"
-            onClick={() => navigate(logisticsPartnerEditPath(partner))}
-          >
-            <Edit className="w-4 h-4 mr-2" />
-            {t("logistics.edit")}
-          </Button>
+          {logisticsWrite && (
+            <>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                <span className="text-sm text-slate-600">
+                  {isActive ? t("logistics.status.active") : t("logistics.status.inactive")}
+                </span>
+                <Switch
+                  checked={isActive}
+                  disabled={togglingStatus}
+                  onCheckedChange={() => void handleToggleStatus()}
+                />
+              </div>
+              <Button
+                className="bg-slate-900 hover:bg-slate-800"
+                onClick={() => navigate(logisticsPartnerEditPath(partner))}
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                {t("logistics.edit")}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

@@ -8,6 +8,7 @@ export const STOREFRONT_BLOCKED_ROLES = new Set([
   "administrator",
   "data-entry",
   "warehouse",
+  "customer-services",
   "platform-admin",
   "product-manager",
   "developer",

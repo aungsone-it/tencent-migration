@@ -21,6 +21,8 @@ import { toast } from "sonner";
 import { categoriesApi } from "../../utils/api";
 import { CategoryForm } from "./CategoryForm";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { cacheManager } from "../utils/cacheManager";
 import {
@@ -56,6 +58,8 @@ interface Category {
 
 export function Categories() {
   const { t } = useLanguage();
+  const { user: sessionUser } = useAuth();
+  const categoriesWrite = canWriteSuperAdminSection(sessionUser?.role, "categories");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
@@ -541,7 +545,7 @@ export function Categories() {
   };
 
   // Show form page
-  if (showForm) {
+  if (showForm && categoriesWrite) {
     return <CategoryForm onBack={handleFormBack} onSave={handleFormSave} editingCategory={editingCategory} />;
   }
 
@@ -565,19 +569,21 @@ export function Categories() {
             />
           </div>
           <div className="flex items-center gap-2">
-            <Button 
-              className="bg-slate-900 hover:bg-slate-800 text-white"
-              onClick={handleAddCategory}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              {t('categories.addCategory')}
-            </Button>
+            {categoriesWrite && (
+              <Button 
+                className="bg-slate-900 hover:bg-slate-800 text-white"
+                onClick={handleAddCategory}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t('categories.addCategory')}
+              </Button>
+            )}
           </div>
         </div>
       </Card>
 
       {/* Bulk Actions Bar */}
-      {selectedCategories.length > 0 && (
+      {categoriesWrite && selectedCategories.length > 0 && (
         <Card className="mb-4 bg-slate-900 text-white border-slate-900">
           <div className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -623,10 +629,12 @@ export function Categories() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/50">
                 <th className="w-12 py-3 px-6">
-                  <Checkbox
-                    checked={selectedCategories.length === filteredCategories.length && filteredCategories.length > 0}
-                    onCheckedChange={toggleSelectAll}
-                  />
+                  {categoriesWrite && (
+                    <Checkbox
+                      checked={selectedCategories.length === filteredCategories.length && filteredCategories.length > 0}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  )}
                 </th>
                 <th className="text-left py-3 px-6 text-sm font-medium text-slate-600">
                   Category
@@ -687,10 +695,12 @@ export function Categories() {
                     }`}
                   >
                     <td className="py-4 px-6">
-                      <Checkbox
-                        checked={selectedCategories.includes(category.id)}
-                        onCheckedChange={() => toggleCategorySelection(category.id)}
-                      />
+                      {categoriesWrite && (
+                        <Checkbox
+                          checked={selectedCategories.includes(category.id)}
+                          onCheckedChange={() => toggleCategorySelection(category.id)}
+                        />
+                      )}
                     </td>
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
@@ -739,24 +749,28 @@ export function Categories() {
                       </Badge>
                     </td>
                     <td className="py-4 px-6">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-slate-600 hover:text-slate-900"
-                          onClick={() => handleEditCategory(category)}
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-slate-600 hover:text-red-600"
-                          onClick={() => handleDeleteCategory(category.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                      {categoriesWrite ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-slate-600 hover:text-slate-900"
+                            onClick={() => handleEditCategory(category)}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-slate-600 hover:text-red-600"
+                            onClick={() => handleDeleteCategory(category.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">View only</span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -769,14 +783,18 @@ export function Categories() {
           <div className="p-12 text-center">
             <Folder className="w-12 h-12 text-slate-300 mx-auto mb-4" />
             <h3 className="text-base font-medium text-slate-900 mb-2">No categories found</h3>
-            <p className="text-sm text-slate-500 mb-4">Get started by creating a new category</p>
-            <Button 
-              className="bg-slate-900 hover:bg-slate-800"
-              onClick={handleAddCategory}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add category
-            </Button>
+            <p className="text-sm text-slate-500 mb-4">
+              {categoriesWrite ? "Get started by creating a new category" : "No categories match your search"}
+            </p>
+            {categoriesWrite && (
+              <Button 
+                className="bg-slate-900 hover:bg-slate-800"
+                onClick={handleAddCategory}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add category
+              </Button>
+            )}
           </div>
         )}
       </Card>

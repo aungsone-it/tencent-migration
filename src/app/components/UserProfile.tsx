@@ -7,7 +7,7 @@ import { compressImage } from "../../utils/imageCompression";
 import { useAuth } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { translateActivityDetailPiece, translateStaffActivityAction } from "../utils/staffActivityLabels";
-import { canonicalizeStaffRoleForSave } from "../utils/superAdminRolePermissions";
+import { canonicalizeStaffRoleForSave, assignableRolesForCreator } from "../utils/superAdminRolePermissions";
 import type { VendorUser } from "../contexts/VendorAuthContext";
 import {
   ArrowLeft,
@@ -29,6 +29,7 @@ import {
   Edit,
   Store,
   Warehouse,
+  Headphones,
   Trash2,
   Pencil,
 } from "lucide-react";
@@ -727,6 +728,13 @@ export function UserProfile({
           color: "text-amber-600 bg-amber-100",
           description: t("role.warehouse.desc"),
         };
+      case "customer-services":
+        return {
+          label: t("role.customerServices"),
+          icon: Headphones,
+          color: "text-teal-600 bg-teal-100",
+          description: t("role.customerServices.desc"),
+        };
       default:
         return {
           label: t("common.unknown"),
@@ -1112,6 +1120,10 @@ export function UserProfile({
                         <span>{t("profile.permission.manageInventory")}</span>
                       </div>
                       <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <span>{t("profile.permission.accessMarketingTools")}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
                         <XCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
                         <span>{t("profile.permission.noOrderAccess")}</span>
                       </div>
@@ -1138,6 +1150,26 @@ export function UserProfile({
                       <div className="flex items-start gap-2">
                         <XCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
                         <span>{t("profile.permission.noProductsFinancesSettings")}</span>
+                      </div>
+                    </>
+                  )}
+                  {canonicalRole === "customer-services" && (
+                    <>
+                      <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <span>{t("profile.permission.manageOrdersChat")}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <span>{t("profile.permission.accessMarketingTools")}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <span>{t("profile.permission.viewProductsLogistics")}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <XCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                        <span>{t("profile.permission.noFinancesSettingsVendors")}</span>
                       </div>
                     </>
                   )}
@@ -1624,10 +1656,11 @@ export function UserProfile({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="store-owner">{t("role.storeOwner")}</SelectItem>
-                            <SelectItem value="administrator">{t("role.administrator")}</SelectItem>
-                            <SelectItem value="data-entry">{t("role.dataEntry")}</SelectItem>
-                            <SelectItem value="warehouse">{t("role.warehouse")}</SelectItem>
+                            {assignableRolesForCreator(sessionUser?.role).map((r) => (
+                              <SelectItem key={r} value={r}>
+                                {getRoleInfo(r).label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       ) : (

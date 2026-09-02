@@ -428,7 +428,7 @@ export function SideNav({
       <div className="p-4 border-t border-slate-200">
         <div className="text-center">
           <p className="text-[10px] text-slate-400 font-medium">
-            {t('footer.createdBy')} <span className="text-slate-600 font-semibold">AungSone</span>
+            {t('footer.createdBy')} <span className="text-slate-600 font-semibold">Aung Pyae Sone</span>
           </p>
           <p className="text-[10px] text-slate-400">{t('footer.role')}</p>
         </div>

@@ -17,6 +17,7 @@ import {
   FileEdit,
   Upload,
   Warehouse,
+  Headphones,
   User,
   Globe,
   Loader2,
@@ -26,6 +27,7 @@ import {
   Activity,
   CheckCircle,
   Clock,
+  Copy,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -95,6 +97,7 @@ import {
   subscribeStorefrontPolicyUpdates,
 } from "../utils/storefrontPolicyRealtime";
 import { compressImage } from "../../utils/imageCompression";
+import { copyToClipboard } from "../utils/clipboard";
 import { resolveCloudBaseMediaUrl } from "../../../utils/tencent/storageMediaUrl";
 
 interface SettingsTab {
@@ -393,6 +396,7 @@ export function Settings() {
   const avatarPreviewUrlRef = useRef<string | null>(null);
   const [tempPassword, setTempPassword] = useState("");
   const [showTempPassword, setShowTempPassword] = useState(false);
+  const [createdUserEmail, setCreatedUserEmail] = useState("");
   const [addUserFormErrors, setAddUserFormErrors] = useState<AddUserFormErrors>({});
   const initialStaffActivities = peekStaffActivitiesCache() || [];
   const [staffActivities, setStaffActivities] = useState<StaffActivityRow[]>(initialStaffActivities);
@@ -964,6 +968,13 @@ export function Settings() {
           color: "text-green-600 bg-green-100",
           description: t("role.dataEntry.desc"),
         };
+      case "customer-services":
+        return {
+          label: t("role.customerServices"),
+          icon: Headphones,
+          color: "text-teal-600 bg-teal-100",
+          description: t("role.customerServices.desc"),
+        };
       default:
         return {
           label: "Unknown",
@@ -985,7 +996,26 @@ export function Settings() {
     setAvatarPreview("");
     setAddUserFormErrors({});
     setError("");
+    setTempPassword("");
+    setCreatedUserEmail("");
+    setShowTempPassword(false);
     setShowUserDialog(true);
+  };
+
+  const handleCopyTempPassword = async () => {
+    if (!tempPassword) return;
+    const copied = await copyToClipboard(tempPassword);
+    if (copied) {
+      toast.success(t("settings.users.passwordCopied"));
+    } else {
+      toast.error(t("settings.users.couldNotCopy"));
+    }
+  };
+
+  const closeTempPasswordDialog = () => {
+    setShowTempPassword(false);
+    setTempPassword("");
+    setCreatedUserEmail("");
   };
 
   const validateAddUserForm = () => {
@@ -1111,22 +1141,16 @@ export function Settings() {
       };
       setUsers([...users, newUser]);
 
-      if (data.tempPassword != null && data.tempPassword !== "") {
-        toast.success(
-          <div className="space-y-2">
-            <p className="font-semibold flex items-center gap-2">
-              <span className="text-green-600">✓</span> {t('settings.users.created')}
-            </p>
-            <div className="mt-3 pt-3 border-t border-green-200">
-              <p className="text-sm font-medium">{t('settings.users.temporaryPassword')}</p>
-              <p className="font-mono bg-green-50 px-3 py-2 rounded mt-1 text-sm font-semibold">{data.tempPassword}</p>
-              <p className="text-xs mt-2 text-slate-600">{t('settings.users.sharePassword')}</p>
-            </div>
-          </div>,
-          { duration: 20000, className: 'bg-green-50 border-green-200' }
-        );
+      const createdTempPassword =
+        typeof data.tempPassword === "string" ? data.tempPassword.trim() : "";
+
+      if (createdTempPassword) {
+        setTempPassword(createdTempPassword);
+        setCreatedUserEmail(normalized.email);
+        setShowTempPassword(true);
+        toast.success(t("settings.users.created"));
       } else {
-        toast.success(t('settings.users.created'));
+        toast.success(t("settings.users.created"));
       }
 
       setShowUserDialog(false);
@@ -1838,6 +1862,8 @@ export function Settings() {
                         <li>{t('role.dataEntry.perm3')}</li>
                         <li>{t('role.dataEntry.perm4')}</li>
                         <li>{t('role.dataEntry.perm5')}</li>
+                        <li>{t('role.dataEntry.perm6')}</li>
+                        <li>{t('role.dataEntry.perm6')}</li>
                       </ul>
                     </div>
                   </div>
@@ -1854,6 +1880,28 @@ export function Settings() {
                       <p className="text-xs text-slate-600 leading-relaxed">
                         {t('role.warehouse.desc')}
                       </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Customer Services */}
+                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-teal-100 flex items-center justify-center flex-shrink-0">
+                      <Headphones className="w-5 h-5 text-teal-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-sm text-slate-900 mb-1">{t('role.customerServices')}</h4>
+                      <p className="text-xs text-slate-600 mb-2">
+                        {t('role.customerServices.permissions')}
+                      </p>
+                      <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
+                        <li>{t('role.customerServices.perm1')}</li>
+                        <li>{t('role.customerServices.perm2')}</li>
+                        <li>{t('role.customerServices.perm3')}</li>
+                        <li>{t('role.customerServices.perm4')}</li>
+                        <li>{t('role.customerServices.perm4')}</li>
+                      </ul>
                     </div>
                   </div>
                 </div>
@@ -2474,6 +2522,55 @@ export function Settings() {
           </div>
         </main>
       </div>
+
+      <Dialog
+        open={showTempPassword}
+        onOpenChange={(open) => {
+          if (!open) closeTempPasswordDialog();
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{t("settings.users.tempPasswordTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("settings.users.tempPasswordDesc")}
+              {createdUserEmail ? (
+                <span className="block mt-1 font-medium text-slate-700">{createdUserEmail}</span>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label className="text-sm font-medium text-slate-900">
+              {t("settings.users.temporaryPassword")}
+            </Label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-sm font-semibold bg-green-50 border border-green-200 rounded-lg px-3 py-2.5 break-all select-all">
+                {tempPassword}
+              </code>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                onClick={() => void handleCopyTempPassword()}
+                aria-label={t("settings.users.copyPassword")}
+              >
+                <Copy className="w-4 h-4" />
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">{t("settings.users.sharePassword")}</p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              className="bg-slate-900 hover:bg-slate-800 text-white"
+              onClick={closeTempPasswordDialog}
+            >
+              {t("settings.users.tempPasswordDone")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

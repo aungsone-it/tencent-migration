@@ -15,9 +15,11 @@ export type OrderExportInput = {
   shippingAddress?: string;
   vendor: string;
   deliveryService?: string;
+  deliveryPartnerName?: string;
   notes?: string;
   status: string;
   shippingStatus: string;
+  total?: number;
   timeline?: Array<{ status: string; date: string }>;
   products: Array<{
     name: string;
@@ -39,9 +41,11 @@ const EXPORT_HEADERS = [
   "SKU",
   "Order qty",
   "Price",
+  "Total",
   "Vendor",
   "Status",
   "delivery date",
+  "logistic",
 ];
 
 function escapeCsvField(v: unknown): string {
@@ -144,12 +148,21 @@ function buildExportLineItems(order: OrderExportInput) {
   return products;
 }
 
-/** Fulfillment-style CSV: one row per order line, matching ops spreadsheet layout. */
+function resolveExportLogistic(order: OrderExportInput): string {
+  return String(order.deliveryService || order.deliveryPartnerName || "").trim();
+}
+
+function resolveExportOrderTotal(order: OrderExportInput): number {
+  return Math.round(Number(order.total) || 0);
+}
+
+/** Fulfillment-style CSV: one row per line item; order header fields only on the first row. */
 export function buildOrderExportCsv(orders: OrderExportInput[]): string {
   const lines: string[] = [EXPORT_HEADERS.join(",")];
   let rowNo = 1;
 
   for (const order of orders) {
+    const lineItems = buildExportLineItems(order);
     const address = resolveExportAddress(order);
     const city = resolveExportCity(order);
     const vendorName = String(order.vendor || "").trim();
@@ -158,27 +171,33 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
     const status = mapExportStatus(order);
     const customerName = String(order.customer || "").trim();
     const sellerId = resolveOrderSellerId(order as Record<string, unknown>);
+    const logistic = resolveExportLogistic(order);
+    const orderTotal = resolveExportOrderTotal(order);
+    const orderCode = formatOrderNumberDisplay(order.orderNumber);
 
-    for (const item of buildExportLineItems(order)) {
+    lineItems.forEach((item, itemIndex) => {
+      const isFirstLine = itemIndex === 0;
       lines.push(
         [
           escapeCsvField(rowNo++),
-          escapeCsvField(orderDate),
-          escapeCsvField(formatOrderNumberDisplay(order.orderNumber)),
-          escapeCsvField(customerName),
-          excelTextField(order.phone),
-          excelTextField(sellerId),
-          escapeCsvField(address),
-          escapeCsvField(city),
+          isFirstLine ? escapeCsvField(orderDate) : "",
+          isFirstLine ? escapeCsvField(orderCode) : "",
+          isFirstLine ? escapeCsvField(customerName) : "",
+          isFirstLine ? excelTextField(order.phone) : "",
+          isFirstLine ? excelTextField(sellerId) : "",
+          isFirstLine ? escapeCsvField(address) : "",
+          isFirstLine ? escapeCsvField(city) : "",
           escapeCsvField(item.sku),
           escapeCsvField(item.quantity),
           escapeCsvField(Math.round(Number(item.price) || 0)),
+          isFirstLine ? escapeCsvField(orderTotal) : "",
           escapeCsvField(vendorName),
           escapeCsvField(status),
-          escapeCsvField(deliveryDate),
+          isFirstLine ? escapeCsvField(deliveryDate) : "",
+          isFirstLine ? escapeCsvField(logistic) : "",
         ].join(",")
       );
-    }
+    });
   }
 
   return `\uFEFF${lines.join("\n")}`;

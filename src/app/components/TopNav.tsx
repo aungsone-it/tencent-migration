@@ -340,7 +340,9 @@ export function TopNav({
           ? t("role.dataEntry")
           : currentUser.role === "warehouse"
             ? t("role.warehouse")
-            : currentUser.role;
+            : currentUser.role === "customer-services"
+              ? t("role.customerServices")
+              : currentUser.role;
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 fixed top-0 right-0 lg:left-64 left-0 z-10">

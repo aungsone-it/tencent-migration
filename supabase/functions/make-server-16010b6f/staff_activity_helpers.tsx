@@ -10,6 +10,7 @@ const STAFF_AUDIT_ROLES = new Set([
   "administrator",
   "data-entry",
   "warehouse",
+  "customer-services",
   "platform-admin",
   "product-manager",
   "developer",

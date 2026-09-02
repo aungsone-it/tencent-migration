@@ -21,6 +21,17 @@ export type SuperAdminNavPage =
   | "Settings"
   | "Search";
 
+/** Sections where create/edit/delete may be restricted independently of nav visibility. */
+export type SuperAdminWriteSection =
+  | "home"
+  | "product"
+  | "categories"
+  | "inventory"
+  | "orders"
+  | "chat"
+  | "logistics"
+  | "marketing";
+
 const ALL_PAGES: SuperAdminNavPage[] = [
   "Home",
   "Product",
@@ -44,12 +55,13 @@ const OWNER_ROLES = new Set([
   "store-owner",
 ]);
 
-/** Only four roles are assignable; setup may still store `super-admin` (treated as owner). */
+/** Only these roles are assignable; setup may still store `super-admin` (treated as owner). */
 export const CANONICAL_STAFF_ROLES = [
   "store-owner",
   "administrator",
   "data-entry",
   "warehouse",
+  "customer-services",
 ] as const;
 
 /** Day-to-day ops; no Finances; Settings includes General and Appearance (Users tab is store-owner only). */
@@ -84,12 +96,12 @@ export function effectiveStaffRole(role: string | undefined): string {
   return String(role || "").trim();
 }
 
-/** Map stored KV role → permission tier (four-role model + legacy). */
+/** Map stored KV role → permission tier (five-role model + legacy). */
 export function normalizeRoleForPermissions(role: string | undefined): string {
   const r = roleKey(role);
   if (OWNER_ROLES.has(r)) return "store-owner";
   if (ADMINISTRATOR_ROLES.has(r) || LEGACY_AS_ADMINISTRATOR.has(r)) return "administrator";
-  if (r === "data-entry" || r === "warehouse") return r;
+  if (r === "data-entry" || r === "warehouse" || r === "customer-services") return r;
   return r;
 }
 
@@ -110,6 +122,7 @@ export function getAllowedSuperAdminPages(role: string | undefined): Set<SuperAd
       "Product",
       "Categories",
       "Inventory",
+      "Promo Setting",
       "Chat",
       "Settings", // General + Appearance only; Users tab hidden in Settings.tsx
     ]);
@@ -117,6 +130,19 @@ export function getAllowedSuperAdminPages(role: string | undefined): Set<SuperAd
 
   if (tier === "warehouse") {
     return new Set<SuperAdminNavPage>(["Home", "Orders", "Inventory", "Logistics"]);
+  }
+
+  if (tier === "customer-services") {
+    return new Set<SuperAdminNavPage>([
+      "Home",
+      "Product",
+      "Categories",
+      "Inventory",
+      "Orders",
+      "Promo Setting",
+      "Chat",
+      "Logistics",
+    ]);
   }
 
   /** vendor-admin hitting super routes — treat as administrator */
@@ -145,6 +171,49 @@ export function getDefaultSuperAdminLandingPage(role: string | undefined): Super
   return first ?? "Home";
 }
 
+/** True when the role may mutate data in a section (create/edit/delete). */
+export function canWriteSuperAdminSection(
+  role: string | undefined,
+  section: SuperAdminWriteSection
+): boolean {
+  const tier = normalizeRoleForPermissions(role);
+
+  if (tier === "store-owner" || tier === "administrator") {
+    return true;
+  }
+
+  if (tier === "data-entry") {
+    return (
+      section === "home" ||
+      section === "product" ||
+      section === "categories" ||
+      section === "inventory" ||
+      section === "marketing" ||
+      section === "chat"
+    );
+  }
+
+  if (tier === "warehouse") {
+    return (
+      section === "home" ||
+      section === "orders" ||
+      section === "inventory" ||
+      section === "logistics"
+    );
+  }
+
+  if (tier === "customer-services") {
+    return (
+      section === "home" ||
+      section === "orders" ||
+      section === "marketing" ||
+      section === "chat"
+    );
+  }
+
+  return false;
+}
+
 export type AssignableStaffRole = (typeof CANONICAL_STAFF_ROLES)[number];
 
 const CANONICAL_SET = new Set<string>(CANONICAL_STAFF_ROLES);
@@ -171,7 +240,7 @@ export function canAssignStaffRole(
   }
 
   if (isAdministratorTierCreator(c)) {
-    return t === "warehouse" || t === "data-entry";
+    return t === "warehouse" || t === "data-entry" || t === "customer-services";
   }
 
   return false;
@@ -187,7 +256,7 @@ export function canManageStaffAccounts(role: string | undefined): boolean {
   return OWNER_ROLES.has(r) || isAdministratorTierCreator(r);
 }
 
-/** When saving a profile, persist one of the four canonical roles. */
+/** When saving a profile, persist one of the canonical staff roles. */
 export function canonicalizeStaffRoleForSave(role: string | undefined): string {
   const r = roleKey(role);
   if (r === "super-admin") return "store-owner";

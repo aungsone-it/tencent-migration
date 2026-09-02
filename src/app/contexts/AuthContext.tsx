@@ -45,6 +45,7 @@ export type UserRole =
   | 'administrator'
   | 'warehouse'
   | 'data-entry'
+  | 'customer-services'
   | 'vendor-admin'
   | 'collaborator';
 
@@ -98,6 +99,7 @@ const STAFF_AUDIT_ROLES = new Set([
   "administrator",
   "data-entry",
   "warehouse",
+  "customer-services",
   "platform-admin",
   "product-manager",
   "developer",
@@ -597,8 +599,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data.user) {
         console.log('✅ Login successful for:', data.user.email);
+        const loginTempPassword = Boolean(
+          (data.user as { tempPassword?: unknown }).tempPassword
+        );
         const profile = await loadUserProfile(data.user.id);
-        if (profile?.tempPassword) {
+        if (profile?.tempPassword || loginTempPassword) {
           return { success: true, needsPasswordChange: true };
         }
         return { success: true };
@@ -647,11 +652,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: error.message };
       }
 
-      // Update tempPassword flag
+      // /auth/update-password already clears tempPassword in KV; keep client state in sync.
       if (user) {
-        const response = await fetch(
-          `${API_BASE_URL}/auth/update-temp-password`,
-          {
+        try {
+          await fetch(`${API_BASE_URL}/auth/update-temp-password`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -659,12 +663,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
             },
             body: JSON.stringify({ userId: user.id }),
-          }
-        );
-
-        if (response.ok) {
-          setUser({ ...user, tempPassword: false });
+          });
+        } catch {
+          /* non-fatal — password was already updated */
         }
+        setUser({ ...user, tempPassword: false });
+        await loadUserProfile(user.id, true);
       }
 
       return { success: true };

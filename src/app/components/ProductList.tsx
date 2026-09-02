@@ -3,6 +3,7 @@ import {
   Plus,
   Edit,
   Trash2,
+  Eye,
   CalendarDays,
   MoreVertical,
   ChevronLeft,
@@ -71,6 +72,7 @@ import {
   findVendorRowForProductSelectionEntry,
 } from "../utils/vendorDisplay";
 import { useAuth } from "../contexts/AuthContext";
+import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
 
 interface ProductListProps {
   onProductsChanged?: () => void; // 🔥 NEW: Callback when products change
@@ -288,6 +290,7 @@ export function ProductList({
 }: ProductListProps) {
   const { t } = useLanguage();
   const { user: sessionUser } = useAuth();
+  const productWrite = canWriteSuperAdminSection(sessionUser?.role, "product");
   const initialAdminPageSize = useMemo(readPersistedAdminProductsPageSize, []);
   const initialProductsPayload = useMemo(
     () =>
@@ -1002,7 +1005,7 @@ export function ProductList({
         setSelectedProduct(
           normalizeProductForAdminDetailView(raw as Record<string, unknown>, vendorsMap) as Product
         );
-        setCurrentView("edit");
+        setCurrentView(productWrite ? "edit" : "view");
       } else {
         toast.error("Failed to load product details");
       }
@@ -1116,7 +1119,7 @@ export function ProductList({
   return (
     <>
       {/* Show Add Product Page */}
-      {currentView === "add" && (
+      {currentView === "add" && productWrite && (
         <ProductFormPage
           mode="add"
           onSave={handleSaveProduct}
@@ -1125,7 +1128,7 @@ export function ProductList({
       )}
 
       {/* Show Edit Product Page */}
-      {currentView === "edit" && selectedProduct && (
+      {currentView === "edit" && productWrite && selectedProduct && (
         <ProductFormPage
           mode="edit"
           initialData={selectedProduct}
@@ -1161,9 +1164,11 @@ export function ProductList({
               <p className="text-slate-500 mt-1">{t('products.subtitle')}</p>
             </div>
             <div className="flex items-center gap-2">
-              <Button className="bg-slate-900 hover:bg-slate-800" onClick={() => setCurrentView("add")}>
-                {t('products.addProduct')}
-              </Button>
+              {productWrite && (
+                <Button className="bg-slate-900 hover:bg-slate-800" onClick={() => setCurrentView("add")}>
+                  {t('products.addProduct')}
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1253,7 +1258,7 @@ export function ProductList({
                   </Card>
 
               {/* Bulk Actions Bar */}
-              {selectedProducts.length > 0 && (
+              {productWrite && selectedProducts.length > 0 && (
                 <Card className="p-4 bg-purple-50 border-purple-200">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-purple-900">
@@ -1281,10 +1286,12 @@ export function ProductList({
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50">
                         <th className="text-left py-3 px-4 w-12 align-middle">
-                          <Checkbox
-                            checked={selectedProducts.length === displayProducts.length && displayProducts.length > 0}
-                            onCheckedChange={toggleSelectAll}
-                          />
+                          {productWrite && (
+                            <Checkbox
+                              checked={selectedProducts.length === displayProducts.length && displayProducts.length > 0}
+                              onCheckedChange={toggleSelectAll}
+                            />
+                          )}
                         </th>
                         <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm align-middle">{t("products.product")}</th>
                         <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm align-middle">{t("products.status")}</th>
@@ -1317,10 +1324,12 @@ export function ProductList({
                       displayProducts.map((product) => (
                         <tr key={product.id} className="border-b border-slate-100 hover:bg-slate-50">
                           <td className="py-3 px-4">
-                            <Checkbox
-                              checked={selectedProducts.includes(product.id)}
-                              onCheckedChange={() => toggleSelectProduct(product.id)}
-                            />
+                            {productWrite && (
+                              <Checkbox
+                                checked={selectedProducts.includes(product.id)}
+                                onCheckedChange={() => toggleSelectProduct(product.id)}
+                              />
+                            )}
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
@@ -1448,13 +1457,19 @@ export function ProductList({
                                 <DropdownMenuItem onClick={() => { 
                                   handleEditProduct(product.id); 
                                 }}>
-                                  <Edit className="w-4 h-4 mr-2" />
-                                  Edit
+                                  {productWrite ? (
+                                    <Edit className="w-4 h-4 mr-2" />
+                                  ) : (
+                                    <Eye className="w-4 h-4 mr-2" />
+                                  )}
+                                  {productWrite ? "Edit" : "View"}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem className="text-red-600" onClick={() => { setDeleteDialogOpen(true); setProductToDelete(product.id); }}>
-                                  <Trash2 className="w-4 h-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
+                                {productWrite && (
+                                  <DropdownMenuItem className="text-red-600" onClick={() => { setDeleteDialogOpen(true); setProductToDelete(product.id); }}>
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </td>

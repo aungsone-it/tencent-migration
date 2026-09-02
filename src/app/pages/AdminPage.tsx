@@ -10,6 +10,7 @@ import {
   getAllowedSuperAdminPages,
   canAccessSuperAdminPage,
   getDefaultSuperAdminLandingPage,
+  canWriteSuperAdminSection,
 } from "../utils/superAdminRolePermissions";
 import { SideNav } from "../components/SideNav";
 import { TopNav } from "../components/TopNav";
@@ -823,6 +824,16 @@ export function AdminPage() {
       case ADMIN_PAGES.FINANCES:
         return <Finances />;
       case ADMIN_PAGES.LOGISTICS:
+        if (
+          authUser?.role &&
+          !canWriteSuperAdminSection(authUser.role, "logistics") &&
+          (logisticsRoute.kind === "create" || logisticsRoute.kind === "edit")
+        ) {
+          if (logisticsRoute.kind === "edit" && logisticsRoute.slug) {
+            return <LogisticsPartnerProfile slug={logisticsRoute.slug} />;
+          }
+          return <Logistics />;
+        }
         if (logisticsRoute.kind === "create") {
           return <LogisticsPartnerFormPage mode="create" />;
         }

@@ -44,10 +44,14 @@ import {
 } from "../utils/staffActivityLabels";
 import { getMyanmarRegionLabel } from "../utils/myanmarRegionLabels";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
 
 export function Logistics() {
   const navigate = useNavigate();
   const { t, language } = useLanguage();
+  const { user: sessionUser } = useAuth();
+  const logisticsWrite = canWriteSuperAdminSection(sessionUser?.role, "logistics");
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -146,13 +150,15 @@ export function Logistics() {
           <h1 className="text-3xl font-bold text-slate-900">{t("logistics.title")}</h1>
           <p className="text-slate-500 mt-1 max-w-[42rem]">{t("logistics.subtitle")}</p>
         </div>
-        <Button
-          className="bg-slate-900 hover:bg-slate-800 shrink-0"
-          onClick={() => navigate(LOGISTICS_PARTNER_CREATE_PATH)}
-        >
-          <Truck className="w-4 h-4 mr-2" />
-          {t("logistics.addPartner")}
-        </Button>
+        {logisticsWrite && (
+          <Button
+            className="bg-slate-900 hover:bg-slate-800 shrink-0"
+            onClick={() => navigate(LOGISTICS_PARTNER_CREATE_PATH)}
+          >
+            <Truck className="w-4 h-4 mr-2" />
+            {t("logistics.addPartner")}
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -267,7 +273,7 @@ export function Logistics() {
                     : t("logistics.empty.filteredHint")}
                 </p>
               </div>
-              {partners.length === 0 && (
+              {partners.length === 0 && logisticsWrite && (
                 <Button
                   className="bg-slate-900 hover:bg-slate-800"
                   onClick={() => navigate(LOGISTICS_PARTNER_CREATE_PATH)}
@@ -370,27 +376,31 @@ export function Logistics() {
                               <Eye className="w-4 h-4 mr-2" />
                               {t("logistics.viewProfile")}
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => navigate(logisticsPartnerEditPath(service))}
-                            >
-                              <Edit className="w-4 h-4 mr-2" />
-                              {t("logistics.edit")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => void handleToggleStatus(service)}
-                            >
-                              <Power className="w-4 h-4 mr-2" />
-                              {serviceActive
-                                ? t("logistics.status.inactive")
-                                : t("logistics.status.active")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => void handleDelete(service)}
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              {t("logistics.remove")}
-                            </DropdownMenuItem>
+                            {logisticsWrite && (
+                              <>
+                                <DropdownMenuItem
+                                  onClick={() => navigate(logisticsPartnerEditPath(service))}
+                                >
+                                  <Edit className="w-4 h-4 mr-2" />
+                                  {t("logistics.edit")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => void handleToggleStatus(service)}
+                                >
+                                  <Power className="w-4 h-4 mr-2" />
+                                  {serviceActive
+                                    ? t("logistics.status.inactive")
+                                    : t("logistics.status.active")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-red-600"
+                                  onClick={() => void handleDelete(service)}
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  {t("logistics.remove")}
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

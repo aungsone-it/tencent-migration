@@ -119,6 +119,18 @@ export function normalizePaymentBadgeStatus(raw: unknown): AdminPaymentBadgeStat
   return "unpaid";
 }
 
+const PAYMENT_STATUS_LABELS: Record<AdminPaymentBadgeStatus, string> = {
+  paid: "Paid",
+  unpaid: "Unpaid",
+  refunded: "Refunded",
+  "pending-refund": "Pending Refund",
+};
+
+/** Human-readable payment label for invoices and exports. */
+export function formatPaymentStatusLabel(raw: unknown): string {
+  return PAYMENT_STATUS_LABELS[normalizePaymentBadgeStatus(raw)];
+}
+
 export function normalizeShippingBadgeStatus(raw: unknown): AdminShippingBadgeStatus {
   const s = String(raw ?? "pending")
     .trim()

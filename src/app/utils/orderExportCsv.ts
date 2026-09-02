@@ -1,5 +1,9 @@
 import { formatOrderNumberDisplay } from "./orderNumber";
 import { resolveOrderSellerId } from "./orderShippingAddress";
+import {
+  derivePaymentStatusFromOrder,
+  formatPaymentStatusLabel,
+} from "./normalizeOrderBadgeStatus";
 
 export type OrderExportInput = {
   orderNumber: string;
@@ -19,6 +23,12 @@ export type OrderExportInput = {
   notes?: string;
   status: string;
   shippingStatus: string;
+  paymentStatus?: string;
+  paymentMethod?: unknown;
+  kpay?: {
+    status?: string;
+    refund?: { status?: string };
+  };
   total?: number;
   timeline?: Array<{ status: string; date: string }>;
   products: Array<{
@@ -45,8 +55,10 @@ const EXPORT_HEADERS = [
   "Total",
   "Vendor",
   "Status",
+  "Payment",
   "logistic",
   "delivery date",
+  "Order note",
 ] as const;
 
 function escapeCsvField(v: unknown): string {
@@ -117,6 +129,12 @@ function mapExportStatus(order: OrderExportInput): string {
   return status || "instock";
 }
 
+function mapExportPaymentStatus(order: OrderExportInput): string {
+  return formatPaymentStatusLabel(
+    order.paymentStatus ?? derivePaymentStatusFromOrder(order),
+  );
+}
+
 function uniqueAddressParts(...parts: string[]): string {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -168,6 +186,10 @@ function resolveExportOrderTotal(order: OrderExportInput): number {
   return Math.round(Number(order.total) || 0);
 }
 
+function resolveExportNotes(order: OrderExportInput): string {
+  return String(order.notes || "").trim();
+}
+
 type PreparedOrderExport = {
   orderNo: number;
   orderDate: string;
@@ -180,9 +202,11 @@ type PreparedOrderExport = {
   region: string;
   vendorName: string;
   status: string;
+  paymentStatus: string;
   deliveryDate: string;
   logistic: string;
   orderTotal: number;
+  notes: string;
   lineItems: Array<{ sku: string; quantity: number; price: number }>;
 };
 
@@ -207,9 +231,11 @@ function prepareOrderExports(orders: OrderExportInput[]): PreparedOrderExport[] 
       region: resolveExportRegion(order),
       vendorName: String(order.vendor || "").trim(),
       status: mapExportStatus(order),
+      paymentStatus: mapExportPaymentStatus(order),
       deliveryDate: formatExportDeliveryDate(order),
       logistic: resolveExportLogistic(order),
       orderTotal: resolveExportOrderTotal(order),
+      notes: resolveExportNotes(order),
       lineItems,
     };
   });
@@ -268,8 +294,10 @@ export function buildOrderExportSpreadsheetHtml(orders: OrderExportInput[]): str
         cells.push(rowspanCell(escapeHtml(order.orderTotal), span));
         cells.push(rowspanCell(escapeHtml(order.vendorName), span));
         cells.push(rowspanCell(escapeHtml(order.status), span));
+        cells.push(rowspanCell(escapeHtml(order.paymentStatus), span));
         cells.push(rowspanCell(escapeHtml(order.logistic), span));
         cells.push(rowspanCell(escapeHtml(order.deliveryDate), span));
+        cells.push(rowspanCell(escapeHtml(order.notes), span));
       }
 
       bodyRows.push(`<tr>${cells.join("")}</tr>`);
@@ -315,8 +343,10 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
           isFirstLine ? escapeCsvField(order.orderTotal) : "",
           isFirstLine ? escapeCsvField(order.vendorName) : "",
           isFirstLine ? escapeCsvField(order.status) : "",
+          isFirstLine ? escapeCsvField(order.paymentStatus) : "",
           isFirstLine ? escapeCsvField(order.logistic) : "",
           isFirstLine ? escapeCsvField(order.deliveryDate) : "",
+          isFirstLine ? escapeCsvField(order.notes) : "",
         ].join(","),
       );
     });

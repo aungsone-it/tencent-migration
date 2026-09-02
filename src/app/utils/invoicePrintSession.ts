@@ -128,6 +128,12 @@ export const INVOICE_PRINT_STYLES = `
     font-weight: 600 !important;
   }
 
+  body.invoice-print-active .payment-line {
+    font-size: max(3.1mm, 2.3vw) !important;
+    margin-top: 0.8vw !important;
+    font-weight: 600 !important;
+  }
+
   body.invoice-print-active .shipping-section {
     margin-bottom: 2.6vw !important;
     padding-bottom: 2vw !important;
@@ -459,6 +465,12 @@ export const INVOICE_PRINT_STYLES = `
 .delivery-company-label {
   font-weight: 600;
   color: #333;
+}
+
+.payment-line {
+  font-weight: 600;
+  color: #333;
+  margin-top: 4px;
 }
 
 .subtotal-row,

@@ -1,4 +1,5 @@
 import type { InvoiceSheetOrder } from "../components/InvoiceSheet";
+import { derivePaymentStatusFromOrder } from "./normalizeOrderBadgeStatus";
 
 /** Map admin order detail / list row → printable invoice payload. */
 export function toInvoiceSheetOrder(order: {
@@ -24,6 +25,10 @@ export function toInvoiceSheetOrder(order: {
   storeName?: string;
   deliveryService?: string;
   deliveryPartnerName?: string;
+  paymentStatus?: unknown;
+  status?: string;
+  paymentMethod?: unknown;
+  kpay?: InvoiceSheetOrder["kpay"];
 }): InvoiceSheetOrder {
   const vendorLabel = String(
     order.vendorName || order.vendor || order.storeName || ""
@@ -54,5 +59,9 @@ export function toInvoiceSheetOrder(order: {
     storeName: order.storeName,
     deliveryService: deliveryService || undefined,
     deliveryPartnerName: deliveryService || undefined,
+    paymentStatus: order.paymentStatus ?? derivePaymentStatusFromOrder(order),
+    status: order.status,
+    paymentMethod: order.paymentMethod,
+    kpay: order.kpay,
   };
 }

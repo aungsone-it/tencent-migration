@@ -63,3 +63,10 @@ export function formatOrderPaymentMethodLabel(key: OrderPaymentMethodKey): strin
 export function formatOrderPaymentMethodFromOrder(order: OrderPaymentLike): string {
   return formatOrderPaymentMethodLabel(deriveOrderPaymentMethodKey(order));
 }
+
+/** True when the order was paid via KBZPay QR or PWA (not COD / card / bank). */
+export function isKPayOrderLike(order: OrderPaymentLike | undefined | null): boolean {
+  if (!order) return false;
+  const key = deriveOrderPaymentMethodKey(order);
+  return key === "kbz-qr" || key === "kbz-pwa";
+}

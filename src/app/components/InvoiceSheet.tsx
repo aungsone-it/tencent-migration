@@ -1,6 +1,11 @@
 import { Barcode } from "./BarcodeLazy";
 import { BRANDING } from "../../constants";
 import { formatInvoiceBarcodeValue } from "../utils/orderNumber";
+import {
+  derivePaymentStatusFromOrder,
+  formatPaymentStatusLabel,
+} from "../utils/normalizeOrderBadgeStatus";
+import { isKPayOrderLike } from "../utils/orderPaymentMethod";
 
 export interface InvoiceLineItem {
   id?: string;
@@ -31,6 +36,13 @@ export interface InvoiceSheetOrder {
   storeName?: string;
   deliveryService?: string;
   deliveryPartnerName?: string;
+  paymentStatus?: unknown;
+  status?: string;
+  paymentMethod?: unknown;
+  kpay?: {
+    status?: string;
+    refund?: { status?: string };
+  };
 }
 
 function resolveInvoiceBrandName(order: InvoiceSheetOrder): string {
@@ -103,6 +115,10 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
       : order.customer?.fullName || order.customer?.name || "Guest Customer";
 
   const vendorName = resolveInvoiceBrandName(order);
+  const showPaymentStatus = isKPayOrderLike(order);
+  const paymentLabel = formatPaymentStatusLabel(
+    order.paymentStatus ?? derivePaymentStatusFromOrder(order),
+  );
 
   const barcodeProps = { width: 1, height: 35, fontSize: 14, margin: 6 };
 
@@ -140,6 +156,9 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
         )}
         {deliveryCompany && (
           <p className="delivery-line">Delivery: {deliveryCompany}</p>
+        )}
+        {showPaymentStatus && (
+          <p className="payment-line">Payment: {paymentLabel}</p>
         )}
       </div>
 

@@ -989,6 +989,8 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
                 items: order.items,
                 status: order.status,
                 paymentStatus: order.paymentStatus,
+                paymentMethod: order.paymentMethod,
+                kpay: order.kpay,
                 shippingStatus: order.shippingStatus
               };
               return <PrintInvoice key={order.id} orders={[printOrder]} />;

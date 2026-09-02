@@ -1889,7 +1889,6 @@ export function Checkout({
     if (!shippingInfo.address.trim()) missingFields.push(t("checkout.address"));
     if (!shippingInfo.state.trim()) missingFields.push(t("checkout.stateRegion"));
     if (!shippingInfo.city.trim()) missingFields.push(t("checkout.township"));
-    if (!shippingInfo.zipCode.trim()) missingFields.push(t("checkout.sellerId"));
     if (showDeliveryPartnerSelect && !selectedDeliveryPartnerId && !isFreeShippingCheckout) {
       missingFields.push(t("checkout.deliveryMethod"));
     }
@@ -2937,15 +2936,22 @@ export function Checkout({
                   </div>
                   <div>
                     <Label htmlFor="vs-seller-id" className={checkoutLabelClass}>
-                      {t("checkout.sellerId")} *
+                      {t("checkout.sellerId")}
                     </Label>
                     <Input
                       id="vs-seller-id"
                       type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       autoComplete="off"
                       placeholder={t("checkout.sellerIdPlaceholder")}
                       value={shippingInfo.zipCode}
-                      onChange={(e) => setShippingInfo({ ...shippingInfo, zipCode: e.target.value })}
+                      onChange={(e) =>
+                        setShippingInfo({
+                          ...shippingInfo,
+                          zipCode: e.target.value.replace(/\D/g, ""),
+                        })
+                      }
                       className={checkoutInputClass}
                     />
                   </div>

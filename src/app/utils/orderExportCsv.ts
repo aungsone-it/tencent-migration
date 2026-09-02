@@ -236,10 +236,8 @@ export function buildOrderExportSpreadsheetHtml(orders: OrderExportInput[]): str
       if (isFirstLine) {
         cells.push(rowspanCell(escapeHtml(order.orderNo), span));
         cells.push(rowspanCell(escapeHtml(order.orderDate), span));
+        cells.push(rowspanCell(escapeHtml(order.orderCode), span));
       }
-
-      // Mi Code repeats on every line item row.
-      cells.push(`<td>${escapeHtml(order.orderCode)}</td>`);
 
       if (isFirstLine) {
         cells.push(rowspanCell(escapeHtml(order.customerName), span));
@@ -268,12 +266,8 @@ export function buildOrderExportSpreadsheetHtml(orders: OrderExportInput[]): str
 
       if (isFirstLine) {
         cells.push(rowspanCell(escapeHtml(order.orderTotal), span));
-      }
-
-      cells.push(`<td>${escapeHtml(order.vendorName)}</td>`);
-      cells.push(`<td>${escapeHtml(order.status)}</td>`);
-
-      if (isFirstLine) {
+        cells.push(rowspanCell(escapeHtml(order.vendorName), span));
+        cells.push(rowspanCell(escapeHtml(order.status), span));
         cells.push(rowspanCell(escapeHtml(order.logistic), span));
         cells.push(rowspanCell(escapeHtml(order.deliveryDate), span));
       }
@@ -308,7 +302,7 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
         [
           isFirstLine ? escapeCsvField(order.orderNo) : "",
           isFirstLine ? escapeCsvField(order.orderDate) : "",
-          escapeCsvField(order.orderCode),
+          isFirstLine ? escapeCsvField(order.orderCode) : "",
           isFirstLine ? escapeCsvField(order.customerName) : "",
           isFirstLine ? excelTextField(order.phone) : "",
           isFirstLine ? excelTextField(order.sellerId) : "",
@@ -319,8 +313,8 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
           escapeCsvField(item.quantity),
           escapeCsvField(item.price),
           isFirstLine ? escapeCsvField(order.orderTotal) : "",
-          escapeCsvField(order.vendorName),
-          escapeCsvField(order.status),
+          isFirstLine ? escapeCsvField(order.vendorName) : "",
+          isFirstLine ? escapeCsvField(order.status) : "",
           isFirstLine ? escapeCsvField(order.logistic) : "",
           isFirstLine ? escapeCsvField(order.deliveryDate) : "",
         ].join(","),

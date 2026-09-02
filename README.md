@@ -16,13 +16,20 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 
 | Area | What shipped |
 |------|----------------|
-| **Chat emoji picker** | Native Unicode emoji in **FloatingChat** (storefront) and **admin Chat** — smile icon beside image upload; lazy `emoji-picker-react` chunk — see [docs/CHAT.md](docs/CHAT.md) |
-| **Guest phone modal** | After a guest’s **first successful chat message**, FloatingChat prompts for Myanmar phone (`+959…` / `09…`); saved locally and sent on later messages |
-| **Order numbers (NOS serial)** | Sequential **`NOS-00001`**, **`NOS-00002`**, … via KV counter + `GET /orders/next-number`; legacy `ORD-` / `MOS-` normalized on display |
-| **Seller ID at checkout** | Required field on vendor checkout (stored as `sellerId` / `zipCode`); shown on admin order detail, vendor orders, and print invoice |
-| **Free shipping checkout UI** | When cart qualifies, delivery dropdown shows **အခမဲ့ / FREE** (not quoted MMK fee); shipping duration hidden from partner labels |
+| **Admin roles** | **`customer-services`** role: Home, Orders, Chat (full write); Products/Categories/Inventory, Logistics (read-only); **Promo Setting** (full write). **`data-entry`** includes **Promo Setting**. Canonical roles in `superAdminRolePermissions.ts` + backend `CANONICAL_STAFF_ROLES` |
+| **Staff users** | New staff get **alphanumeric temp password** (12 chars) with copy dialog in Settings → Users; `GET /auth/users` runs **`reconcileAuthUsersList`** to merge orphan `user:email` profiles |
+| **Orders realtime** | **`OrderRealtimeBridge`** polls `GET /realtime/pulses` every **2s** (visible tab only); order bumps debounced **~350ms** → silent background refetch (no list blink) |
+| **Order export** | Super-admin **Export** downloads **`.xls`** (Excel HTML), not CSV — columns include **Region**, **Seller ID**, **logistic**, delivery date; multi-item orders use **merged cells** for order-level fields; phone as Excel text formula |
+| **Orders toolbar** | Bulk **Delete** hidden (`SHOW_ORDERS_DELETE_BUTTON=false`; handler retained) |
+| **Promo / cart** | **Promo Setting** reactivated in admin nav (`/admin/marketing`); cart drawer coupon with Burmese labels (**တွန်းလှည်း**, **ကျသင့်ငွေ**); shared **`couponEligibility.ts`** for checkout + cart |
+| **UI polish** | SideNav footer: **Created by Aung Pyae Sone** / Software Architect; **Back-to-top** FAB — white/black hover theme |
+| **Backend** | Order create **awaits** `syncOrderReadModel` + `bumpOrderPulse`; coupon validate returns generic errors only (no “available codes” leak) |
+| **Chat emoji picker** | Native Unicode emoji in **FloatingChat** (storefront) and **admin Chat** — see [docs/CHAT.md](docs/CHAT.md) |
+| **Guest phone modal** | After a guest’s **first successful chat message**, FloatingChat prompts for Myanmar phone (`+959…` / `09…`) |
+| **Order numbers (NOS serial)** | Sequential **`NOS-00001`**, **`NOS-00002`**, … via KV counter + `GET /orders/next-number` |
+| **Seller ID at checkout** | Required field on vendor checkout; shown on admin order detail, vendor orders, print invoice, and order export |
+| **Free shipping checkout UI** | When cart qualifies, delivery dropdown shows **အခမဲ့ / FREE** (not quoted MMK fee) |
 | **Local API dev** | `npm run dev:api` (function on `:8787`) + `npm run dev:local` (Vite proxies to local API) — see [Local Development](#local-development) |
-| **Orders toolbar** | Bulk **Delete** button hidden in super-admin Orders (handler retained) |
 
 ## Recent Updates (July 2026)
 
@@ -122,15 +129,17 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 
 ### Super Admin
 
-- Dashboard, products, categories, inventory, orders, customers, chat, marketing, finances, settings
-- **Orders:** paginated SQL read model; serial order numbers **`NOS-00001`** format; **Seller ID** on order detail and invoice; KBZPay **orphaned draft recovery** (amber panel when paid drafts lack orders); status changes and recover use optimistic UI (no full-list blink); bulk Delete hidden in toolbar
+- Dashboard, products, categories, inventory, orders, customers, chat, **Promo Setting**, finances, settings
+- **Staff roles:** store-owner, administrator, data-entry, warehouse, **customer-services** — sidebar and write access via `superAdminRolePermissions.ts` (customer-services: orders/chat/promo write; catalog/logistics read-only)
+- **Orders:** paginated SQL read model; serial **`NOS-00001`** format; **Seller ID** on detail/invoice/export; KBZPay **orphaned draft recovery**; realtime list refresh via **2s pulse poll** + debounced silent refetch; **Export** → `.xls` with merged multi-SKU rows; bulk Delete hidden in toolbar
+- **Settings → Users** (store owner): staff creation with **temp password copy dialog**; user list reconciled on `GET /auth/users`
 - **Chat:** customer inbox at `/admin/chat` — emoji + image in composer; guest phone and display codes in conversation list — see [docs/CHAT.md](docs/CHAT.md)
 - Vendor management (**Review applications** only), promotions, collaborator flows
 - **Vendor free shipping:** grant per-vendor feature access; view free-shipping product counts on vendor profile
 - **Settings → General** — platform name, logo, support contact (formerly split with Appearance; Appearance tab is hidden)
 - **Settings → Users** — staff accounts (owner-only)
 - **Settings → Activities** — global audit timeline for all admin actions (visible to everyone who can open Settings)
-- SQL-backed admin lists where read-model migrations are applied; Realtime via pulse tables
+- SQL-backed admin lists where read-model migrations are applied; order list refresh via **2s pulse poll** + debounced silent refetch
 
 ### Vendor
 
@@ -372,8 +381,8 @@ After deploy, re-run [PageSpeed Insights](https://pagespeed.web.dev/) on mobile 
 | Metric | Pro included | Notes for this app |
 |--------|--------------|-------------------|
 | Auth MAU | 100,000 | One login account = 1 MAU/month; **guests do not count** |
-| Realtime connections | 500 peak | Pulse-based bridge uses fewer messages than global KV fanout; checkout still uses filtered `kpay_txn` channels |
-| Realtime messages | 5M/month | Domain pulses debounced (~400ms); legacy KV fallback only if pulse channel fails |
+| Realtime connections | 500 peak | Checkout uses filtered `kpay_txn` channels; admin order sync uses **HTTP pulse poll** (2s), not WebSocket |
+| Realtime messages | 5M/month | Admin tabs poll `/realtime/pulses` every 2s; order bumps debounced (~350ms) before refetch |
 | Edge Function calls | 2M/month | Client cache + SQL read paths reduce repeat scans |
 
 See [docs/ARCHITECTURE_AND_BACKEND.md](docs/ARCHITECTURE_AND_BACKEND.md) §9 for tier guidance (~1k / 10k / 100k / 1M users).

@@ -102,6 +102,7 @@ On the store you can browse products, search, switch **English / Burmese**, cont
 - **Signed in** cart syncs across devices · **登录后**购物车可跨设备同步。
 - Heart icon saves items to **Saved / Wishlist** · 心形图标加入**收藏/心愿单**。
 - **Wishlist requires sign-in** — guests are prompted to log in · **收藏需登录** — 访客会提示登录
+- **Coupon codes:** open the cart drawer (**တွန်းလှည်း**) and enter a promo code; subtotal shows as **ကျသင့်ငွေ** in Burmese UI · **优惠码：** 打开购物车抽屉输入优惠码；缅甸语界面中购物车标题为 **တွန်းလှည်း**，小计为 **ကျသင့်ငွေ**
 
 ### 2.4 Account and profile / 账户与个人资料
 
@@ -299,11 +300,11 @@ Open `https://www.nexa-mm.com/admin` and sign in with your staff account. Left m
 
 打开 `https://www.nexa-mm.com/admin` 并使用员工账户登录。左侧菜单（因角色而异）：
 
-**Home**, **Product** (Products, Categories, Inventory), **Orders**, **Vendor**, **Chat**, **Customers**, **Subscriptions** (Plans, Subscribers), **Finances**, **Logistics**, **Settings**.
+**Home**, **Product** (Products, Categories, Inventory), **Orders**, **Vendor**, **Chat**, **Customers**, **Promo Setting**, **Subscriptions** (Plans, Subscribers), **Finances**, **Logistics**, **Settings**.
 
-**首页**、**商品**（商品/分类/库存）、**订单**、**商家**、**聊天**、**顾客**、**订阅**（套餐/订阅用户）、**财务**、**物流**、**设置**。
+**首页**、**商品**（商品/分类/库存）、**订单**、**商家**、**聊天**、**顾客**、**促销设置**、**订阅**（套餐/订阅用户）、**财务**、**物流**、**设置**。
 
-> **Note:** **Marketing** is not in the current menu (legacy route redirects to Home). · **营销**不在当前菜单中（旧路由重定向至首页）。
+> **Note:** Legacy **Marketing** URLs redirect to **Promo Setting**. · **说明：** 旧 **Marketing** 路由重定向至 **促销设置**。
 
 ### 4.2 Admin user roles / 管理员角色
 
@@ -311,12 +312,13 @@ Open `https://www.nexa-mm.com/admin` and sign in with your staff account. Left m
 |-----------|-------------|
 | **Store Owner** 店主 | Full access — all menus including **Finances** and **Settings → Users** · 全部权限 — 含财务与用户管理 |
 | **Administrator** 管理员 | All menus **except Finances**; **Settings** (General + Activities, no Users tab) · 除财务外全部菜单；**设置**（常规+活动，无用户管理） |
-| **Data Entry** 数据录入 | Home, Product, Categories, Inventory, **Chat**, Settings (General, no Users) · 首页、商品/分类/库存、**聊天**、设置（常规，无用户管理） |
+| **Data Entry** 数据录入 | Home, Product, Categories, Inventory, **Promo Setting**, **Chat**, Settings (General, no Users) · 首页、商品/分类/库存、**促销设置**、**聊天**、设置（常规，无用户管理） |
 | **Warehouse** 仓库 | Home, Orders, Inventory, Logistics only · 首页、订单、库存、物流 |
+| **Customer Services** 客服 | Home, Orders, Chat (full); Product/Categories/Inventory/Logistics (view only); **Promo Setting** (full) · 首页、订单、聊天（完整）；商品/分类/库存/物流（只读）；**促销设置**（完整） |
 
-Only **Store Owner** can add staff under **Settings → Users**.
+Only **Store Owner** can add staff under **Settings → Users**. New staff receive a **temporary password** — copy it from the dialog and share securely; password is alphanumeric for easy entry.
 
-仅**店主**可在 **Settings → Users** 中添加员工。
+仅**店主**可在 **Settings → Users** 中添加员工。新员工会获得**临时密码** — 从对话框复制并安全分享；密码为字母数字组合便于输入。
 
 ### 4.3 Vendors / 商家管理
 
@@ -354,8 +356,15 @@ When creating or editing a vendor:
 
 1. Review **Orders** (pending badge) · 查看**订单**（待处理角标）
 2. Recover **KBZPay drafts** if needed · 必要时恢复 **KBZPay 草稿订单**
-3. **Vendor → Review applications** · **商家 → 审核入驻申请**
-4. **Settings → Activities** audit log · **设置 → 活动** 审计日志
+3. Manage **Promo Setting** campaigns/coupons when applicable · 按需管理 **促销设置** 活动/优惠码
+4. **Vendor → Review applications** · **商家 → 审核入驻申请**
+5. **Settings → Activities** audit log · **设置 → 活动** 审计日志
+
+### 4.8 Orders export / 订单导出
+
+Super-admin **Orders** toolbar **Export** downloads **`.xls`** (opens in Excel/WPS) — not CSV. Includes **Seller ID**, **Region**, logistics partner, delivery date; multi-item orders show one row per SKU with merged order-level cells.
+
+超级管理员 **Orders** 工具栏 **Export** 下载 **`.xls`**（可用 Excel/WPS 打开）— 非 CSV。包含 **Seller ID**、**Region**、物流伙伴、送达日期；多商品订单按 SKU 分行，订单级字段合并单元格。
 
 ### 4.7 Settings / 设置
 

@@ -125,10 +125,10 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 
 ## 9) Realtime (summary)
 
-- **Pulse bridge:** `OrderRealtimeBridge` (mounted only on super-admin routes via `AdminRealtimeBridge`) listens to `app_order_pulse`, `app_vendor_application_pulse`, and `app_kv_domain_pulse` — debounced domain invalidation instead of global KV fanout.
-- **KV fallback:** If domain pulse channel fails, temporary subscription on `kv_store_16010b6f` maps keys → domains client-side.
+- **Pulse bridge:** `OrderRealtimeBridge` (super-admin routes only via `AdminRealtimeBridge`) **polls** `GET /realtime/pulses` every **2s** while the tab is visible. Counter bumps on `app_order_pulse`, `app_vendor_application_pulse`, and `app_kv_domain_pulse` trigger debounced (~350ms) silent admin refetch — not WebSocket subscriptions.
 - **Vendor storefront:** `VendorStoreView` + `storefrontPolicyRealtime.ts` for catalog/policy updates; `public/vendor-storefront-head.js` sets tab title before React.
 - **Checkout:** filtered `kpay-txn-{orderId}` channel + polling fallback.
+- **UI:** SideNav footer credits **Aung Pyae Sone** / Software Architect; `BackToTop.tsx` white/black hover theme.
 
 Details and scale limits: [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) §6–§9.
 
@@ -145,7 +145,9 @@ Details and scale limits: [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKE
 - **Admin Chat:** `Chat.tsx` at `/admin/chat` — same emoji + image composer pattern as FloatingChat.
 - **Scroll restore:** `VendorStoreView` saves grid scroll position (window + inner container) when opening a product; restores on browser Back or header back via `vendorBrowseScroll.ts`, `persistedSessionCache.ts`, and `ScrollController.tsx` (skips scroll-to-top between list ↔ product paths).
 - **Add to Home:** `VendorInstallFab` (portal to `document.body`) mounted from `VendorStoreView` above the chat FAB stack; injects per-vendor web manifest + registers `public/sw.js` for Chrome install eligibility. See [VENDOR_ADD_TO_HOME.md](./VENDOR_ADD_TO_HOME.md).
-- **Settings (`Settings.tsx`):** Activities tab with global feed; Appearance tab filtered out; `scrollbar-thin` on nav and main pane.
+- **Settings (`Settings.tsx`):** Activities tab with global feed; Appearance tab filtered out; **Users** tab (store owner) with temp-password copy dialog on staff create; `scrollbar-thin` on nav and main pane.
+- **SideNav:** **Promo Setting** in admin menu; footer credit **Created by Aung Pyae Sone** / Software Architect.
+- **Orders export:** `Orders.tsx` → `.xls` download via `orderExportCsv.ts` (Excel HTML, merged multi-SKU rows).
 - **Vendor admin list (`Vendor.tsx`):** no Add Vendor button; horizontal table scroll uses `scrollbar-thin-x` (4px, inset track).
 - **Landing vendors:** `fetchLandingVendorsCached()` → `GET /vendors`; active vendors sorted client-side by `totalRevenue` descending.
 

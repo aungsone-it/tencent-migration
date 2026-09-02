@@ -12,10 +12,10 @@ This version is intentionally short and non-technical.
 
 1. Open `https://www.nexa-mm.com/admin`.
 2. Sign in with your staff account.
-3. Use the left menu for **Home**, **Product** (Products, Categories, Inventory), **Orders**, **Vendor**, **Chat**, **Customers**, **Subscriptions** (Plans, Subscribers), **Finances**, **Logistics**, and **Settings**.
+3. Use the left menu for **Home**, **Product** (Products, Categories, Inventory), **Orders**, **Vendor**, **Promo Setting**, **Chat**, **Customers**, **Subscriptions** (Plans, Subscribers), **Finances**, **Logistics**, and **Settings**.
 4. If you cannot see a section, your role likely does not have permission — see **Admin user roles** below.
 
-> **Marketing** is not in the current menu (legacy route redirects to Home).
+> Legacy **Marketing** URLs redirect to **Promo Setting**.
 
 ### Settings
 
@@ -27,16 +27,17 @@ There is no separate **Appearance** tab; branding is under **General**.
 
 ### Admin user roles
 
-Platform staff at `https://www.nexa-mm.com/admin` have one of **four roles**. The role controls which menu items appear.
+Platform staff at `https://www.nexa-mm.com/admin` have one of **five roles**. The role controls which menu items appear.
 
 | Role | Access summary |
 |------|----------------|
 | **Store Owner** | Full access — all menus including **Finances** and **Settings → Users**. Can manage all staff roles. |
 | **Administrator** | All menus **except Finances**; **Settings** (General + Activities, no Users tab). |
-| **Data Entry** | Home, Product, Categories, Inventory, **Chat**, Settings (General, no Users). |
-| **Warehouse** | Home, Orders, Inventory, Logistics only. No products, vendors, finances, or settings. |
+| **Data Entry** | Home, Product, Categories, Inventory, **Promo Setting**, **Chat**, Settings (General, no Users). |
+| **Warehouse** | Home, Orders, Inventory, Logistics only. |
+| **Customer Services** | Home, Orders, Chat (full); Product/Categories/Inventory/Logistics (view only); **Promo Setting** (full). |
 
-**Who can add staff:** only **Store Owner** (Settings → Users). To fix a missing menu item, ask the Store Owner to check your role there.
+**Who can add staff:** only **Store Owner** (Settings → Users). New staff get a **temporary alphanumeric password** — copy from the dialog. To fix a missing menu item, ask the Store Owner to check your role there.
 
 ### Vendors
 

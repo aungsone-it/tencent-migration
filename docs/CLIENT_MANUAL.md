@@ -336,7 +336,13 @@ Staff changes status → optimistic patch in cache + UI
 PUT /orders/:id (keepalive) → server writes KV + syncs SQL
         │
         ▼
-OrderRealtimeBridge hears app_order_pulse → debounce 400ms → refetch
+OrderRealtimeBridge polls GET /realtime/pulses every 2s (visible tab)
+        │
+        ▼
+Counter bump on app_order_pulse → debounce ~350ms
+        │
+        ▼
+notifyAdminOrdersUpdated() → silent background refetch (no list blink)
 ```
 
 Optimistic UI is allowed because:
@@ -345,41 +351,44 @@ Optimistic UI is allowed because:
 - Failed PUT rolls back via `orderInventoryCacheSync.ts`
 - Server PUT is always the final word
 
+**Export:** Toolbar downloads **`.xls`** (Excel HTML) via `buildOrderExportSpreadsheetHtml` — merged cells for multi-SKU orders; Seller ID, Region, logistic columns; phone as Excel text formula.
+
 Files: `Orders.tsx`, `OrderRealtimeBridge.tsx`, `adminOrdersRealtime.ts`, `orderInventoryCacheSync.ts`
 
 ---
 
-## Slide 12 — Realtime: Pulses, Not Payloads
+## Slide 12 — Realtime: Pulse Poll, Not Payloads
 
-The client does **not** receive full entity updates over Realtime.
+TencentDB/CloudBase does **not** expose Supabase-style `postgres_changes` WebSockets. Admin tabs poll small counters instead.
 
 ```
 KV row changes on server
         │
         ▼
-Postgres pulse table bumps (app_order_pulse, app_kv_domain_pulse, …)
+Postgres pulse tables bump (app_order_pulse, app_kv_domain_pulse, …)
         │
         ▼
-OrderRealtimeBridge (mounted on super-admin routes via AdminRealtimeBridge)
+OrderRealtimeBridge (super-admin routes only)
         │
         ▼
-Debounce (~400ms) → notifyAdminOrdersUpdated()
+GET /realtime/pulses every 2s (visible tab) → compare bump counters
         │
         ▼
-Affected caches invalidate or refetch
+Debounce (~350ms for orders) → notifyAdminOrdersUpdated()
+        │
+        ▼
+Silent background refetch (createAdminOrdersRealtimeRefetchScheduler)
 ```
 
-Pulse tables:
+Pulse tables (read by `/realtime/pulses`):
 
 | Table | Triggers |
 |-------|----------|
-| `app_order_pulse` | Order create/update/delete |
-| `app_kv_domain_pulse` | Products, settings, policies |
+| `app_order_pulse` | Order create/update/delete (`syncOrderReadModel` + `bumpOrderPulse` on POST/PUT) |
+| `app_kv_domain_pulse` | Products, settings, policies, marketing/promo |
 | `app_vendor_application_pulse` | Vendor application queue |
 
-Legacy fallback: full KV subscription only if pulse channel fails.
-
-**Client rule:** Realtime tells you *something changed* — go ask the server.
+**Client rule:** Realtime tells you *something changed* — go ask the server. No entity payloads over the wire.
 
 ---
 
@@ -445,6 +454,8 @@ Client displays via resolveCloudBaseMediaUrl().
 | **Vendor admin** | Vendor KV auth | VendorAuthContext |
 | **Super-admin staff** | CloudBase Auth + role | AuthContext + `migoo-staff-actor-id` |
 
+Canonical assignable roles: `store-owner`, `administrator`, `data-entry`, `warehouse`, `customer-services`. New staff receive alphanumeric temp passwords (Settings → Users copy dialog). `GET /auth/users` reconciles orphan profiles.
+
 Guest browsers **do not** count toward Auth MAU limits.
 
 **Password reset:** `/reset-password` → `POST /auth/send-email-otp` → email OTP (Tencent SES template) → `POST /auth/verify-otp-and-reset`. Vendor admin: `?returnTo=/admin&account=vendor`. Verify backend: `GET /auth/email-health`.
@@ -508,7 +519,12 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 | `src/app/components/Chat.tsx` | Admin chat inbox |
 | `src/app/components/EmojiPickerLazy.tsx` | Lazy emoji picker (chat composers) |
 | `src/app/utils/orderNumber.ts` | NOS serial order numbers (client) |
-| `src/app/components/Orders.tsx` | Admin orders + optimistic status |
+| `src/app/components/Orders.tsx` | Admin orders + optimistic status + `.xls` export |
+| `src/app/utils/orderExportCsv.ts` | Excel HTML export (`buildOrderExportSpreadsheetHtml`) — merged cells, Seller ID, Region |
+| `src/app/utils/superAdminRolePermissions.ts` | Staff role → nav pages + write sections |
+| `src/app/utils/couponEligibility.ts` | Shared coupon rules (checkout + cart drawer) |
+| `src/app/components/CartDrawer.tsx` | Cart + coupon apply (Burmese labels in `my.ts`) |
+| `src/app/components/BackToTop.tsx` | White/black themed scroll-to-top FAB |
 | `src/app/utils/kpayClient.ts` | KPay API wrapper → server |
 | `utils/tencent/cloudbase.ts` | Env config resolution |
 | `src/constants/index.ts` | Timeouts, polling guardrails |
@@ -560,6 +576,7 @@ Prefer event-driven invalidation. Polling is a **last resort**.
 
 | Surface | Interval | Why |
 |---------|----------|-----|
+| Admin order pulse | 2s (+ focus) | `OrderRealtimeBridge` polls `/realtime/pulses`; debounced silent refetch |
 | KPay checkout | ~1.5s | WebView return + webhook latency |
 | Settings → Activities | 30s | Incremental staff audit feed while tab open |
 | Deploy version | 2 min + focus | One hard reload after EdgeOne deploy |
@@ -665,4 +682,4 @@ When in doubt: put logic on the server, not in the browser.
 
 ---
 
-*Last updated: July 2026 · NEXA Platform / Tencent migration*
+*Last updated: September 2026 · NEXA Platform / Tencent migration*

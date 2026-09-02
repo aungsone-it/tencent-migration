@@ -42,18 +42,19 @@ Customers shop on **one vendor at a time**:
 - Vendors (**Review applications** — new sellers are approved here; there is no “Add vendor” button)
 - Customers
 - Chat
+- **Promo Setting** (campaigns and discount codes — replaces legacy Marketing nav)
 - **Subscriptions** (Plans, Subscribers)
 - Finances and settings (role dependent)
 - Logistics
 
-> **Marketing** is not in the current sidebar (legacy `/admin/marketing` redirects to Home).
+> Legacy `/admin/marketing` URLs still route to **Promo Setting**.
 
 ### Settings tabs
 
 | Tab | Who sees it | Purpose |
 |-----|-------------|---------|
 | **General** | All roles with Settings access | Platform name, logo, support phone/email, banners |
-| **Users** | Store owner only | Create/edit/delete staff accounts |
+| **Users** | **Store owner** only | Create/edit/delete staff accounts — temp password copy dialog on create |
 | **Activities** | All roles with Settings access | Global audit timeline — every admin action across the platform |
 
 The **Appearance** tab is hidden in the UI; branding fields live under **General**.
@@ -86,6 +87,22 @@ When creating or editing a vendor (**Vendor form** / approved application):
 
 Commission is deducted from vendor net earnings before KBZPay withdrawal. Full rules and withdrawal setup: [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
 
+### Staff roles (super admin)
+
+Canonical assignable roles (frontend `superAdminRolePermissions.ts`, backend `CANONICAL_STAFF_ROLES`):
+
+| Role | Nav access | Write notes |
+|------|------------|-------------|
+| **Store owner** | All pages including Finances and Settings → Users | Full write everywhere |
+| **Administrator** | All except Finances; Settings (General + Activities, no Users tab) | Full write except Finances |
+| **Data entry** | Home, Product, Categories, Inventory, **Promo Setting**, Chat, Settings (General) | Catalog + promo write; no Orders |
+| **Warehouse** | Home, Orders, Inventory, Logistics | Orders, inventory, logistics write |
+| **Customer services** | Home, Product*, Categories*, Inventory*, Orders, **Promo Setting**, Chat, Logistics* | Orders, chat, promo write; *product/catalog and logistics **read-only** |
+
+**Staff creation:** Settings → Users (store owner) → new user receives a **12-character alphanumeric temp password** shown in a copy dialog. Backend stores `tempPassword: true` until first login/password change.
+
+**User list reconciliation:** `GET /auth/users` calls **`reconcileAuthUsersList`** — merges orphan staff profiles from the `user:email` index into `auth:users-list` and backfills missing `auth:user:{id}` rows.
+
 ### Orders
 
 - Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
@@ -93,6 +110,8 @@ Commission is deducted from vendor net earnings before KBZPay withdrawal. Full r
 - **Seller ID:** required customer field at vendor checkout; visible on order detail (above notes) and print invoice under customer phone
 - **KBZPay draft recovery:** amber panel lists paid PWA checkouts that never became orders; **Recover order** creates the order and prepends it to the list without a full refetch
 - Status changes (including cancel on recovered KPay orders) use optimistic UI + cache patches
+- **Realtime list refresh:** `OrderRealtimeBridge` polls `/realtime/pulses` every **2s**; order counter bumps trigger debounced **silent** background refetch (no full-list blink)
+- **Export:** toolbar downloads **`.xls`** (Excel-compatible HTML) — not CSV. Columns: No, Order date, Mi Code, Name, Phone, **Seller ID**, address, city, **Region**, SKU, Order qty, Price, Total, Vendor, Status, **logistic**, delivery date. Multi-SKU orders: **merged cells** for order-level fields (Mi Code, Vendor, Status, Total, etc.); one row per SKU. Phone stored as Excel text formula to avoid scientific notation.
 - Bulk **Delete** is hidden in the toolbar (`SHOW_ORDERS_DELETE_BUTTON = false`; handler retained for future use)
 - Sidebar badge counts pending orders using normalized status (not raw KV strings)
 
@@ -221,9 +240,22 @@ Customers and prospects visiting the marketplace apex see:
 
 ## 4) Role and permission notes
 
-- Super-admin/staff roles control sidebar visibility and privileged actions.
+- Super-admin/staff roles control sidebar visibility and privileged actions — see **Staff roles** above and `src/app/utils/superAdminRolePermissions.ts`.
+- **Promo Setting** is available to **data-entry** and **customer-services** (full write for customer-services; data-entry has full catalog + promo write).
 - Unknown or unsupported role mappings should be corrected in user management to restore expected navigation.
 - Owner-level roles are required for full finance/settings administration in most deployments.
+
+### Promo / cart (storefront)
+
+- **Promo Setting** admin UI manages campaigns and coupon codes.
+- Storefront **cart drawer** supports coupon apply with Burmese labels (**တွန်းလှည်း** = cart title, **ကျသင့်ငွေ** = subtotal) in `my.ts`.
+- Shared eligibility logic: `src/app/utils/couponEligibility.ts` (checkout + cart).
+- Coupon validate API returns generic errors only — does **not** leak available code lists on invalid input.
+
+### UI credits
+
+- Super-admin **SideNav** footer: **Created by Aung Pyae Sone** / Software Architect.
+- **Back-to-top** FAB: white background, slate text; hover inverts to black background / white icon (`BackToTop.tsx`).
 
 ## 5) Operational checks
 

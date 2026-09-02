@@ -15,7 +15,7 @@ The following markdown files live in the **repository root** and are **historica
 | [docs/READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md) | Read-model validation and monitoring |
 | [docs/PAYMENTS.md](./PAYMENTS.md) | KBZPay (production payment path) |
 | [docs/PERFORMANCE_AND_CACHING.md](./PERFORMANCE_AND_CACHING.md) | LCP, caching |
-| [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](./NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows |
+| [docs/NEXA_ADMIN_AND_VENDOR_GUIDE.md](./NEXA_ADMIN_AND_VENDOR_GUIDE.md) | Operator workflows (roles, orders export, promo, staff users) |
 | [docs/CLIENT_INSTRUCTIONS.md](./CLIENT_INSTRUCTIONS.md) | **End-user manual** — how to use the system (customers, vendors, admin) |
 | [docs/NEXA_SIMPLE_UI_INSTRUCTIONS.md](./NEXA_SIMPLE_UI_INSTRUCTIONS.md) | Short non-technical quick reference |
 | [docs/CLIENT_MANUAL.md](./CLIENT_MANUAL.md) | Frontend client architecture manual (developers) |
@@ -59,4 +59,6 @@ These files are kept for history but **should not** be used for deployment or ar
 | `src/app/components/StorefrontCached.tsx` | Legacy storefront helper — removed from the repo |
 | `src/app/components/StripePayment.tsx` | Exists; **not used** in vendor checkout |
 
-When in doubt, verify against `src/app/routes.tsx` and `docs/ARCHITECTURE_AND_BACKEND.md`.
+When in doubt, verify against `src/app/routes.tsx`, `src/app/utils/superAdminRolePermissions.ts`, and [docs/ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md).
+
+**September 2026 doc topics:** staff roles (`customer-services`, Promo Setting for data-entry), order `.xls` export, HTTP pulse poll realtime, cart coupon — see [README.md](../README.md) § Recent Updates (September 2026).

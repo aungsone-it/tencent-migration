@@ -76,7 +76,7 @@ GET /auth/staff-activity/:userId          → per-user history (profile timeline
 
 Client cache: `ADMIN_STAFF_ACTIVITIES` in `module-cache.ts`; 30s incremental poll while Settings → Activities tab is open (`STAFF_ACTIVITIES_POLL_MS`).
 
-**Writes:** Edge handlers persist to KV first, then sync to SQL read-model tables via `read_model.ts`. Order status updates and deletes **await** `syncOrderReadModel` / `deleteOrderReadModel` for admin list consistency.
+**Writes:** Edge handlers persist to KV first, then sync to SQL read-model tables via `read_model.ts`. Order **create** and status updates **await** `syncOrderReadModel` + `bumpOrderPulse` for admin list consistency.
 
 ### SQL read model (optimized reads)
 
@@ -165,7 +165,11 @@ Order create rejects `shippingFee === 0` unless every line item resolves as free
 
 Implementation: `order_number.ts` — KV counter `order_serial_counter`, reservation keys, bootstrap from existing `order:*` rows. Display helper unwraps legacy stacked prefixes (`MOS-NOS-00001` → `NOS-00001`). Client: `src/app/utils/orderNumber.ts`.
 
-**Checkout Seller ID:** Required on vendor checkout; stored on order as `sellerId` (alias `zipCode` for legacy compatibility). Shown in admin order detail and print invoice.
+**Checkout Seller ID:** Required on vendor checkout; stored on order as `sellerId` (alias `zipCode` for legacy compatibility). Shown in admin order detail, print invoice, and **`.xls` order export**.
+
+**Coupon validation:** `POST /campaigns/validate` checks KV `campaign:*` rows. Invalid codes return a generic **"Invalid coupon code"** message — the API does **not** enumerate available codes in error responses (avoids leaking active promo codes).
+
+**Admin order export:** Super-admin Orders toolbar exports **`.xls`** (Excel HTML via `buildOrderExportSpreadsheetHtml`) with merged cells for multi-item orders. See `src/app/utils/orderExportCsv.ts`.
 
 **Vendor commission wallet & KBZPay withdrawal** (vendor session required — `x-vendor-session`):
 
@@ -189,7 +193,13 @@ Default platform commission is **0%** unless admin sets vendor or product rates.
 | **Guest shopper** | No login; anon JWT on API calls; cart in `localStorage` | **No** |
 | **Registered customer** | CloudBase/Tencent Auth (`signInWithPassword`, etc.) | **Yes** — 1 MAU per unique user ID per billing month |
 | **Vendor admin** | Vendor login (`/vendor-auth/login`) issues a **server session token** (`x-vendor-session`) for secured routes (commission wallet, KBZ payout account, withdraw). KV-backed vendor password auth + `VendorAuthContext`. | **Yes** (if using CloudBase/Tencent Auth session) |
-| **Super admin / staff** | Admin auth + setup checks | **Yes** |
+| **Super admin / staff** | KV-backed staff auth (`auth:user:{id}`) + role checks | **Yes** (when using staff login) |
+
+**Canonical staff roles** (assignable on create/update): `store-owner`, `administrator`, `data-entry`, `warehouse`, `customer-services` — enforced in `auth_routes.tsx` (`CANONICAL_STAFF_ROLES`) and `superAdminRolePermissions.ts`.
+
+**Staff user list:** `GET /auth/users` runs **`reconcileAuthUsersList`** first — merges orphan `user:email` KV profiles into `auth:users-list` and backfills `auth:user:{id}` when missing.
+
+**New staff passwords:** `generatePassword()` produces **12-character alphanumeric** strings (no special characters) for easier copy/share; returned once in the create-user response for the admin copy dialog.
 
 **MAU rule:** One account = one MAU for the whole month, regardless of daily logins or open tabs. Guest visits do not consume the 100k MAU quota on CloudBase/Tencent Pro.
 
@@ -220,17 +230,18 @@ Optional Tencent Cloud SMS on `make-server-16010b6f` (`TENCENT_SMS_*` in `cloudb
 
 ## 6) Realtime (current behavior)
 
-**Super-admin portal routes** mount `OrderRealtimeBridge` via `AdminRealtimeBridge` in `routes.tsx` (not every SPA session). Storefront and guest tabs do **not** open the pulse bridge. As of June 2026 the bridge uses **small pulse tables** instead of an always-on global KV subscription:
+**Super-admin portal routes** mount `OrderRealtimeBridge` via `AdminRealtimeBridge` in `routes.tsx`. TencentDB/CloudBase does **not** expose Supabase-style Realtime WebSockets on pulse tables — the bridge **polls** a tiny HTTP endpoint instead.
 
-| Channel | Table | Purpose |
-|---------|-------|---------|
-| `sec-order-pulse-v1` | `app_order_pulse` (id=1) | Debounced admin order refresh (~400ms) |
-| `sec-vendor-app-pulse-v1` | `app_vendor_application_pulse` (id=1) | Vendor application list updates (~80ms) |
-| `sec-kv-domain-pulse-v1` | `app_kv_domain_pulse` | Domain-scoped invalidation: `products`, `orders`, `customers`, `vendors`, `marketing` |
+| Mechanism | Detail |
+|-----------|--------|
+| Poll interval | **2 seconds** while the admin tab is **visible** (`PULSE_POLL_MS`) |
+| Endpoint | `GET /realtime/pulses` — returns bump counters from `app_order_pulse`, `app_vendor_application_pulse`, `app_kv_domain_pulse` |
+| Order debounce | **~350ms** after order counter change → `notifyAdminOrdersUpdated("realtime-order-pulse")` |
+| Refetch style | `createAdminOrdersRealtimeRefetchScheduler` — **silent** background reload (no list blink); optional 2s retry while SQL read model catches up |
 
-KV writes bump the appropriate pulse row (via DB triggers in migrations). The bridge debounces and dispatches browser events / cache patches — e.g. `dispatchAdminProductsCachePatched()` for stock changes without full list refetch.
+When KV writes occur, server-side triggers bump pulse rows. Order **POST** and status **PUT** **await** `syncOrderReadModel` + `bumpOrderPulse` so admin lists stay consistent.
 
-**Legacy fallback:** If the domain pulse channel errors, the bridge temporarily subscribes to the full `kv_store_16010b6f` table (`sec-kv-global-realtime-fallback-v1`) and maps changed keys to domains client-side.
+**Domain fan-out** (on counter change): `products` → cache patch; `categories`, `vendors`, `marketing` → custom events; `customers`, `notifications`, `staff_sessions` → targeted handlers.
 
 **Other subscriptions (unchanged):**
 
@@ -241,7 +252,7 @@ KV writes bump the appropriate pulse row (via DB triggers in migrations). The br
 | Signed-in cart/wishlist | `customer:{uid}:cart`, etc. | Filtered ✓ |
 | `VendorStoreView` | Product/policy listeners | Scoped to vendor catalog where configured |
 
-**Scale impact:** Pulse-based Realtime uses far fewer messages than broadcasting every KV row to every admin tab. Realtime **connections** (~500 on Pro) are driven mainly by **admin** pulse bridges plus checkout/catalog filtered channels under flash traffic — not by every guest storefront tab.
+**Scale impact:** Pulse **polling** (2s per visible admin tab) uses far fewer connections than per-client WebSocket fanout. Realtime **connections** (~500 on Pro) are driven mainly by checkout `kpay_txn` channels and scoped storefront listeners — not by a global guest pulse bridge.
 
 ---
 

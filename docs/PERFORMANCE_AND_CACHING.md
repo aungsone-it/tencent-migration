@@ -97,6 +97,7 @@ When changing data-fetching behavior:
 
 | Surface | Interval | Notes |
 |---------|----------|-------|
+| Admin pulse bridge | 2s (+ focus) | `OrderRealtimeBridge` → `GET /realtime/pulses`; order bumps debounced ~350ms → silent refetch |
 | KPay checkout | ~1.5s | Fallback while waiting for webhook/Realtime |
 | Settings → Activities | 30s | Incremental `GET /auth/staff-activities?since=` while tab is open; session cache on tab switch |
 | Deploy version | 2 min + focus | `GET /version.json` — triggers one hard reload after EdgeOne deploy |
@@ -107,15 +108,15 @@ Activities cache key: `ADMIN_STAFF_ACTIVITIES` (`module-cache.ts`). Invalidate o
 
 ## Realtime and scale (current system)
 
-**Super-admin routes** mount `OrderRealtimeBridge` (via `AdminRealtimeBridge` in `routes.tsx`), which subscribes to **pulse tables** (`app_order_pulse`, `app_kv_domain_pulse`, `app_vendor_application_pulse`) rather than broadcasting every KV row. Domain pulses are debounced (~400ms) before cache invalidation or admin refetch. A legacy full-KV subscription activates only if the pulse channel fails. Storefront/guest tabs do **not** mount this bridge.
+**Super-admin routes** mount `OrderRealtimeBridge` (via `AdminRealtimeBridge` in `routes.tsx`), which **polls** `GET /realtime/pulses` every **2 seconds** while the tab is visible. Pulse counter changes debounce (~350ms for orders) before a **silent** background refetch — no full-list blink. Storefront/guest tabs do **not** mount this bridge.
 
 Checkout still uses a **filtered** `kpay_txn:{orderId}` channel. Vendor storefront tabs may listen for product/policy changes in `VendorStoreView`.
 
 | CloudBase/Tencent Pro limit | Included | Impact on this app |
 |--------------------|----------|-------------------|
-| Realtime peak connections | 500 | Driven by admin pulse bridges + checkout/scoped storefront channels (not every guest tab) |
-| Realtime messages / month | 5M | Pulse model reduces fanout vs. global KV; monitor during flash sales |
-| Cloud Function invocations | 2M/mo | Client cache + SQL read RPCs reduce repeat scans |
+| Realtime peak connections | 500 | Driven by checkout/scoped storefront channels — admin uses HTTP pulse poll, not WebSocket |
+| Realtime messages / month | 5M | Pulse poll + debounce reduces fanout vs. global KV broadcast |
+| Cloud Function invocations | 2M/mo | Client cache + SQL read RPCs reduce repeat scans; admin pulse poll adds ~30 req/min per open tab |
 | Auth MAU | 100k | Guest browsers **do not** count; only signed-in accounts |
 
 Before high-traffic events, read [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md) §9 and validate read models per [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md).

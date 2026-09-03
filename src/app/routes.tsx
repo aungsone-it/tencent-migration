@@ -299,6 +299,8 @@ export const appRouteObjects: RouteObject[] = [
               { index: true, element: <AdminSubdomainLeaf /> },
               { path: "customers/add", element: <AdminSubdomainLeaf /> },
               { path: "orders", element: <AdminSubdomainLeaf /> },
+              { path: "orders/:orderId", element: <AdminSubdomainLeaf /> },
+              { path: "orders/:orderId/edit", element: <AdminSubdomainLeaf /> },
               { path: "products", element: <AdminSubdomainLeaf /> },
               { path: "categories", element: <AdminSubdomainLeaf /> },
               { path: "inventory", element: <AdminSubdomainLeaf /> },

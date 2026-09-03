@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from "react";
+import { useNavigate } from "react-router";
 import type { DateRange } from "react-day-picker";
-import { Download, Eye, Printer, Package, Clock, CheckCircle, XCircle, Calendar, TrendingUp, DollarSign, ShoppingCart, X, Truck, CreditCard, MapPin, Phone, Mail, FileText, User, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Download, Eye, Edit, Printer, Package, Clock, CheckCircle, XCircle, Calendar, TrendingUp, DollarSign, ShoppingCart, X, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { AdminClearableSearchInput } from "./AdminClearableSearchInput";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -42,6 +43,8 @@ import { ApiError, getAdminOperationHeaders } from "../../utils/api-client";
 import { toast } from "sonner";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
 import {
   getCachedAdminOrdersPage,
   patchAdminOrdersCacheStatuses,
@@ -85,7 +88,6 @@ import {
   dedupeOrdersByCanonicalForBadge,
   getOrderListRowKey,
 } from "../utils/normalizeOrderBadgeStatus";
-import { deriveOrderPaymentMethodKey } from "../utils/orderPaymentMethod";
 import {
   broadcastOrderStatusUpdate,
   subscribeOrderStatusUpdates,
@@ -95,12 +97,19 @@ import {
   extractOrderShippingFields,
   resolveOrderSellerId,
 } from "../utils/orderShippingAddress";
-import { OrderShippingAddressBlock } from "./OrderShippingAddressBlock";
 import { buildOrderExportSpreadsheetHtml } from "../utils/orderExportCsv";
+import {
+  mapApiOrdersToOrderItems,
+  type AdminOrderItem,
+  type AdminOrderStatus,
+  type AdminPaymentStatus,
+  type AdminShippingStatus,
+} from "../utils/adminOrderMapper";
 
-type OrderStatus = "pending" | "processing" | "fulfilled" | "cancelled" | "ready-to-ship";
-type PaymentStatus = "paid" | "unpaid" | "refunded" | "pending_refund";
-type ShippingStatus = "pending" | "shipped" | "delivered" | "cancelled";
+type OrderStatus = AdminOrderStatus;
+type PaymentStatus = AdminPaymentStatus;
+type ShippingStatus = AdminShippingStatus;
+type OrderItem = AdminOrderItem;
 function isFinanciallyAccruedOrderStatus(status: string | undefined): boolean {
   const normalized = String(status || "")
     .trim()
@@ -221,6 +230,13 @@ function adminOrdersRowsSnapshotEqual(prev: OrderItem[], next: OrderItem[]): boo
     if (a.shippingStatus !== b.shippingStatus) return false;
     if (a.updatedAt !== b.updatedAt) return false;
     if (a.items !== b.items) return false;
+    if (a.customer !== b.customer) return false;
+    if (a.phone !== b.phone) return false;
+    if (a.email !== b.email) return false;
+    if (a.notes !== b.notes) return false;
+    if (a.deliveryService !== b.deliveryService) return false;
+    if (a.trackingNumber !== b.trackingNumber) return false;
+    if (a.sellerId !== b.sellerId) return false;
   }
   return true;
 }
@@ -246,60 +262,6 @@ function adminOrdersAggregatesEqual(
   );
 }
 
-
-interface Product {
-  id: string;
-  name: string;
-  quantity: number;
-  price: number;
-  image: string;
-  sku: string;
-}
-
-interface OrderItem {
-  id: string;
-  orderNumber: string;
-  date: string;
-  createdAt?: string; // Full timestamp for accurate sorting
-  customer: string;
-  email: string;
-  phone: string;
-  vendor: string;
-  total: number;
-  subtotal?: number;
-  discount?: number;
-  couponCode?: string;
-  items: number;
-  status: OrderStatus;
-  paymentStatus: PaymentStatus;
-  shippingStatus: ShippingStatus;
-  products: Product[];
-  shippingAddress: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zipCode?: string;
-  sellerId?: string;
-  country?: string;
-  trackingNumber?: string;
-  notes?: string;
-  deliveryService?: string;
-  deliveryServiceLogo?: string;
-  shippingFee?: number;
-  paymentMethod?: "credit-card" | "cod" | "bank-transfer" | "kbz-qr" | "kbz-pwa";
-  timeline: {
-    status: string;
-    date: string;
-    time: string;
-  }[];
-  /** Mirrors server order payload — false until fulfilled/ready-to-ship deducts stock */
-  inventoryDeducted?: boolean;
-  refundStatus?: "success" | "already_refunded" | "processing" | "failed" | "";
-  refundRequestNo?: string;
-  refundAmount?: number;
-  refundedAt?: string;
-  kpay?: unknown;
-}
 
 type PendingOrderStatusDraft = {
   status: OrderStatus;
@@ -686,82 +648,19 @@ const getShippingBadge = (status: ShippingStatus | string, t: (key: string) => s
   );
 };
 
-function mapApiOrdersToOrderItems(apiOrders: any[]): OrderItem[] {
-  return (apiOrders || []).map((order: any) => {
-    const shipping = extractOrderShippingFields(order);
-    return {
-    id: order.id,
-    orderNumber: order.orderNumber || order.id,
-    date: order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-    createdAt: order.createdAt || new Date().toISOString(),
-    customer: order.customer?.fullName || order.customer?.name || order.customerName || (typeof order.customer === 'string' ? order.customer : null) || (order.customer?.firstName && order.customer?.lastName ? `${order.customer.firstName} ${order.customer.lastName}` : order.customer?.firstName || order.customer?.lastName || 'Guest Customer'),
-    email: order.email || order.customer?.email || '',
-    phone: order.phone || order.customer?.phone || '',
-    vendor:
-      order.vendor ??
-      order.vendorName ??
-      order.storeName ??
-      (typeof order.vendorId === "string" ? order.vendorId : "") ??
-      "",
-    total: parseFloat(order.total) || 0,
-    subtotal: order.subtotal != null && order.subtotal !== '' ? parseFloat(String(order.subtotal)) : undefined,
-    discount: order.discount != null && order.discount !== '' ? parseFloat(String(order.discount)) : undefined,
-    couponCode: order.couponCode,
-    items: order.items?.length || 0,
-    status: order.status || 'pending',
-    paymentStatus: derivePaymentStatusFromOrder(order) as PaymentStatus,
-    shippingStatus: deriveShippingStatusFromOrder(order),
-    products: (order.items || []).map((item: any) => ({
-      id: normalizeOrderLineParentProductId(item.productId ?? item.id),
-      name: item.name || 'Product',
-      quantity: item.quantity || 1,
-      price: typeof item.price === 'number' ? item.price : parseFloat(String(item.price || '0').replace(/[$,]/g, '')) || 0,
-      image: item.image || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=100&h=100&fit=crop',
-      sku: item.sku || 'N/A'
-    })),
-    shippingAddress: buildOrderShippingAddressLine(shipping),
-    address: shipping.address,
-    city: shipping.city,
-    state: shipping.state,
-    zipCode: shipping.zipCode,
-    sellerId: resolveOrderSellerId(order),
-    country: shipping.country,
-    trackingNumber: order.trackingNumber,
-    notes: order.notes,
-    deliveryService: order.deliveryService || order.deliveryPartnerName,
-    deliveryServiceLogo: order.deliveryServiceLogo,
-    shippingFee:
-      parseFloat(String(order.shippingFee ?? order.shippingCost ?? order.shipping ?? 0)) || 0,
-    paymentMethod: deriveOrderPaymentMethodKey(order),
-    kpay: order.kpay,
-    timeline: [
-      { status: "Order Placed", date: order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : '', time: order.createdAt ? new Date(order.createdAt).toLocaleTimeString() : '' },
-      ...(order.status !== 'pending' ? [{ status: "Processing", date: order.updatedAt ? new Date(order.updatedAt).toISOString().split('T')[0] : '', time: order.updatedAt ? new Date(order.updatedAt).toLocaleTimeString() : '' }] : [])
-    ],
-    inventoryDeducted: order.inventoryDeducted,
-    refundStatus:
-      (String(order.refundStatus || order.kpay?.refund?.status || "")
-        .trim()
-        .toLowerCase() as OrderItem["refundStatus"]) || "",
-    refundRequestNo: order.refundRequestNo || order.kpay?.refund?.refundRequestNo || "",
-    refundAmount: Number(order.refundAmount || order.kpay?.refund?.amount || 0) || 0,
-    refundedAt: order.refundedAt || order.kpay?.refund?.refundedAt || order.kpay?.refund?.failedAt || "",
-  };
-  });
-}
-
 export function Orders({
-  onViewOrder,
   onOrderUpdate,
   initialListSearchQuery,
   listSearchApplyToken,
 }: {
-  onViewOrder?: (order: OrderItem) => void;
   onOrderUpdate?: () => void;
   initialListSearchQuery?: string;
   listSearchApplyToken?: number;
 }) {
   const { t } = useLanguage();
+  const { user: sessionUser } = useAuth();
+  const navigate = useNavigate();
+  const ordersWrite = canWriteSuperAdminSection(sessionUser?.role, "orders");
   /** False after unmount when the admin switches to another section — PUT may still be in flight. */
   const ordersSurfaceActiveRef = useRef(true);
   const hasHydratedOrdersRef = useRef(false);
@@ -789,7 +688,6 @@ export function Orders({
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<OrderStatus>("processing");
-  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [isDeletingOrders, setIsDeletingOrders] = useState(false);
   
   const initialOrdersPayload = useMemo(
@@ -1206,6 +1104,18 @@ export function Orders({
     setSelectedOrders(prev =>
       prev.includes(id) ? prev.filter(order => order !== id) : [...prev, id]
     );
+  };
+
+  const handleEditOrder = (order: OrderItem) => {
+    const key = String(order.orderNumber || order.id || "").trim();
+    if (!key) return;
+    navigate(`/admin/orders/${encodeURIComponent(key)}/edit`);
+  };
+
+  const handleViewOrder = (order: OrderItem) => {
+    const key = String(order.orderNumber || order.id || "").trim();
+    if (!key) return;
+    navigate(`/admin/orders/${encodeURIComponent(key)}`);
   };
 
   const handleBulkStatusUpdate = () => {
@@ -1916,7 +1826,7 @@ export function Orders({
               <div className="flex items-center justify-between gap-4 mb-4">
                 <h3 className="font-semibold text-slate-900">{t("orders.allOrders")} ({ordersTotal})</h3>
                 <div className="flex items-center gap-2">
-                  {selectedOrders.length > 0 && (
+                  {ordersWrite && selectedOrders.length > 0 && (
                     <>
                       <Button variant="outline" size="sm" onClick={handleBulkStatusUpdate}>
                         <Package className="w-4 h-4 mr-2" />
@@ -1927,6 +1837,12 @@ export function Orders({
                         {t("orders.print")} ({selectedOrders.length})
                       </Button>
                     </>
+                  )}
+                  {selectedOrders.length > 0 && !ordersWrite && (
+                    <Button variant="outline" size="sm" onClick={handleBulkPrint}>
+                      <Printer className="w-4 h-4 mr-2" />
+                      {t("orders.print")} ({selectedOrders.length})
+                    </Button>
                   )}
                   {hasActiveFilters && (
                     <Button variant="outline" size="sm" onClick={clearFilters}>
@@ -2163,12 +2079,28 @@ export function Orders({
                       <td className="py-3 px-4">{getShippingBadge(order.shippingStatus, t)}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => onViewOrder?.(order)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewOrder(order)}
+                            title={t("common.view")}
+                          >
                             <Eye className="w-4 h-4" />
                           </Button>
+                          {ordersWrite && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditOrder(order)}
+                              title={t("orders.edit")}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          )}
+                          {ordersWrite && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" title={t("orders.updateStatus")}>
                                 <Package className="w-4 h-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -2190,6 +2122,7 @@ export function Orders({
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2371,208 +2304,6 @@ export function Orders({
               {t("orders.print")}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Order Details Modal */}
-      <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Order Details</DialogTitle>
-            <DialogDescription>
-              View complete order information and timeline
-            </DialogDescription>
-          </DialogHeader>
-          {selectedOrder && (
-            <div className="space-y-6">
-              {/* Order Header */}
-              <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
-                <div>
-                  <p className="text-sm text-slate-500">Order Number</p>
-                  <p className="font-semibold text-slate-900 text-lg">{formatOrderNumberDisplay(selectedOrder.orderNumber)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Order Date</p>
-                  <p className="font-semibold text-slate-900">{selectedOrder.date}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Status</p>
-                  {getStatusBadge(selectedOrder.status, t)}
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Payment Status</p>
-                  {getPaymentBadge(selectedOrder.paymentStatus, t)}
-                  {getRefundBadge(selectedOrder.refundStatus, t)}
-                  {selectedOrder.refundStatus && (
-                    <div className="mt-2 text-xs text-slate-600 space-y-0.5">
-                      {selectedOrder.refundRequestNo && <p>Refund Ref: {selectedOrder.refundRequestNo}</p>}
-                      {!!selectedOrder.refundAmount && <p>Refund Amount: {selectedOrder.refundAmount.toLocaleString()} MMK</p>}
-                      {selectedOrder.refundedAt && <p>Refund Time: {new Date(selectedOrder.refundedAt).toLocaleString()}</p>}
-                    </div>
-                  )}
-                </div>
-                {selectedOrder.deliveryService && (
-                  <div className="col-span-2">
-                    <p className="text-sm text-slate-500 mb-2">Delivery Service</p>
-                    <div className="flex items-center gap-2">
-                      {selectedOrder.deliveryServiceLogo && (
-                        <img 
-                          src={selectedOrder.deliveryServiceLogo} 
-                          alt={selectedOrder.deliveryService} 
-                          className="w-8 h-8 rounded object-cover"
-                        />
-                      )}
-                      <p className="font-semibold text-purple-600">{selectedOrder.deliveryService}</p>
-                      {selectedOrder.paymentMethod === "cod" && (
-                        <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200">
-                          💰 Cash on Delivery
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Customer Info */}
-              <div>
-                <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <User className="w-4 h-4" />
-                  Customer Information
-                </h4>
-                <div className="grid grid-cols-2 gap-4 p-4 border border-slate-200 rounded-lg">
-                  <div>
-                    <p className="text-sm text-slate-500 mb-1">Name</p>
-                    <p className="font-medium text-slate-900">{typeof selectedOrder.customer === 'string' ? selectedOrder.customer : (selectedOrder.customer?.fullName || selectedOrder.customer?.name || 'Guest Customer')}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500 mb-1">Vendor</p>
-                    <p className="font-medium text-slate-900">{selectedOrder.vendor}</p>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <Mail className="w-4 h-4 text-slate-400 mt-1" />
-                    <div>
-                      <p className="text-sm text-slate-500">Email</p>
-                      <p className="font-medium text-slate-900">{selectedOrder.email}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <Phone className="w-4 h-4 text-slate-400 mt-1" />
-                    <div>
-                      <p className="text-sm text-slate-500">Phone</p>
-                      <p className="font-medium text-slate-900">{selectedOrder.phone}</p>
-                    </div>
-                  </div>
-                  <div className="col-span-2 flex items-start gap-2">
-                    <MapPin className="w-4 h-4 text-slate-400 mt-1" />
-                    <div>
-                      <p className="text-sm text-slate-500">Shipping Address</p>
-                      <OrderShippingAddressBlock order={selectedOrder} />
-                    </div>
-                  </div>
-                  {selectedOrder.trackingNumber && (
-                    <div className="col-span-2 flex items-start gap-2">
-                      <Truck className="w-4 h-4 text-slate-400 mt-1" />
-                      <div>
-                        <p className="text-sm text-slate-500">Tracking Number</p>
-                        <p className="font-medium text-slate-900">{selectedOrder.trackingNumber}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Products */}
-              <div>
-                <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <ShoppingCart className="w-4 h-4" />
-                  Products ({selectedOrder.products.length})
-                </h4>
-                <div className="space-y-3">
-                  {selectedOrder.products.map((product) => (
-                    <div key={product.id} className="flex items-center gap-4 p-3 border border-slate-200 rounded-lg">
-                      <img src={product.image} alt={product.sku} className="w-16 h-16 object-cover rounded" />
-                      <div className="flex-1">
-                        <p className="font-medium text-slate-900">{product.sku}</p>
-                        <p className="text-sm text-slate-500">Quantity: {product.quantity}</p>
-                      </div>
-                      <p className="font-semibold text-slate-900">{product.price.toLocaleString()} Ks</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Order Timeline */}
-              <div>
-                <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Order Timeline
-                </h4>
-                <div className="space-y-3">
-                  {selectedOrder.timeline.map((event, index) => (
-                    <div key={index} className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
-                      <div className="flex-1">
-                        <p className="font-medium text-slate-900">{event.status}</p>
-                        <p className="text-sm text-slate-500">{event.date} at {event.time}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Seller ID */}
-              {selectedOrder.sellerId?.trim() && (
-                <div>
-                  <h4 className="font-semibold text-slate-900 mb-2">Seller ID</h4>
-                  <p className="font-medium text-slate-900">{selectedOrder.sellerId.trim()}</p>
-                </div>
-              )}
-
-              {/* Notes */}
-              {selectedOrder.notes && (
-                <div>
-                  <h4 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    Notes
-                  </h4>
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                    <p className="text-sm text-slate-700">{selectedOrder.notes}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Order Summary */}
-              <div className="border-t pt-4">
-                <h4 className="font-semibold text-slate-900 mb-3">Order Summary</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Subtotal</span>
-                    <span className="font-medium text-slate-900">{selectedOrder.total.toLocaleString()} Ks</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Shipping</span>
-                    <span className="font-medium text-slate-900">Free</span>
-                  </div>
-                  <div className="flex justify-between pt-2 border-t">
-                    <span className="font-semibold text-slate-900">Total</span>
-                    <span className="font-bold text-slate-900 text-lg">{selectedOrder.total.toLocaleString()} Ks</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2 justify-end">
-                <Button variant="outline">
-                  <Printer className="w-4 h-4 mr-2" />
-                  Print Invoice
-                </Button>
-                <Button>
-                  <Mail className="w-4 h-4 mr-2" />
-                  Contact Customer
-                </Button>
-              </div>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 

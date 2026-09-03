@@ -36,10 +36,81 @@ export function isStorefrontCustomerSession(
 
 const MYANMAR_PHONE_RE = /^(\+959|09)\d{9}$/;
 
+/** Local/landline lengths used at checkout (Burma — varies by region). */
+const CHECKOUT_LOCAL_PHONE_LENGTHS = new Set([5, 6, 7, 9]);
+
 export function normalizeMyanmarPhone(raw: string): string | null {
   const normalized = String(raw || "").replace(/[\s\-]/g, "");
   if (!MYANMAR_PHONE_RE.test(normalized)) return null;
   if (normalized.startsWith("09")) return `+95${normalized.slice(1)}`;
+  return normalized;
+}
+
+/**
+ * Checkout phone validation — mobile (+959 / 09) plus shorter Burma local numbers
+ * (5, 6, 7, or 9 digits) and landlines with a leading 0.
+ */
+export function normalizeCheckoutPhone(raw: string): string | null {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return null;
+
+  const compact = trimmed.replace(/[\s\-().]/g, "");
+  const mobile = normalizeMyanmarPhone(compact);
+  if (mobile) return mobile;
+
+  const digits = compact.replace(/\D/g, "");
+  if (!digits) return null;
+
+  // Modern mobile without leading 0: 9440226433 (10 digits)
+  if (/^9\d{9}$/.test(digits)) {
+    return normalizeMyanmarPhone(`0${digits}`);
+  }
+
+  // Nine-digit numbers — mobile subscriber (4–9…) or local line
+  if (/^\d{9}$/.test(digits)) {
+    if (/^[4-9]/.test(digits)) {
+      const asMobile = normalizeMyanmarPhone(`09${digits}`);
+      if (asMobile) return asMobile;
+    }
+    return digits;
+  }
+
+  // Short local numbers — 5, 6, or 7 digits
+  if ([5, 6, 7].includes(digits.length) && /^\d+$/.test(digits)) {
+    return digits;
+  }
+
+  // Landline with area code: 0XXXXXXXX (8–11 digits total)
+  if (/^0\d{7,10}$/.test(digits)) {
+    return digits;
+  }
+
+  // International prefix + short national number
+  if (compact.startsWith("+95") || digits.startsWith("95")) {
+    const national = digits.startsWith("95") ? digits.slice(2) : "";
+    if (national && CHECKOUT_LOCAL_PHONE_LENGTHS.has(national.length)) {
+      return `+95${national}`;
+    }
+    if (national && /^0\d{7,10}$/.test(national)) {
+      return `+95${national.slice(1)}`;
+    }
+  }
+
+  return null;
+}
+
+/** Format checkout phone for display — spaced mobile, plain digits for local lines. */
+export function formatCheckoutPhoneDisplay(phone: string | null | undefined): string {
+  const raw = String(phone || "").trim();
+  if (!raw) return "";
+
+  const normalized = normalizeCheckoutPhone(raw);
+  if (!normalized) return raw;
+
+  if (normalizeMyanmarPhone(normalized)) {
+    return formatCustomerPhoneDisplay(normalized);
+  }
+
   return normalized;
 }
 

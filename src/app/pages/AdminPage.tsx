@@ -4,7 +4,6 @@ import { useSearchParams, useParams, useNavigate, useLocation } from "react-rout
 import { toast } from "sonner";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import type { User } from "../types/user";
-import type { Order } from "../types";
 import { useAuth } from "../contexts/AuthContext";
 import {
   getAllowedSuperAdminPages,
@@ -15,7 +14,7 @@ import {
 import { SideNav } from "../components/SideNav";
 import { TopNav } from "../components/TopNav";
 import { UserProfile } from "../components/UserProfile";
-import { OrderDetails } from "../components/OrderDetails";
+import { OrderViewPage } from "../components/OrderViewPage";
 import { ServerDiagnostics } from "../components/ServerDiagnostics";
 import { AdminBreadcrumb } from "../components/AdminBreadcrumb";
 import { useBadgeCounts } from "../hooks/useBadgeCounts";
@@ -166,6 +165,16 @@ export function AdminPage() {
     return { kind: "list" as const };
   }, [location.pathname]);
 
+  const orderEditId = useMemo(() => {
+    const match = location.pathname.match(/^\/admin\/orders\/([^/]+)\/edit$/i);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  }, [location.pathname]);
+
+  const orderViewId = useMemo(() => {
+    const match = location.pathname.match(/^\/admin\/orders\/([^/]+)$/i);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  }, [location.pathname]);
+
   const navigate = useNavigate();
   const { refreshUser, user: authUser } = useAuth();
   const allowedAdminPages = useMemo(
@@ -177,7 +186,6 @@ export function AdminPage() {
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [viewingUserProfile, setViewingUserProfile] = useState<User | null>(null);
   const [userProfileInitialEdit, setUserProfileInitialEdit] = useState(false);
-  const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [serverChecked, setServerChecked] = useState(false);
   const [appKey] = useState(() => Date.now());
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -360,6 +368,13 @@ export function AdminPage() {
       setCurrentPage(ADMIN_PAGES.LOGISTICS);
     }
   }, [location.pathname]);
+
+  /** Keep order view/edit sub-routes on the Orders page. */
+  useEffect(() => {
+    if (orderEditId || orderViewId) {
+      setCurrentPage(ADMIN_PAGES.ORDERS);
+    }
+  }, [orderEditId, orderViewId]);
 
   useEffect(() => {
     if (!authUser?.id) return;
@@ -615,10 +630,10 @@ export function AdminPage() {
     document.title = buildSuperAdminDocumentTitle({
       pageName: currentPage === "Home" ? "Home" : currentPage,
       storeName: platformBranding.storeName,
-      viewingOrderId: viewingOrder?.id ?? null,
+      viewingOrderId: orderViewId ?? orderEditId,
       viewingUserName: viewingUserProfile?.name ?? null,
     });
-  }, [currentPage, viewingUserProfile, viewingOrder, platformBranding.storeName]);
+  }, [currentPage, viewingUserProfile, orderViewId, orderEditId, platformBranding.storeName]);
 
   const handleSaveUserProfile = async (updatedUser: User) => {
     console.log("User profile updated:", updatedUser);
@@ -671,7 +686,10 @@ export function AdminPage() {
               setCurrentPage(ADMIN_PAGES.PRODUCT);
               navigate("/admin/products", { replace: false });
             }}
-            onViewOrder={(o) => setViewingOrder(o)}
+            onViewOrder={(o) => {
+              const key = String((o as { orderNumber?: string; id?: string }).orderNumber || (o as { id?: string }).id || "").trim();
+              if (key) navigate(`/admin/orders/${encodeURIComponent(key)}`);
+            }}
             onGoToOrdersWithPrefill={(prefill) => {
               setOrdersSearchPrefill({ q: prefill, t: Date.now() });
               setCurrentPage(ADMIN_PAGES.ORDERS);
@@ -708,9 +726,28 @@ export function AdminPage() {
           />
         );
       case ADMIN_PAGES.ORDERS:
+        if (orderEditId) {
+          const canEditOrders = canWriteSuperAdminSection(authUser?.role, "orders");
+          return (
+            <OrderViewPage
+              orderId={orderEditId}
+              mode={canEditOrders ? "edit" : "view"}
+              onOrderUpdated={handleOrderUpdate}
+            />
+          );
+        }
+        if (orderViewId) {
+          return (
+            <OrderViewPage
+              orderId={orderViewId}
+              mode="view"
+              canEdit={canWriteSuperAdminSection(authUser?.role, "orders")}
+              onOrderUpdated={handleOrderUpdate}
+            />
+          );
+        }
         return (
           <Orders
-            onViewOrder={setViewingOrder}
             onOrderUpdate={handleOrderUpdate}
             initialListSearchQuery={ordersSearchPrefill?.q}
             listSearchApplyToken={ordersSearchPrefill?.t}
@@ -866,15 +903,7 @@ export function AdminPage() {
         />
       )}
 
-      {viewingOrder && (
-        <OrderDetails
-          order={viewingOrder as any}
-          onBack={() => setViewingOrder(null)}
-          onOrderUpdated={handleOrderUpdate}
-        />
-      )}
-
-      {!viewingUserProfile && !viewingOrder && (
+      {!viewingUserProfile && (
         <div key={appKey} className="flex h-screen bg-slate-50 overflow-hidden">
           {sidebarOpen && (
             <div 

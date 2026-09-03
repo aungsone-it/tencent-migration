@@ -73,9 +73,9 @@ import { useIsMobile } from "./ui/use-mobile";
 import { useLanguage } from "../contexts/LanguageContext";
 import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
 import {
-  formatCustomerPhoneDisplay,
+  formatCheckoutPhoneDisplay,
   isStorefrontCustomerSession,
-  normalizeMyanmarPhone,
+  normalizeCheckoutPhone,
   readNormalizedMigooUserFromStorage,
 } from "../utils/customerAuthIdentity";
 import { logisticsApi, type DeliveryPartner } from "../../utils/api";
@@ -130,7 +130,7 @@ function resolveUserIdFromRecord(u: unknown): string | null {
 function sanitizeMyanmarPhoneInput(value: string): string {
   const cleaned = String(value || "")
     .replace(/[^\d+\s-]/g, "")
-    .slice(0, 18);
+    .slice(0, 16);
   if (cleaned.startsWith("+")) {
     return `+${cleaned.slice(1).replace(/\+/g, "")}`;
   }
@@ -985,7 +985,7 @@ export function Checkout({
     };
   });
   const [phoneTouched, setPhoneTouched] = useState(false);
-  const normalizedShippingPhone = normalizeMyanmarPhone(shippingInfo.phone);
+  const normalizedShippingPhone = normalizeCheckoutPhone(shippingInfo.phone);
   const phoneInvalid = phoneTouched && !normalizedShippingPhone;
 
   const regionSelectOptions = useMemo(
@@ -2733,7 +2733,7 @@ export function Checkout({
                 <div>
                   <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{t("checkout.phone")}</p>
                   <p className="text-sm font-medium text-slate-900">
-                    {formatCustomerPhoneDisplay(shippingInfo.phone)}
+                    {formatCheckoutPhoneDisplay(shippingInfo.phone)}
                   </p>
                 </div>
                 {resolveOrderEmail() && (
@@ -2834,8 +2834,8 @@ export function Checkout({
                       type="tel"
                       inputMode="tel"
                       autoComplete="tel"
-                      maxLength={18}
-                      placeholder="+959XXXXXXXXX / 09XXXXXXXXX"
+                      maxLength={16}
+                      placeholder={t("checkout.phonePlaceholder")}
                       value={shippingInfo.phone}
                       onChange={(e) =>
                         setShippingInfo({
@@ -2845,11 +2845,11 @@ export function Checkout({
                       }
                       onBlur={() => {
                         setPhoneTouched(true);
-                        const normalized = normalizeMyanmarPhone(shippingInfo.phone);
+                        const normalized = normalizeCheckoutPhone(shippingInfo.phone);
                         if (normalized) {
                           setShippingInfo((current) => ({
                             ...current,
-                            phone: formatCustomerPhoneDisplay(normalized),
+                            phone: formatCheckoutPhoneDisplay(normalized),
                           }));
                         }
                       }}

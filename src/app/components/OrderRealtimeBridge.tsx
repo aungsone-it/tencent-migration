@@ -106,7 +106,12 @@ export function OrderRealtimeBridge() {
 
         const previous = previousRef.current;
         previousRef.current = next;
-        if (!previous) return;
+        if (!previous) {
+          if (next.orders == null) {
+            console.warn("[OrderRealtimeBridge] Order pulse counter unavailable — using event-only refresh");
+          }
+          return;
+        }
 
         if (counterChanged(previous.orders, next.orders)) {
           scheduleOrdersPulse();

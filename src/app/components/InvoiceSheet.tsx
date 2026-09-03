@@ -198,13 +198,6 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
         </div>
       )}
 
-      {order.couponCode && (
-        <div className="promo-section">
-          <p className="promo-label">Promo Code Applied:</p>
-          <p className="promo-code">{order.couponCode}</p>
-        </div>
-      )}
-
       <div className="total-section">
         {(subtotal > 0 || shippingFee > 0) && (
           <div className="subtotal-row">

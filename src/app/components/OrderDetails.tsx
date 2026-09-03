@@ -1,12 +1,19 @@
-import { ArrowLeft, Printer, Mail, User, ShoppingCart, Clock, FileText, MapPin, Phone, Truck, CreditCard, Package, Loader2 } from "lucide-react";
+import { ArrowLeft, Printer, Mail, User, ShoppingCart, Clock, FileText, MapPin, Phone, Truck, CreditCard, Package, Loader2, Pencil } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { PrintInvoice } from "./PrintInvoice";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { toast } from "sonner";
-import { ordersApi } from "../../utils/api";
+import { ordersApi, type DeliveryPartner } from "../../utils/api";
+import { useLanguage } from "../contexts/LanguageContext";
+import { invalidateAdminOrdersCache, patchAdminOrdersCacheStatuses } from "../utils/module-cache";
+import { notifyAdminOrdersUpdated } from "../utils/adminOrdersRealtime";
+import { broadcastOrderStatusUpdate } from "../utils/ordersRealtime";
 import { ApiError } from "../../utils/api-client";
 import { useInvoicePrintJob } from "../utils/invoicePrintSession";
 import { toInvoiceSheetOrder } from "../utils/invoiceOrderMapper";
@@ -17,7 +24,6 @@ import {
   refreshAdminInventoryAfterOrderStatusPut,
   normalizeOrderLineParentProductId,
 } from "../utils/orderInventoryCacheSync";
-import { invalidateAdminOrdersCache, patchAdminOrdersCacheStatuses } from "../utils/module-cache";
 import {
   isKPayPaidOrderLike,
   pollKPayRefundAfterCancel,
@@ -77,6 +83,7 @@ interface OrderItem {
   notes?: string;
   deliveryService?: string;
   deliveryServiceLogo?: string;
+  deliveryPartnerId?: string;
   deliveryPartnerName?: string;
   shippingFee?: number;
   shippingCost?: number;
@@ -91,11 +98,74 @@ interface OrderItem {
   inventoryDeducted?: boolean;
 }
 
+type OrderEditForm = {
+  status: OrderStatus;
+  customerName: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  sellerId: string;
+  trackingNumber: string;
+  notes: string;
+  deliveryPartnerId: string;
+};
+
 interface OrderDetailsProps {
   order: OrderItem;
   onBack: () => void;
+  mode?: "view" | "edit";
+  deliveryPartners?: DeliveryPartner[];
+  onEdit?: () => void;
+  onCancelEdit?: () => void;
+  onSaved?: () => void;
   /** Called after a successful order status update (e.g. refresh badges). */
   onOrderUpdated?: () => void;
+  /** @deprecated Use mode="view" instead */
+  readOnly?: boolean;
+}
+
+function getCustomerDisplayName(order: OrderItem): string {
+  if (typeof order.customer === "string") return order.customer;
+  return order.customer?.fullName || order.customer?.name || "Guest Customer";
+}
+
+function resolvePartnerId(
+  order: OrderItem,
+  partners: DeliveryPartner[],
+): string {
+  const direct = String(order.deliveryPartnerId || "").trim();
+  if (direct && partners.some((p) => p.id === direct)) return direct;
+
+  const name = String(order.deliveryPartnerName || order.deliveryService || "")
+    .trim()
+    .toLowerCase();
+  if (!name) return "";
+
+  const match = partners.find((p) => p.name.trim().toLowerCase() === name);
+  return match?.id || "";
+}
+
+function buildEditFormFromOrder(order: OrderItem, partners: DeliveryPartner[]): OrderEditForm {
+  const shipping = extractOrderShippingFields(order as Record<string, unknown>);
+  const sellerId =
+    String(order.sellerId || "").trim() ||
+    String(shipping.sellerId || order.zipCode || shipping.zipCode || "").trim();
+
+  return {
+    status: normalizeOrderStatus(order.status),
+    customerName: getCustomerDisplayName(order),
+    email: String(order.email || "").trim(),
+    phone: String(order.phone || "").trim(),
+    address: String(shipping.address || order.address || "").trim(),
+    city: String(shipping.city || order.city || "").trim(),
+    state: String(shipping.state || order.state || "").trim(),
+    sellerId,
+    trackingNumber: String(order.trackingNumber || "").trim(),
+    notes: String(order.notes || "").trim(),
+    deliveryPartnerId: resolvePartnerId(order, partners),
+  };
 }
 
 const getStatusBadge = (status: OrderStatus) => {
@@ -154,17 +224,41 @@ const getShippingBadge = (status: ShippingStatus | string) => {
   return <Badge className={`${config.className} border`}>{config.label}</Badge>;
 };
 
-export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProps) {
+export function OrderDetails({
+  order,
+  onBack,
+  mode: modeProp,
+  deliveryPartners = [],
+  onEdit,
+  onCancelEdit,
+  onSaved,
+  onOrderUpdated,
+  readOnly = false,
+}: OrderDetailsProps) {
+  const { t } = useLanguage();
+  const mode = modeProp ?? "view";
+  const isEditMode = mode === "edit";
   const [printOrders, setPrintOrders] = useState<InvoiceSheetOrder[] | null>(null);
   const [orderStatus, setOrderStatus] = useState<OrderStatus>(normalizeOrderStatus(order.status));
+  const [editForm, setEditForm] = useState<OrderEditForm>(() =>
+    buildEditFormFromOrder(order, deliveryPartners),
+  );
+  const [saving, setSaving] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(
     () => normalizePaymentStatus(derivePaymentStatusFromOrder(order)) as PaymentStatus
   );
   const [shippingStatus, setShippingStatus] = useState<ShippingStatus>(() =>
     deriveShippingStatusFromOrder(order)
   );
-  const [statusSaving, setStatusSaving] = useState(false);
   const [resolvedSellerId, setResolvedSellerId] = useState("");
+  const activePartners = useMemo(
+    () => deliveryPartners.filter((p) => p.status === "active"),
+    [deliveryPartners],
+  );
+  const selectedPartner = useMemo(
+    () => activePartners.find((p) => p.id === editForm.deliveryPartnerId) || null,
+    [activePartners, editForm.deliveryPartnerId],
+  );
   const orderProducts = (Array.isArray(order.products) ? order.products : []).filter(
     (p): p is Product => !!p && typeof p === "object"
   );
@@ -212,7 +306,10 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
     setOrderStatus(normalizeOrderStatus(order.status));
     setPaymentStatus(normalizePaymentStatus(derivePaymentStatusFromOrder(order)) as PaymentStatus);
     setShippingStatus(deriveShippingStatusFromOrder(order));
-  }, [order.id, order.status, order.paymentStatus, order.shippingStatus]);
+    if (isEditMode) {
+      setEditForm(buildEditFormFromOrder(order, deliveryPartners));
+    }
+  }, [order, deliveryPartners, isEditMode]);
 
   // Calculate actual product total from individual product prices with safety checks
   const calculateProductTotal = () => {
@@ -266,13 +363,26 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
     setPrintOrders([invoiceSheetOrder]);
   };
 
-  const handleOrderStatusChange = async (newStatus: OrderStatus) => {
-    if (newStatus === orderStatus) return;
-    const wasNotCancelled = orderStatus !== "cancelled";
+  const updateEditForm = (patch: Partial<OrderEditForm>) => {
+    setEditForm((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.status) {
+        setOrderStatus(patch.status);
+      }
+      return next;
+    });
+  };
+
+  const handleSaveOrder = async () => {
+    if (!isEditMode) return;
+    const newStatus = editForm.status;
+    const previousStatus = normalizeOrderStatus(order.status);
+    const wasNotCancelled = previousStatus !== "cancelled";
     const isNowCancelled = newStatus === "cancelled";
     const wasKPayPaid = isKPayPaidOrderLike(order);
+    const partner = selectedPartner;
     const snapshot = {
-      status: orderStatus,
+      status: previousStatus,
       inventoryDeducted: order.inventoryDeducted,
       vendor: typeof order.vendor === "string" ? order.vendor : undefined,
       products: orderProducts.map((p) => ({
@@ -281,11 +391,8 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
         sku: p.sku,
       })),
     };
-    const previousStatus = orderStatus;
-    const previousPaymentStatus = paymentStatus;
-    const previousShippingStatus = shippingStatus;
-    setStatusSaving(true);
-    setOrderStatus(newStatus);
+
+    setSaving(true);
     if (isNowCancelled) {
       setPaymentStatus(paymentStatus === "refunded" ? "refunded" : "pending_refund");
       setShippingStatus("cancelled");
@@ -303,8 +410,31 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
           : {}),
       },
     ]);
+
     try {
-      const result = (await ordersApi.update(order.id, { status: newStatus })) as {
+      const result = (await ordersApi.update(order.id, {
+        status: newStatus,
+        notes: editForm.notes.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim(),
+        customerName: editForm.customerName.trim(),
+        customer: {
+          fullName: editForm.customerName.trim(),
+          name: editForm.customerName.trim(),
+          email: editForm.email.trim(),
+          phone: editForm.phone.trim(),
+        },
+        address: editForm.address.trim(),
+        city: editForm.city.trim(),
+        state: editForm.state.trim(),
+        zipCode: editForm.sellerId.trim(),
+        sellerId: editForm.sellerId.trim(),
+        trackingNumber: editForm.trackingNumber.trim(),
+        deliveryPartnerId: partner?.id || null,
+        deliveryPartnerName: partner?.name || null,
+        deliveryService: partner?.name || null,
+        deliveryServiceLogo: partner?.logo || null,
+      })) as {
         order?: {
           status?: string;
           paymentStatus?: string;
@@ -312,24 +442,40 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
           kpay?: { refund?: { status?: string }; status?: string };
         };
       };
-      try {
-        await refreshAdminInventoryAfterOrderStatusPut(snapshot, newStatus);
-      } catch (invErr) {
-        console.warn("[inventory] post-status cache sync failed:", invErr);
+
+      if (newStatus !== previousStatus) {
+        try {
+          await refreshAdminInventoryAfterOrderStatusPut(snapshot, newStatus);
+        } catch (invErr) {
+          console.warn("[inventory] post-status cache sync failed:", invErr);
+        }
       }
+
       setOrderStatus(newStatus);
       const srv = result?.order;
       if (srv) {
         setPaymentStatus(
-          normalizePaymentStatus(derivePaymentStatusFromOrder({ ...order, ...srv, status: newStatus })) as PaymentStatus
+          normalizePaymentStatus(
+            derivePaymentStatusFromOrder({ ...order, ...srv, status: newStatus }),
+          ) as PaymentStatus,
         );
         setShippingStatus(deriveShippingStatusFromOrder({ ...order, ...srv, status: newStatus }));
       } else if (newStatus === "cancelled") {
         setPaymentStatus(order.paymentStatus === "refunded" ? "refunded" : "pending_refund");
         setShippingStatus("cancelled");
       }
-      // Keep Orders/Finances views consistent across quick navigation and tabs.
+
       invalidateAdminOrdersCache();
+      notifyAdminOrdersUpdated("order-updated");
+      if (newStatus !== previousStatus) {
+        void broadcastOrderStatusUpdate({
+          orderId: String(order.orderNumber || order.id || ""),
+          status: newStatus,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      onOrderUpdated?.();
+
       if (wasNotCancelled && isNowCancelled && wasKPayPaid) {
         toast.message("Order cancelled", {
           duration: 4000,
@@ -341,38 +487,35 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
           onSuccess: (orderData) => {
             setPaymentStatus(
               normalizePaymentStatus(
-                derivePaymentStatusFromOrder({ ...order, ...orderData, status: "cancelled" })
-              ) as PaymentStatus
+                derivePaymentStatusFromOrder({ ...order, ...orderData, status: "cancelled" }),
+              ) as PaymentStatus,
             );
             setShippingStatus(
-              deriveShippingStatusFromOrder({ ...order, ...orderData, status: "cancelled" })
+              deriveShippingStatusFromOrder({ ...order, ...orderData, status: "cancelled" }),
             );
             onOrderUpdated?.();
           },
         });
       } else {
-        toast.success("Order status updated");
+        toast.success(t("orders.editSaved"));
       }
-      onOrderUpdated?.();
+      onSaved?.();
     } catch (e) {
       setOrderStatus(previousStatus);
-      setPaymentStatus(normalizePaymentStatus(previousPaymentStatus) as PaymentStatus);
-      setShippingStatus(normalizeShippingBadgeStatus(previousShippingStatus) as ShippingStatus);
+      setEditForm((prev) => ({ ...prev, status: previousStatus }));
       patchAdminOrdersCacheStatuses([
         {
           orderId: order.id,
           orderNumber: order.orderNumber,
           status: previousStatus,
-          paymentStatus: previousPaymentStatus,
-          shippingStatus: previousShippingStatus,
         },
       ]);
       console.error(e);
       const detail =
         e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Unknown error";
-      toast.error("Failed to update order status", { description: detail, duration: 8000 });
+      toast.error(t("orders.editSaveError"), { description: detail, duration: 8000 });
     } finally {
-      setStatusSaving(false);
+      setSaving(false);
     }
   };
 
@@ -393,19 +536,45 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                   {formatOrderNumberDisplay(order.orderNumber)}
                 </h1>
                 <p className="text-sm text-slate-500 mt-1">
-                  Placed on {order.date}
+                  {isEditMode ? t("orders.editOrderSubtitle") : `Placed on ${order.date}`}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={handlePrintInvoice}>
-                <Printer className="w-4 h-4 mr-2" />
-                Print Invoice
-              </Button>
-              <Button>
-                <Mail className="w-4 h-4 mr-2" />
-                Contact Customer
-              </Button>
+              {isEditMode ? (
+                <>
+                  <Button variant="outline" onClick={onCancelEdit ?? onBack} disabled={saving}>
+                    {t("common.cancel")}
+                  </Button>
+                  <Button onClick={() => void handleSaveOrder()} disabled={saving}>
+                    {saving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        {t("common.saving")}
+                      </>
+                    ) : (
+                      t("orders.saveChanges")
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {onEdit && (
+                    <Button variant="outline" onClick={onEdit}>
+                      <Pencil className="w-4 h-4 mr-2" />
+                      {t("orders.editOrder")}
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={handlePrintInvoice}>
+                    <Printer className="w-4 h-4 mr-2" />
+                    Print Invoice
+                  </Button>
+                  <Button>
+                    <Mail className="w-4 h-4 mr-2" />
+                    Contact Customer
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -421,35 +590,31 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
               <Card>
                 <CardContent className="p-6">
                   <h3 className="text-lg font-semibold text-slate-900 mb-4">Order Status</h3>
-                  <div className="mb-4 max-w-xs">
-                    <p className="text-sm text-slate-500 mb-2">Update status</p>
-                    <Select
-                      value={orderStatus}
-                      onValueChange={(v) => handleOrderStatusChange(v as OrderStatus)}
-                      disabled={statusSaving}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="processing">Shipped</SelectItem>
-                        <SelectItem value="ready-to-ship">Ready to Ship</SelectItem>
-                        <SelectItem value="fulfilled">Fulfilled</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {statusSaving && (
-                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Updating…
-                      </p>
-                    )}
-                  </div>
+                  {isEditMode && (
+                    <div className="mb-4 max-w-xs">
+                      <Label className="text-sm text-slate-500 mb-2">Update status</Label>
+                      <Select
+                        value={editForm.status}
+                        onValueChange={(v) => updateEditForm({ status: v as OrderStatus })}
+                        disabled={saving}
+                      >
+                        <SelectTrigger className="w-full mt-2">
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="processing">Shipped</SelectItem>
+                          <SelectItem value="ready-to-ship">Ready to Ship</SelectItem>
+                          <SelectItem value="fulfilled">Fulfilled</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <p className="text-sm text-slate-500 mb-2">Order Status</p>
-                      {getStatusBadge(orderStatus)}
+                      {getStatusBadge(isEditMode ? editForm.status : orderStatus)}
                     </div>
                     <div>
                       <p className="text-sm text-slate-500 mb-2">Payment Status</p>
@@ -460,27 +625,67 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                       {getShippingBadge(shippingBadgeStatus)}
                     </div>
                   </div>
-                  {order.deliveryService && (
+                  {isEditMode ? (
                     <div className="mt-4 pt-4 border-t border-slate-200">
-                      <p className="text-sm text-slate-500 mb-2">Delivery Service</p>
-                      <div className="flex items-center gap-3">
-                        {order.deliveryServiceLogo && (
-                          <img 
-                            src={order.deliveryServiceLogo} 
-                            alt={order.deliveryService} 
-                            className="w-10 h-10 rounded object-cover"
+                      <Label htmlFor="order-logistic" className="text-sm text-slate-500 mb-2 flex items-center gap-2">
+                        <Truck className="h-4 w-4" />
+                        {t("orders.logisticPartner")}
+                      </Label>
+                      <Select
+                        value={editForm.deliveryPartnerId || "__none__"}
+                        onValueChange={(value) =>
+                          updateEditForm({
+                            deliveryPartnerId: value === "__none__" ? "" : value,
+                          })
+                        }
+                        disabled={saving}
+                      >
+                        <SelectTrigger id="order-logistic" className="mt-2 max-w-md">
+                          <SelectValue placeholder={t("orders.selectLogistic")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">{t("orders.noLogistic")}</SelectItem>
+                          {activePartners.map((partner) => (
+                            <SelectItem key={partner.id} value={partner.id}>
+                              {partner.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedPartner?.logo && (
+                        <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
+                          <img
+                            src={selectedPartner.logo}
+                            alt=""
+                            className="h-8 w-8 rounded object-cover"
                           />
-                        )}
-                        <div>
-                          <p className="font-semibold text-purple-600">{order.deliveryService}</p>
-                          {order.paymentMethod === "cod" && (
-                            <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 mt-1">
-                              💰 Cash on Delivery
-                            </Badge>
+                          <span>{selectedPartner.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    order.deliveryService && (
+                      <div className="mt-4 pt-4 border-t border-slate-200">
+                        <p className="text-sm text-slate-500 mb-2">Delivery Service</p>
+                        <div className="flex items-center gap-3">
+                          {order.deliveryServiceLogo && (
+                            <img
+                              src={order.deliveryServiceLogo}
+                              alt={order.deliveryService}
+                              className="w-10 h-10 rounded object-cover"
+                            />
                           )}
+                          <div>
+                            <p className="font-semibold text-purple-600">{order.deliveryService}</p>
+                            {order.paymentMethod === "cod" && (
+                              <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 mt-1">
+                                💰 Cash on Delivery
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )
                   )}
                 </CardContent>
               </Card>
@@ -579,29 +784,49 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
               </Card>
 
               {/* Seller ID — above order notes */}
-              {displaySellerId && (
+              {(isEditMode || displaySellerId) && (
                 <Card>
                   <CardContent className="p-6">
                     <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
                       <Package className="w-5 h-5" />
                       Seller ID
                     </h3>
-                    <p className="font-medium text-slate-900">{displaySellerId}</p>
+                    {isEditMode ? (
+                      <Input
+                        value={editForm.sellerId}
+                        onChange={(e) => updateEditForm({ sellerId: e.target.value })}
+                        disabled={saving}
+                        inputMode="numeric"
+                        placeholder="Seller ID"
+                      />
+                    ) : (
+                      <p className="font-medium text-slate-900">{displaySellerId}</p>
+                    )}
                   </CardContent>
                 </Card>
               )}
 
               {/* Notes Card */}
-              {order.notes && (
+              {(isEditMode || order.notes) && (
                 <Card>
                   <CardContent className="p-6">
                     <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
                       <FileText className="w-5 h-5" />
                       Notes
                     </h3>
-                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-sm text-slate-700">{order.notes}</p>
-                    </div>
+                    {isEditMode ? (
+                      <Textarea
+                        value={editForm.notes}
+                        onChange={(e) => updateEditForm({ notes: e.target.value })}
+                        placeholder={t("orders.orderNotesPlaceholder")}
+                        rows={5}
+                        disabled={saving}
+                      />
+                    ) : (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-sm text-slate-700">{order.notes}</p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}
@@ -619,20 +844,45 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                   <div className="space-y-4">
                     <div>
                       <p className="text-sm text-slate-500 mb-1">Name</p>
-                      <p className="font-medium text-slate-900">{typeof order.customer === 'string' ? order.customer : (order.customer?.fullName || order.customer?.name || 'Guest Customer')}</p>
+                      {isEditMode ? (
+                        <Input
+                          value={editForm.customerName}
+                          onChange={(e) => updateEditForm({ customerName: e.target.value })}
+                          disabled={saving}
+                        />
+                      ) : (
+                        <p className="font-medium text-slate-900">{getCustomerDisplayName(order)}</p>
+                      )}
                     </div>
                     <div className="flex items-start gap-3">
                       <Mail className="w-4 h-4 text-slate-400 mt-1" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm text-slate-500 mb-1">Email</p>
-                        <p className="font-medium text-slate-900">{order.email}</p>
+                        {isEditMode ? (
+                          <Input
+                            type="email"
+                            value={editForm.email}
+                            onChange={(e) => updateEditForm({ email: e.target.value })}
+                            disabled={saving}
+                          />
+                        ) : (
+                          <p className="font-medium text-slate-900">{order.email}</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
                       <Phone className="w-4 h-4 text-slate-400 mt-1" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm text-slate-500 mb-1">Phone</p>
-                        <p className="font-medium text-slate-900">{order.phone}</p>
+                        {isEditMode ? (
+                          <Input
+                            value={editForm.phone}
+                            onChange={(e) => updateEditForm({ phone: e.target.value })}
+                            disabled={saving}
+                          />
+                        ) : (
+                          <p className="font-medium text-slate-900">{order.phone}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -660,15 +910,47 @@ export function OrderDetails({ order, onBack, onOrderUpdated }: OrderDetailsProp
                   <div className="space-y-4">
                     <div className="flex items-start gap-3">
                       <MapPin className="w-4 h-4 text-slate-400 mt-1" />
-                      <div>
+                      <div className="flex-1 space-y-3">
                         <p className="text-sm text-slate-500 mb-1">Address</p>
-                        <OrderShippingAddressBlock order={order} />
+                        {isEditMode ? (
+                          <>
+                            <Input
+                              value={editForm.address}
+                              onChange={(e) => updateEditForm({ address: e.target.value })}
+                              placeholder="Street address"
+                              disabled={saving}
+                            />
+                            <Input
+                              value={editForm.city}
+                              onChange={(e) => updateEditForm({ city: e.target.value })}
+                              placeholder="City / Township"
+                              disabled={saving}
+                            />
+                            <Input
+                              value={editForm.state}
+                              onChange={(e) => updateEditForm({ state: e.target.value })}
+                              placeholder="State / Region"
+                              disabled={saving}
+                            />
+                          </>
+                        ) : (
+                          <OrderShippingAddressBlock order={order} />
+                        )}
                       </div>
                     </div>
-                    {order.trackingNumber && (
+                    {(isEditMode || order.trackingNumber) && (
                       <div className="pt-3 border-t border-slate-200">
                         <p className="text-sm text-slate-500 mb-1">Tracking Number</p>
-                        <p className="font-mono font-medium text-slate-900 text-sm">{order.trackingNumber}</p>
+                        {isEditMode ? (
+                          <Input
+                            value={editForm.trackingNumber}
+                            onChange={(e) => updateEditForm({ trackingNumber: e.target.value })}
+                            disabled={saving}
+                            className="font-mono"
+                          />
+                        ) : (
+                          <p className="font-mono font-medium text-slate-900 text-sm">{order.trackingNumber}</p>
+                        )}
                       </div>
                     )}
                   </div>

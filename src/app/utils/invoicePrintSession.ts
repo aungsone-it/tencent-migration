@@ -174,14 +174,6 @@ export const INVOICE_PRINT_STYLES = `
     line-height: 1.45 !important;
   }
 
-  body.invoice-print-active .promo-label {
-    font-size: max(2.9mm, 1.9vw) !important;
-  }
-
-  body.invoice-print-active .promo-code {
-    font-size: max(3.4mm, 2.65vw) !important;
-  }
-
   body.invoice-print-active .total-section {
     margin: 2.2vw 0 !important;
     padding-top: 2vw !important;
@@ -421,28 +413,6 @@ export const INVOICE_PRINT_STYLES = `
   margin: 0;
   color: #333;
   white-space: pre-wrap;
-}
-
-.promo-section {
-  margin: 8px 0;
-  padding: 6px;
-  background: #f0fdf4;
-  border: none;
-  border-radius: 4px;
-  text-align: center;
-}
-
-.promo-label {
-  font-weight: 600;
-  margin: 0 0 2px 0;
-  color: #16a34a;
-}
-
-.promo-code {
-  font-weight: 700;
-  margin: 0;
-  color: #15803d;
-  letter-spacing: 1px;
 }
 
 .total-section {

@@ -7,6 +7,8 @@ describe("route matching", () => {
     const cases = [
       "/admin",
       "/admin/orders",
+      "/admin/orders/NOS-00082",
+      "/admin/orders/NOS-00082/edit",
       "/admin/products",
       "/vendor/foo/admin",
       "/vendor/foo/admin/orders",

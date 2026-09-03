@@ -123,7 +123,10 @@ export function shouldRetryAdminOrdersRealtime(reason: string | undefined): bool
     reason === "realtime-order-pulse" ||
     reason === "storefront-checkout-order-created" ||
     reason === "storefront-order-created" ||
-    reason === "pwa-checkout-order-created"
+    reason === "pwa-checkout-order-created" ||
+    reason === "order-updated" ||
+    reason === "vendor-admin-order-updated" ||
+    reason === "invalidate-admin-orders-cache"
   );
 }
 

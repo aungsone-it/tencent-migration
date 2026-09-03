@@ -490,12 +490,21 @@ export function queueOrderReadModelSync(orderId: string, orderValue: unknown): v
 /** Second pulse after read-model sync so admin pollers refetch once SQL rows exist. */
 export async function bumpOrderPulse(): Promise<void> {
   await bestEffort("bump order pulse", async () => {
-    const { data, error } = await readModelClient
+    let { data, error } = await readModelClient
       .from("app_order_pulse")
       .select("bump")
       .eq("id", 1)
       .maybeSingle();
     if (error) throw error;
+    if (!data) {
+      const seed = await readModelClient.from("app_order_pulse").insert({
+        id: 1,
+        bump: 1,
+        updated_at: new Date().toISOString(),
+      });
+      if (seed.error) throw seed.error;
+      return;
+    }
     const nextBump = (Number((data as { bump?: unknown } | null)?.bump) || 0) + 1;
     const { error: updateError } = await readModelClient
       .from("app_order_pulse")

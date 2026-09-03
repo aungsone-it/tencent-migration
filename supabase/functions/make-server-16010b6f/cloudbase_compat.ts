@@ -152,7 +152,18 @@ function parseInValues(raw: string): string[] {
   return trimmed.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
 }
 
-function selectedColumns(columns: string): string {
+const DIRECT_PG_TABLES = new Set([
+  "kv_store_16010b6f",
+  "app_order_pulse",
+  "app_vendor_application_pulse",
+  "app_kv_domain_pulse",
+]);
+
+function selectedColumns(table: string, columns: string): string {
+  if (table !== "kv_store_16010b6f") {
+    const normalized = columns.replace(/\s+/g, "");
+    return normalized || "*";
+  }
   const normalized = columns.replace(/\s+/g, "").toLowerCase();
   if (normalized === "value") return "value";
   if (normalized === "key,value" || normalized === "key,value") return "key, value";
@@ -271,6 +282,9 @@ class PostgrestQuery<T = unknown> implements PromiseLike<QueryResult<T>> {
       const pgResult = await this.executePg();
       if (!pgResult.error) return pgResult;
       const msg = pgResult.error.message || "";
+      if (msg.startsWith("Unsupported direct PostgreSQL table:") && postgrestBaseUrl()) {
+        return this.executePostgrest();
+      }
       if (!isTransientPgError(msg) || !postgrestBaseUrl()) return pgResult;
       console.warn(`[cloudbase_compat] Direct PG failed (${msg}); falling back to PostgREST`);
     }
@@ -309,12 +323,16 @@ class PostgrestQuery<T = unknown> implements PromiseLike<QueryResult<T>> {
   }
 
   private async executePg(): Promise<QueryResult<T>> {
-    if (this.table !== "kv_store_16010b6f") {
+    if (!DIRECT_PG_TABLES.has(this.table)) {
       return errorResult(`Unsupported direct PostgreSQL table: ${this.table}`) as QueryResult<T>;
     }
 
     try {
       const pool = getPgPool();
+
+      if (this.table !== "kv_store_16010b6f") {
+        return this.executePgSimpleTable(pool);
+      }
 
       if (this.method === "POST") {
         const rows = Array.isArray(this.body) ? this.body : [this.body];
@@ -362,7 +380,7 @@ class PostgrestQuery<T = unknown> implements PromiseLike<QueryResult<T>> {
         }
       }
 
-      let sql = `SELECT ${selectedColumns(this.columns)} FROM public.kv_store_16010b6f`;
+      let sql = `SELECT ${selectedColumns(this.table, this.columns)} FROM public.kv_store_16010b6f`;
       if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
       const order = this.params.get("order");
       if (order?.startsWith("key.")) {
@@ -389,6 +407,84 @@ class PostgrestQuery<T = unknown> implements PromiseLike<QueryResult<T>> {
       return errorResult(error instanceof Error ? error.message : String(error)) as QueryResult<T>;
     }
   }
+
+  private async executePgSimpleTable(pool: PgPoolLike): Promise<QueryResult<T>> {
+    const table = this.table;
+    const where: string[] = [];
+    const values: unknown[] = [];
+    for (const [column, raw] of this.params.entries()) {
+      if (column === "select" || column === "order" || column === "limit") continue;
+      const parsed = parsePostgrestFilter(raw);
+      if (parsed.op === "eq") {
+        values.push(parsed.value);
+        where.push(`${column} = $${values.length}`);
+      }
+    }
+
+    if (this.method === "PATCH") {
+      const body = asRecord(this.body);
+      const sets: string[] = [];
+      for (const [column, value] of Object.entries(body)) {
+        values.push(value);
+        sets.push(`${column} = $${values.length}`);
+      }
+      if (!sets.length) return { data: null, error: null };
+      let sql = `UPDATE public.${table} SET ${sets.join(", ")}`;
+      if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+      sql += " RETURNING *";
+      const result = await pool.query(sql, values);
+      const data = this.singleMode ? (result.rows[0] ?? null) : result.rows;
+      return { data: data as T, error: null };
+    }
+
+    if (this.method === "POST") {
+      const rows = Array.isArray(this.body) ? this.body : [this.body];
+      const saved: unknown[] = [];
+      for (const row of rows.map(asRecord)) {
+        const columns = Object.keys(row);
+        if (!columns.length) continue;
+        const placeholders = columns.map((_, index) => `$${index + 1}`);
+        const upsertSets = columns
+          .filter((column) => column !== "id")
+          .map((column) => `${column} = EXCLUDED.${column}`);
+        const sql =
+          upsertSets.length > 0
+            ? `INSERT INTO public.${table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")})
+               ON CONFLICT (id) DO UPDATE SET ${upsertSets.join(", ")} RETURNING *`
+            : `INSERT INTO public.${table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING *`;
+        const result = await pool.query(
+          sql,
+          columns.map((column) => row[column]),
+        );
+        saved.push(result.rows[0]);
+      }
+      const data = this.singleMode ? (saved[0] ?? null) : saved;
+      return { data: data as T, error: null };
+    }
+
+    let sql = `SELECT ${selectedColumns(table, this.columns)} FROM public.${table}`;
+    if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+    const order = this.params.get("order");
+    if (order) {
+      const [column, direction] = order.split(".");
+      if (column) {
+        sql += ` ORDER BY ${column} ${direction === "desc" ? "DESC" : "ASC"}`;
+      }
+    }
+    if (this.params.get("limit")) {
+      values.push(Math.max(1, parseInt(this.params.get("limit") || "1", 10) || 1));
+      sql += ` LIMIT $${values.length}`;
+    }
+    const result = await pool.query(sql, values);
+    const data = this.singleMode ? (result.rows[0] ?? null) : result.rows;
+    return { data: data as T, error: null };
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function normalizeAuthUserRecord(user: unknown): Record<string, unknown> {

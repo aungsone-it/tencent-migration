@@ -5,7 +5,13 @@ import {
   paidSubscriptionPaymentDate,
   subscriptionPaymentSplit,
 } from "./subscription_finance.ts";
+import { bumpOrderPulse } from "./read_model.ts";
 import { assertVendorSession } from "./vendor_session_guard.tsx";
+import {
+  buildProductCommissionLookup,
+  defaultVendorCommissionPercent,
+  resolveLineCommissionPercentFromCatalog,
+} from "./commission_rate.ts";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -35,19 +41,6 @@ function parseMoney(v: unknown): number {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string") return parseFloat(v.replace(/[^0-9.-]/g, "")) || 0;
   return 0;
-}
-
-function parseCommissionPercent(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
-  if (v == null || v === "") return NaN;
-  const n = parseFloat(String(v).replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) && n >= 0 ? n : NaN;
-}
-
-function defaultVendorCommissionPercent(v: unknown): number {
-  if (v == null || v === "") return 0;
-  const parsed = parseCommissionPercent(v);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function normalizeOrderStatus(status: unknown): string {
@@ -122,42 +115,12 @@ function orderLineNetAfterDiscount(lineGross: number, order: AnyRecord): number 
   return lineGross;
 }
 
-function explicitCommissionPercent(value: unknown): number | null {
-  if (value == null || value === "") return null;
-  const parsed = parseCommissionPercent(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function lineCommissionPercent(
   item: AnyRecord,
   productMap: Map<string, { commissionRate: unknown; hasExplicitRate: boolean }>,
   vendorContractPercent: number,
 ): number {
-  const fromLine = explicitCommissionPercent(
-    item.commissionRate ?? item.commission ?? (item.product as AnyRecord | undefined)?.commissionRate,
-  );
-  if (fromLine != null) return fromLine;
-
-  const keys: string[] = [];
-  const rawPid = item.productId ?? item.id;
-  if (rawPid != null) {
-    const s = String(rawPid).trim();
-    if (s) {
-      keys.push(s);
-      if (s.includes(":")) keys.push(s.split(":")[0]!.trim());
-    }
-  }
-  const sku = item.sku != null ? String(item.sku).trim() : "";
-  if (sku) keys.push(sku);
-
-  for (const k of keys) {
-    const hit = productMap.get(k);
-    if (hit?.hasExplicitRate) {
-      const pct = explicitCommissionPercent(hit.commissionRate);
-      if (pct != null) return pct;
-    }
-  }
-  return vendorContractPercent;
+  return resolveLineCommissionPercentFromCatalog(item, productMap, vendorContractPercent);
 }
 
 function isOrderWithdrawable(order: AnyRecord): boolean {
@@ -265,15 +228,8 @@ function productBelongsToVendor(product: AnyRecord, vendorIds: Set<string>): boo
 function buildProductMap(products: AnyRecord[]): Map<string, { commissionRate: unknown; hasExplicitRate: boolean }> {
   const map = new Map<string, { commissionRate: unknown; hasExplicitRate: boolean }>();
   for (const product of products) {
-    if (!product?.id) continue;
-    const hasExplicitRate =
-      product.commissionRate !== undefined &&
-      product.commissionRate !== null &&
-      String(product.commissionRate).trim() !== "";
-    const info = {
-      commissionRate: hasExplicitRate ? product.commissionRate : null,
-      hasExplicitRate,
-    };
+    const info = buildProductCommissionLookup(product);
+    if (!info) continue;
     const idKey = String(product.id).trim();
     map.set(idKey, info);
     const sku = product.sku != null ? String(product.sku).trim() : "";
@@ -565,6 +521,7 @@ async function reconcileProcessingWithdrawals(vendorId: string): Promise<void> {
 
   if (changed) {
     await saveVendorWithdrawals(vendorId, rows);
+    await bumpOrderPulse();
   }
 }
 
@@ -888,6 +845,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
 
     await saveVendorWithdrawals(vendorId, latestWithdrawals);
     await kv.set(`vendor_withdrawal_txn:${merchOrderId}`, latestWithdrawals[idx]);
+    await bumpOrderPulse();
 
     const record = latestWithdrawals[idx];
     const reservedAfter = withdrawnTotal(latestWithdrawals);

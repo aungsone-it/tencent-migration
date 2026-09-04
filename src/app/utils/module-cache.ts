@@ -24,6 +24,7 @@ import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
 import { notifyAdminOrdersUpdated, isSuperAdminFinancesSessionStale } from "./adminOrdersRealtime";
 import {
+  aggregateVendorPayoutsFromTransactions,
   financesTransactionMatchesOrder,
   isAccruedFinancesOrder,
   isCancelledFinancesOrder,
@@ -3103,10 +3104,17 @@ export function patchAdminFinancesCacheFromOrderUpdates(
 
   if (!changed) return false;
 
+  const emailById = new Map<string, string>(
+    (Array.isArray(cached.vendorPayouts) ? cached.vendorPayouts : [])
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+      .map((row) => [String(row.id || ""), String(row.email || "")]),
+  );
+
   const next: FinancesAnalyticsCache = {
     ...cached,
     transactions,
     summary: recomputeFinancesSummaryFromTransactions(transactions),
+    vendorPayouts: aggregateVendorPayoutsFromTransactions(transactions, emailById),
     timestamp: new Date().toISOString(),
   };
   moduleCache.prime(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS, next);
@@ -3128,10 +3136,17 @@ export function removeOrdersFromAdminFinancesCache(
   );
   if (transactions.length === before) return false;
 
+  const emailById = new Map<string, string>(
+    (Array.isArray(cached.vendorPayouts) ? cached.vendorPayouts : [])
+      .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+      .map((row) => [String(row.id || ""), String(row.email || "")]),
+  );
+
   const next: FinancesAnalyticsCache = {
     ...cached,
     transactions,
     summary: recomputeFinancesSummaryFromTransactions(transactions),
+    vendorPayouts: aggregateVendorPayoutsFromTransactions(transactions, emailById),
     timestamp: new Date().toISOString(),
   };
   moduleCache.prime(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS, next);
@@ -3146,9 +3161,10 @@ export function invalidateAdminFinancesCache(): void {
 
 /** Hydrate finances UI from session module cache or localStorage (same TTL as catalog snapshots). */
 export function readFinancialAnalyticsHydrate(): Record<string, unknown> | null {
-  if (isSuperAdminFinancesSessionStale()) return null;
   const fromModule = moduleCache.peek<Record<string, unknown>>(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS);
   if (fromModule) return fromModule;
+  // Session-stale means localStorage may predate a checkout/status change; skip it.
+  if (isSuperAdminFinancesSessionStale()) return null;
   const fromLs = readPersistedJson<Record<string, unknown>>(LS_ADMIN_FINANCES_ANALYTICS, PERSISTED_CATALOG_TTL_MS);
   if (fromLs) {
     moduleCache.prime(CACHE_KEYS.ADMIN_FINANCES_ANALYTICS, fromLs);

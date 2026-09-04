@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { DateRange } from "react-day-picker";
 import { Search, Download, Eye, Printer, Package, Clock, CheckCircle, XCircle, Calendar, TrendingUp, DollarSign, ShoppingCart, X, Truck, CreditCard, MapPin, Phone, Mail, FileText, User, RefreshCw } from "lucide-react";
 import { Button } from "../ui/button";
@@ -54,7 +54,13 @@ import {
   isMainMarketplaceVendorName,
 } from "../../utils/orderInventoryCacheSync";
 import { deriveOrderPaymentMethodKey } from "../../utils/orderPaymentMethod";
-import { adminOrdersUpdatedStorageKey } from "../../utils/adminOrdersRealtime";
+import {
+  adminOrdersUpdatedStorageKey,
+  createAdminOrdersRealtimeRefetchScheduler,
+  readAdminOrdersUpdatedStorageEvent,
+  shouldRetryAdminOrdersRealtime,
+  type AdminOrdersLoadOptions,
+} from "../../utils/adminOrdersRealtime";
 import {
   derivePaymentStatusFromOrder,
   deriveShippingStatusFromOrder,
@@ -243,11 +249,13 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [showBulkInvoices, setShowBulkInvoices] = useState(false);
   const [serverTotalOrders, setServerTotalOrders] = useState(0);
-  const [ordersRefreshTick, setOrdersRefreshTick] = useState(0);
+  const loadOrdersRef = useRef<(force?: boolean, opts?: AdminOrdersLoadOptions) => Promise<void>>(
+    async () => {},
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      loadOrders(false);
+      void loadOrdersRef.current(false);
     }, 180);
     return () => window.clearTimeout(timer);
   }, [
@@ -260,28 +268,9 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
     orderDateRange?.to?.getTime(),
   ]);
 
-  useEffect(() => {
-    if (ordersRefreshTick === 0) return;
-    void loadOrders(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordersRefreshTick]);
-
-  useEffect(() => {
-    const bump = () => setOrdersRefreshTick((n) => n + 1);
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== adminOrdersUpdatedStorageKey()) return;
-      bump();
-    };
-    window.addEventListener("adminOrdersUpdated", bump);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("adminOrdersUpdated", bump);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
-  const loadOrders = async (forceRefresh = false) => {
-    setListRefreshing(forceRefresh);
+  const loadOrders = async (forceRefresh = false, options?: AdminOrdersLoadOptions) => {
+    const silent = options?.silent === true;
+    if (!silent) setListRefreshing(forceRefresh);
     try {
       const from = orderDateRange?.from ? startOfDay(orderDateRange.from).toISOString() : "";
       const to = orderDateRange?.to ? endOfDay(orderDateRange.to).toISOString() : "";
@@ -296,7 +285,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
         from,
         to
       );
-      if (!moduleCache.peek(pageKey)) {
+      if (!silent && !moduleCache.peek(pageKey)) {
         setIsLoading(true);
       }
       const payload = await getCachedVendorOrdersPage(
@@ -318,14 +307,40 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
       setServerTotalOrders(Number(payload.total || transformedOrders.length));
       // Silent success path: avoid repetitive "Loaded" toasts on revisit.
     } catch (error: any) {
+      if (silent) return;
       console.error("Failed to load orders:", error);
       toast.error(`Failed to load orders: ${error.message || 'Unknown error'}`);
       setOrders([]);
     } finally {
-      setIsLoading(false);
-      setListRefreshing(false);
+      if (!silent) {
+        setIsLoading(false);
+        setListRefreshing(false);
+      }
     }
   };
+  loadOrdersRef.current = loadOrders;
+
+  useEffect(() => {
+    const scheduler = createAdminOrdersRealtimeRefetchScheduler((force, opts) =>
+      loadOrdersRef.current(force, opts),
+    );
+    const bump = (ev: Event) => {
+      const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(reason));
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== adminOrdersUpdatedStorageKey()) return;
+      const payload = readAdminOrdersUpdatedStorageEvent(e.newValue);
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(payload?.reason));
+    };
+    window.addEventListener("adminOrdersUpdated", bump);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      scheduler.cancel();
+      window.removeEventListener("adminOrdersUpdated", bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = 

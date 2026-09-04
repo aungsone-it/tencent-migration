@@ -1228,10 +1228,10 @@ export const enTranslations: Record<string, string> = {
     'finances.totalRevenue': 'Total Revenue',
     'finances.platformCommission': 'Platform Commission',
     'finances.vendorPayout': 'Vendor Payout',
-    /** Top stat card: sum of vendor-side earnings (order total − platform commission). */
+    /** Top stat card: vendor net earnings (order total − platform commission) for accrued orders. */
     'finances.commissionPayout': 'Commission Payout',
     'finances.commissionPayoutHint':
-      'Total commission amount for the filtered period, based on item commission rates.',
+      'Total vendor payout for accrued orders in the filtered period (order total minus platform commission).',
     'finances.pendingPayouts': 'Pending Payouts',
     'finances.overview': 'Overview',
     'finances.transactions': 'Transactions',
@@ -1286,6 +1286,7 @@ export const enTranslations: Record<string, string> = {
     'finances.trackingNumber': 'Tracking Number',
     'finances.completed': 'Completed',
     'finances.pending': 'Pending',
+    'finances.accrued': 'Accrued',
     'finances.failed': 'Failed',
     'finances.showing': 'Showing',
     'finances.of': 'of',
@@ -1590,6 +1591,9 @@ export const enTranslations: Record<string, string> = {
     'vendorAddEdit.accountStatusSection': 'Account Status',
     'vendorAddEdit.accountStatus': 'Account Status',
     'vendorAddEdit.selectStatus': 'Select status',
+    'vendorAddEdit.commissionRate': 'Default Commission Rate (%)',
+    'vendorAddEdit.commissionRateHint':
+      'Platform commission on product sales when a product has no fixed rate. Product-level rates override this vendor default.',
     'vendorAddEdit.vendorLogo': 'Vendor Logo',
     'vendorAddEdit.companyLogo': 'Company Logo',
     'vendorAddEdit.logoUploadHint': "Upload the vendor's company logo",

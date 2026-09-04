@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import {
   DollarSign,
   ShoppingCart,
@@ -66,6 +66,13 @@ import {
 import { computeVendorPayoutEarned } from "../../utils/vendorCommissionEarned";
 import { getVendorSessionHeaders } from "../../utils/vendorSessionHeaders";
 import { formatOrderNumberDisplay } from "../../utils/orderNumber";
+import {
+  adminOrdersUpdatedStorageKey,
+  createAdminOrdersRealtimeRefetchScheduler,
+  notifyAdminOrdersUpdated,
+  readAdminOrdersUpdatedStorageEvent,
+  shouldRetryAdminOrdersRealtime,
+} from "../../utils/adminOrdersRealtime";
 import { toast } from "sonner";
 
 type FinancesDateFilterKey = "revenue" | "commission" | "orders" | "avgOrder";
@@ -198,9 +205,16 @@ export function VendorAdminFinances({
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [kpayPhoneInput, setKpayPhoneInput] = useState("");
   const [withdrawing, setWithdrawing] = useState(false);
+  const walletRef = useRef<VendorCommissionWallet | null>(null);
+  walletRef.current = wallet;
+  const rawOrdersRef = useRef(rawOrders);
+  rawOrdersRef.current = rawOrders;
+  const rawProductsRef = useRef(rawProducts);
+  rawProductsRef.current = rawProducts;
 
-  const loadCommissionWallet = useCallback(async () => {
-    setWalletLoading(true);
+  const loadCommissionWallet = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true && walletRef.current != null;
+    if (!silent) setWalletLoading(true);
     try {
       const res = await fetch(
         `${API_BASE_URL}/vendor/commission-wallet/${encodeURIComponent(vendorId)}`,
@@ -228,26 +242,12 @@ export function VendorAdminFinances({
         toast.error(error.message);
       }
     } finally {
-      setWalletLoading(false);
+      if (!silent) setWalletLoading(false);
     }
   }, [vendorId]);
 
-  useEffect(() => {
-    void loadFinancialData(false);
-    void loadCommissionWallet();
-  }, [vendorId, vendorStoreSlug]);
-
-  useEffect(() => {
-    const onOrdersUpdated = () => {
-      void loadFinancialData(true);
-      void loadCommissionWallet();
-    };
-    window.addEventListener("adminOrdersUpdated", onOrdersUpdated);
-    return () => window.removeEventListener("adminOrdersUpdated", onOrdersUpdated);
-  }, [vendorId, vendorStoreSlug]);
-
-  const loadFinancialData = async (forceRefresh = false) => {
-    const hasWarmData = rawOrders.length > 0 || rawProducts.length > 0;
+  const loadFinancialData = useCallback(async (forceRefresh = false) => {
+    const hasWarmData = rawOrdersRef.current.length > 0 || rawProductsRef.current.length > 0;
     if (!hasWarmData) setLoading(true);
     try {
       const [vendorOrders, productsPayload, contractPct] = await Promise.all([
@@ -271,7 +271,39 @@ export function VendorAdminFinances({
     } finally {
       setLoading(false);
     }
-  };
+  }, [vendorId, contractPctCacheKey, slugKey]);
+
+  useEffect(() => {
+    void loadFinancialData(false);
+    void loadCommissionWallet();
+  }, [loadFinancialData, loadCommissionWallet]);
+
+  useEffect(() => {
+    const scheduler = createAdminOrdersRealtimeRefetchScheduler(() => {
+      void loadFinancialData(true);
+      void loadCommissionWallet({ silent: true });
+    });
+    const bump = (ev: Event) => {
+      const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
+      scheduler.schedule(
+        shouldRetryAdminOrdersRealtime(reason) || reason === "vendor-withdrawal",
+      );
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== adminOrdersUpdatedStorageKey()) return;
+      const payload = readAdminOrdersUpdatedStorageEvent(e.newValue);
+      scheduler.schedule(
+        shouldRetryAdminOrdersRealtime(payload?.reason) || payload?.reason === "vendor-withdrawal",
+      );
+    };
+    window.addEventListener("adminOrdersUpdated", bump);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      scheduler.cancel();
+      window.removeEventListener("adminOrdersUpdated", bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [loadFinancialData, loadCommissionWallet]);
 
   const { stats, revenueData, transactions } = useMemo(() => {
     const endMs = Date.now();
@@ -489,6 +521,7 @@ export function VendorAdminFinances({
           });
           toast.success("Commission withdrawal successful");
           setWithdrawOpen(false);
+          notifyAdminOrdersUpdated("vendor-withdrawal");
           return;
         }
         throw new Error(serverMsg);
@@ -500,6 +533,7 @@ export function VendorAdminFinances({
         toast.success(payload.message || "Commission sent to your KBZPay wallet");
       }
       setWithdrawOpen(false);
+      notifyAdminOrdersUpdated("vendor-withdrawal");
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Withdrawal failed";
       const isBrowserNetworkFailure =

@@ -75,6 +75,7 @@ import {
 } from "../utils/vendorAssignPickerSession";
 import { productMatchesAdminLiveSearch } from "../utils/adminProductSearch";
 import { formatOrderNumberDisplay } from "../utils/orderNumber";
+import { resolveLineCommissionPercentFromProducts, productHasExplicitCommissionRate } from "../utils/commissionRate";
 
 const PICKER_SEARCH_DEBOUNCE_MS = 350;
 
@@ -627,7 +628,14 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
     }
   };
 
-  // Format MMK currency with small unit
+  // Format MMK currency with small unit (JSX for stat cards)
+  const formatMMKPlain = (value: number | string) => {
+    if (value === null || value === undefined || value === "") return "0 MMK";
+    const num = typeof value === "string" ? parseFloat(String(value).replace(/,/g, "")) : value;
+    if (!Number.isFinite(num)) return "0 MMK";
+    return `${Math.round(num).toLocaleString()} MMK`;
+  };
+
   const formatMMK = (value: number | string) => {
     if (value === null || value === undefined || value === '') {
       return <span>0 <span className="text-xs">MMK</span></span>;
@@ -677,6 +685,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
       }
     }
     const rates = products
+      .filter((p) => productHasExplicitCommissionRate(p))
       .map((p) => p.commissionRate)
       .filter((r): r is number => typeof r === "number" && !Number.isNaN(r) && r > 0);
     if (rates.length > 0) {
@@ -709,38 +718,8 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
 
         if (shouldAccrue) {
           revenue += net;
-
-          let productCommission = 0;
-          if (
-            item.commissionRate != null &&
-            item.commissionRate !== "" &&
-            (typeof item.commissionRate !== "number" ||
-              Number.isFinite(item.commissionRate))
-          ) {
-            productCommission = parseOrderMoney(item.commissionRate);
-          } else if (item.product?.commission != null) {
-            productCommission = parseOrderMoney(item.product.commission);
-          } else if (item.commission != null) {
-            productCommission = parseOrderMoney(item.commission);
-          } else {
-            const matchedProduct = products.find(
-              (p: Product) =>
-                (item.sku && p.sku === item.sku) ||
-                (item.name && p.name === item.name) ||
-                (item.productId != null &&
-                  p.id != null &&
-                  String(p.id) === String(item.productId))
-            );
-            if (matchedProduct?.commissionRate != null) {
-              productCommission = parseOrderMoney(matchedProduct.commissionRate);
-            } else if (matchedProduct && (matchedProduct as any).commission != null) {
-              productCommission = parseOrderMoney((matchedProduct as any).commission);
-            } else {
-              productCommission = parseOrderMoney(vendor.commission);
-            }
-          }
-
-          commission += (net * productCommission) / 100;
+          const pct = resolveLineCommissionPercentFromProducts(item, products, vendor.commission);
+          commission += (net * pct) / 100;
         }
       });
     });
@@ -1350,7 +1329,7 @@ export function VendorProfile({ vendor, onBack, onEdit, onPreviewVendorStore, on
               <p className="text-xl font-semibold text-slate-900 mt-1">{displayCommissionRate}%</p>
               <p className="text-xs text-slate-400 mt-0.5">{t(commissionRateDisplay.subtitleKey)}</p>
               <p className="text-xs text-green-600 mt-0.5">
-                {t("vendorProfile.toPay").replace("{amount}", formatMMK(commissionEarned))}
+                {t("vendorProfile.toPay").replace("{amount}", formatMMKPlain(commissionEarned))}
               </p>
             </div>
             <div className="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">

@@ -2,6 +2,10 @@
  * Vendor commission earned — aligned with server-side vendor_commission_withdraw.tsx:
  * accrues on ready-to-ship+ orders with collected payment, per line net of order-level discount.
  */
+import {
+  defaultVendorCommissionPercent,
+  resolveLineCommissionPercentFromProducts,
+} from "./commissionRate";
 
 export type VendorCatalogKeys = { ids: Set<string>; skus: Set<string> };
 
@@ -154,42 +158,8 @@ export function orderLineNetAfterDiscount(lineGross: number, order: any): number
   return lineGross;
 }
 
-function explicitCommissionPercent(value: unknown): number | null {
-  if (value == null || value === "") return null;
-  const n = parseOrderMoney(value);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-function productHasExplicitCommissionRate(product: any): boolean {
-  return (
-    product?.commissionRate !== undefined &&
-    product?.commissionRate !== null &&
-    String(product.commissionRate).trim() !== ""
-  );
-}
-
-function defaultVendorCommissionPercent(value: unknown): number {
-  if (value == null || value === "") return PLATFORM_DEFAULT_COMMISSION_PERCENT;
-  const parsed = explicitCommissionPercent(value);
-  return parsed != null ? parsed : PLATFORM_DEFAULT_COMMISSION_PERCENT;
-}
-
 function lineCommissionPercent(item: any, products: any[], vendorContractPercent: number): number {
-  const fromLine = explicitCommissionPercent(
-    item.commissionRate ?? item.commission ?? item.product?.commissionRate ?? item.product?.commission
-  );
-  if (fromLine != null) return fromLine;
-
-  const matched = products.find(
-    (p: any) =>
-      (item.sku && p.sku === item.sku) ||
-      (item.productId != null && p.id != null && String(p.id) === String(item.productId))
-  );
-  if (matched && productHasExplicitCommissionRate(matched)) {
-    const fromProduct = explicitCommissionPercent(matched.commissionRate ?? matched.commission);
-    if (fromProduct != null) return fromProduct;
-  }
-  return vendorContractPercent;
+  return resolveLineCommissionPercentFromProducts(item, products, vendorContractPercent);
 }
 
 /**

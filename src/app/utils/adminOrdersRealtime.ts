@@ -59,6 +59,9 @@ export function consumeSuperAdminFinancesSessionStale(): boolean {
   }
 }
 
+/** Merge rapid pulses before refetch so the table does not blink. */
+export const ADMIN_ORDERS_REALTIME_DEBOUNCE_MS = 180;
+
 /** Stagger refetches while SQL read model catches up after KV order writes. */
 export const ADMIN_ORDERS_REALTIME_RETRY_MS = 2000;
 
@@ -96,7 +99,7 @@ export function createAdminOrdersRealtimeRefetchScheduler(
         if (withRetry) {
           retryTimer = setTimeout(() => run(), ADMIN_ORDERS_REALTIME_RETRY_MS);
         }
-      }, 400);
+      }, ADMIN_ORDERS_REALTIME_DEBOUNCE_MS);
     },
     cancel() {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -126,6 +129,7 @@ export function shouldRetryAdminOrdersRealtime(reason: string | undefined): bool
     reason === "pwa-checkout-order-created" ||
     reason === "order-updated" ||
     reason === "vendor-admin-order-updated" ||
+    reason === "vendor-withdrawal" ||
     reason === "invalidate-admin-orders-cache"
   );
 }
@@ -143,7 +147,11 @@ export function notifyAdminOrdersUpdated(
     reason === "invalidate-admin-orders-cache" ||
     reason === "realtime-order-pulse" ||
     reason === "remove-admin-orders" ||
-    reason === "patch-admin-orders-status"
+    reason === "patch-admin-orders-status" ||
+    reason === "order-updated" ||
+    reason === "vendor-admin-order-updated" ||
+    reason === "vendor-withdrawal" ||
+    reason === "kpay-refund-payment-updated"
   ) {
     markSuperAdminFinancesSessionStale();
   }

@@ -1189,7 +1189,8 @@ export const zhTranslations: Record<string, string> = {
     'finances.platformCommission': '平台佣金',
     'finances.vendorPayout': '供应商付款',
     'finances.commissionPayout': '佣金支付占比',
-    'finances.commissionPayoutHint': '在所选日期范围内，按商品佣金比例计算的佣金总额。',
+    'finances.commissionPayoutHint':
+      '所选日期范围内已计提订单的供应商净收入（订单总额减去平台佣金）。',
     'finances.pendingPayouts': '待处理付款',
     'finances.overview': '概览',
     'finances.transactions': '交易',
@@ -1244,6 +1245,7 @@ export const zhTranslations: Record<string, string> = {
     'finances.trackingNumber': '跟踪号',
     'finances.completed': '已完成',
     'finances.pending': '待处理',
+    'finances.accrued': '已计提',
     'finances.failed': '失败',
     'finances.showing': '显示',
     'finances.of': '共',
@@ -1548,6 +1550,9 @@ export const zhTranslations: Record<string, string> = {
     'vendorAddEdit.accountStatusSection': '账户状态',
     'vendorAddEdit.accountStatus': '账户状态',
     'vendorAddEdit.selectStatus': '选择状态',
+    'vendorAddEdit.commissionRate': '默认佣金比例 (%)',
+    'vendorAddEdit.commissionRateHint':
+      '当产品未设置固定佣金时，平台按此供应商默认比例收取。产品级佣金会覆盖此默认值。',
     'vendorAddEdit.vendorLogo': '供应商标志',
     'vendorAddEdit.companyLogo': '公司标志',
     'vendorAddEdit.logoUploadHint': '上传供应商的公司标志',

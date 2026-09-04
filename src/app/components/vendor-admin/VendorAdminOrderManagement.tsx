@@ -86,7 +86,11 @@ import {
 import { deriveOrderPaymentMethodKey } from "../../utils/orderPaymentMethod";
 import {
   adminOrdersUpdatedStorageKey,
+  createAdminOrdersRealtimeRefetchScheduler,
   notifyAdminOrdersUpdated,
+  readAdminOrdersUpdatedStorageEvent,
+  shouldRetryAdminOrdersRealtime,
+  type AdminOrdersLoadOptions,
 } from "../../utils/adminOrdersRealtime";
 import { useAdminOrdersResyncOnVisible } from "../../hooks/useAdminOrdersResyncOnVisible";
 import { broadcastOrderStatusUpdate } from "../../utils/ordersRealtime";
@@ -374,7 +378,6 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
   const [ordersListPage, setOrdersListPage] = useState(1);
   const [ordersListPageSize, setOrdersListPageSize] = useState(ADMIN_PRODUCTS_INITIAL_PAGE_SIZE);
   const [serverTotalOrders, setServerTotalOrders] = useState(0);
-  const [ordersRefreshTick, setOrdersRefreshTick] = useState(0);
   const [statDateFilters, setStatDateFilters] = useState({
     revenue: "Last 30 days",
     commission: "Last 30 days",
@@ -382,6 +385,9 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     fulfilled: "Last 30 days",
   });
   const vendorOrdersSurfaceActiveRef = useRef(true);
+  const loadOrdersRef = useRef<(force?: boolean, opts?: AdminOrdersLoadOptions) => Promise<void>>(
+    async () => {},
+  );
 
   useEffect(() => {
     vendorOrdersSurfaceActiveRef.current = true;
@@ -392,7 +398,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      loadOrders(false);
+      void loadOrdersRef.current(false);
     }, 180);
     return () => window.clearTimeout(timer);
   }, [
@@ -406,30 +412,6 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     orderDateRange?.from?.getTime(),
     orderDateRange?.to?.getTime(),
   ]);
-
-  useEffect(() => {
-    if (ordersRefreshTick === 0) return;
-    void loadOrders(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordersRefreshTick]);
-
-  useEffect(() => {
-    const bump = () => setOrdersRefreshTick((n) => n + 1);
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== adminOrdersUpdatedStorageKey()) return;
-      bump();
-    };
-    window.addEventListener("adminOrdersUpdated", bump);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("adminOrdersUpdated", bump);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
-  useAdminOrdersResyncOnVisible(() => {
-    setOrdersRefreshTick((n) => n + 1);
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -455,8 +437,9 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     };
   }, [vendorId, vendorStoreSlug]);
 
-  const loadOrders = async (forceRefresh = false) => {
-    setListRefreshing(forceRefresh);
+  const loadOrders = async (forceRefresh = false, options?: AdminOrdersLoadOptions) => {
+    const silent = options?.silent === true;
+    if (!silent) setListRefreshing(forceRefresh);
     try {
       const from = orderDateRange?.from ? startOfDay(orderDateRange.from).toISOString() : "";
       const to = orderDateRange?.to ? endOfDay(orderDateRange.to).toISOString() : "";
@@ -471,7 +454,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
         from,
         to
       );
-      if (!moduleCache.peek(pageKey)) {
+      if (!silent && !moduleCache.peek(pageKey)) {
         setIsLoading(true);
       }
       console.log(`📦 Loading orders for vendor: ${vendorId}`);
@@ -514,6 +497,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
       }
       // Silent success path: keep tab revisits instant without noisy toasts.
     } catch (error: any) {
+      if (silent) return;
       // 🔇 SUPPRESS WARMUP ERRORS - these are expected during server startup
       const isWarmupError = error.name === 'TypeError' && error.message === 'Failed to fetch';
       
@@ -536,10 +520,47 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
       setOrders([]);
       setRawVendorOrders([]);
     } finally {
-      setIsLoading(false);
-      setListRefreshing(false);
+      if (!silent) {
+        setIsLoading(false);
+        setListRefreshing(false);
+      }
     }
   };
+  loadOrdersRef.current = loadOrders;
+
+  useEffect(() => {
+    const scheduler = createAdminOrdersRealtimeRefetchScheduler((force, opts) =>
+      loadOrdersRef.current(force, opts),
+    );
+    const bump = (ev: Event) => {
+      const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
+      if (
+        reason === "patch-admin-orders-status" ||
+        reason === "kpay-refund-payment-updated" ||
+        reason === "pwa-order-recovered" ||
+        reason === "remove-admin-orders"
+      ) {
+        return;
+      }
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(reason));
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== adminOrdersUpdatedStorageKey()) return;
+      const payload = readAdminOrdersUpdatedStorageEvent(e.newValue);
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(payload?.reason));
+    };
+    window.addEventListener("adminOrdersUpdated", bump);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      scheduler.cancel();
+      window.removeEventListener("adminOrdersUpdated", bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useAdminOrdersResyncOnVisible(() => {
+    void loadOrdersRef.current(true, { silent: true });
+  });
 
   const handlePwaOrderRecovered = () => {
     void loadOrders(true);

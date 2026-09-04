@@ -55,3 +55,70 @@ export function financesTransactionMatchesOrder(
   if (!txKey) return false;
   return txKey === id || (onum.length > 0 && txKey === onum);
 }
+
+export type FinancesVendorPayoutStatus = "pending" | "accrued" | "completed";
+
+export type FinancesVendorPayoutRow = {
+  id: string;
+  vendor: string;
+  email: string;
+  payout: number;
+  orders: number;
+  status: FinancesVendorPayoutStatus;
+};
+
+/** Badge label for super-admin vendor payout rows (accrued earnings, not KBZPay withdrawals). */
+export function vendorPayoutDisplayStatus(statuses: unknown[]): FinancesVendorPayoutStatus {
+  const accrued = statuses
+    .map((raw) => normalizeFinancesOrderStatus(raw))
+    .filter((status) => isAccruedFinancesOrder(status));
+  if (accrued.length === 0) return "pending";
+  const allCompleted = accrued.every(
+    (status) => status === "delivered" || status === "completed" || status === "complete",
+  );
+  if (allCompleted) return "completed";
+  const anyReady = accrued.some(
+    (status) =>
+      status === "ready-to-ship" ||
+      status === "readytoship" ||
+      status === "fulfilled" ||
+      status === "shipped" ||
+      status === "in-transit" ||
+      status === "shipping" ||
+      status === "delivered" ||
+      status === "completed" ||
+      status === "complete",
+  );
+  return anyReady ? "accrued" : "pending";
+}
+
+export function aggregateVendorPayoutsFromTransactions(
+  transactions: Array<Record<string, unknown>>,
+  emailById?: Map<string, string>,
+): FinancesVendorPayoutRow[] {
+  const map = new Map<string, FinancesVendorPayoutRow & { statuses: unknown[] }>();
+  for (const txn of transactions) {
+    if (isCancelledFinancesOrder(txn.status) || !isAccruedFinancesOrder(txn.status)) continue;
+    const id = String(txn.vendorId || txn.vendor || "unknown");
+    const cur =
+      map.get(id) || {
+        id,
+        vendor: String(txn.vendor || "Unknown"),
+        email: emailById?.get(id) || "",
+        payout: 0,
+        orders: 0,
+        status: "pending" as const,
+        statuses: [] as unknown[],
+      };
+    cur.payout += Number(txn.vendorPayout) || 0;
+    cur.orders += 1;
+    cur.statuses.push(txn.status);
+    if (!cur.email && emailById?.has(id)) cur.email = emailById.get(id)!;
+    if (txn.vendor) cur.vendor = String(txn.vendor);
+    map.set(id, cur);
+  }
+  return Array.from(map.values()).map(({ statuses, ...row }) => ({
+    ...row,
+    status: vendorPayoutDisplayStatus(statuses),
+  }));
+}

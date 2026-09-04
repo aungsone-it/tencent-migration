@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Building2, Mail, Phone, MapPin, Globe, Upload } from "lucide-react";
+import { ArrowLeft, Building2, Mail, Phone, MapPin, Globe, Upload, Percent } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card } from "./ui/card";
@@ -59,6 +59,10 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
     status: vendorData?.status || "pending",
     logo: vendorData?.logo || vendorData?.avatar || null,
     freeShippingEnabled: vendorData?.freeShippingEnabled === true,
+    commission:
+      vendorData?.commission != null && vendorData.commission !== ""
+        ? String(vendorData.commission)
+        : "",
   });
 
   useEffect(() => {
@@ -75,6 +79,10 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
         status: data?.status || "pending",
         logo: data?.logo || data?.avatar || null,
         freeShippingEnabled: data?.freeShippingEnabled === true,
+        commission:
+          data?.commission != null && data.commission !== ""
+            ? String(data.commission)
+            : "",
       });
     }
   }, [editingVendor, initialData]);
@@ -87,7 +95,11 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
 
     setIsLoading(true);
     try {
-      await onSave(formData);
+      const commissionRaw = String(formData.commission ?? "").trim();
+      await onSave({
+        ...formData,
+        commission: commissionRaw === "" ? 0 : parseFloat(commissionRaw) || 0,
+      });
     } catch (error) {
       console.error("Error saving vendor:", error);
     } finally {
@@ -223,6 +235,27 @@ export function VendorAddEdit({ onBack, onSave, initialData, mode = "add", editi
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="commission" className="text-sm font-medium text-slate-700">
+                  {t("vendorAddEdit.commissionRate")}
+                </Label>
+                <div className="relative mt-1.5">
+                  <Percent className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input
+                    id="commission"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    placeholder="0"
+                    value={formData.commission}
+                    onChange={(e) => setFormData({ ...formData, commission: e.target.value })}
+                    className="pl-10"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5">{t("vendorAddEdit.commissionRateHint")}</p>
               </div>
 
               <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">

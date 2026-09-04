@@ -35,6 +35,7 @@ import {
   getCachedFinancialAnalytics,
 } from "../utils/module-cache";
 import {
+  aggregateVendorPayoutsFromTransactions,
   isAccruedFinancesOrder,
   isCancelledFinancesOrder,
 } from "../utils/financesOrderStatus";
@@ -42,7 +43,13 @@ import {
   LS_ADMIN_FINANCES_ANALYTICS,
   readPersistedPayloadSavedAt,
 } from "../utils/persistedLocalCache";
-import { adminOrdersUpdatedStorageKey, consumeSuperAdminFinancesSessionStale } from "../utils/adminOrdersRealtime";
+import {
+  adminOrdersUpdatedStorageKey,
+  consumeSuperAdminFinancesSessionStale,
+  createAdminOrdersRealtimeRefetchScheduler,
+  readAdminOrdersUpdatedStorageEvent,
+  shouldRetryAdminOrdersRealtime,
+} from "../utils/adminOrdersRealtime";
 
 /** Large amount + very small MMK; font scales down inside @container cards for billion-scale values. */
 function FinancesStatMmk({ value }: { value: number }) {
@@ -109,7 +116,6 @@ export function Finances() {
   financialDataRef.current = financialData;
 
   const FINANCES_BACKGROUND_MAX_AGE_MS = 120_000;
-  const ordersRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cache-first: session module + localStorage via `getCachedFinancialAnalytics(false)` (no network when warm).
   // Forced refresh: session stale flag (storefront/admin orders), `adminOrdersUpdated`, cross-tab storage,
@@ -117,10 +123,11 @@ export function Finances() {
   useEffect(() => {
     let cancelled = false;
 
-    const load = async (forceRefresh: boolean) => {
+    const load = async (forceRefresh: boolean, options?: { silent?: boolean }) => {
+      const silent = options?.silent === true;
       const hadData = financialDataRef.current != null;
       if (!hadData) setLoading(true);
-      if (forceRefresh && hadData) setRevalidating(true);
+      if (forceRefresh && hadData && !silent) setRevalidating(true);
       try {
         const data = await getCachedFinancialAnalytics(forceRefresh);
         if (cancelled) return;
@@ -130,6 +137,7 @@ export function Finances() {
         if (cancelled) return;
         console.error("❌ Error fetching financial data:", err);
         const stillNoData = financialDataRef.current == null;
+        if (silent && !stillNoData) return;
         if (err.name === "AbortError") {
           if (stillNoData) {
             setError(
@@ -155,6 +163,8 @@ export function Finances() {
       }
     };
 
+    const scheduler = createAdminOrdersRealtimeRefetchScheduler((force, opts) => load(force, opts));
+
     const runInitial = async () => {
       const mustForce = consumeSuperAdminFinancesSessionStale();
       await load(mustForce);
@@ -179,30 +189,28 @@ export function Finances() {
 
     void runInitial();
 
-    const onOrdersUpdated = () => {
+    const onOrdersUpdated = (ev: Event) => {
+      const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
       const optimistic = readFinancialAnalyticsHydrate();
       if (optimistic) {
         setFinancialData(optimistic);
       }
-      if (ordersRefreshTimerRef.current) {
-        clearTimeout(ordersRefreshTimerRef.current);
-      }
-      ordersRefreshTimerRef.current = setTimeout(() => {
-        ordersRefreshTimerRef.current = null;
-        void load(true);
-      }, 250);
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(reason));
     };
     const onStorage = (e: StorageEvent) => {
       if (e.key !== adminOrdersUpdatedStorageKey()) return;
-      onOrdersUpdated();
+      const payload = readAdminOrdersUpdatedStorageEvent(e.newValue);
+      const optimistic = readFinancialAnalyticsHydrate();
+      if (optimistic) {
+        setFinancialData(optimistic);
+      }
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(payload?.reason));
     };
     window.addEventListener("adminOrdersUpdated", onOrdersUpdated);
     window.addEventListener("storage", onStorage);
     return () => {
       cancelled = true;
-      if (ordersRefreshTimerRef.current) {
-        clearTimeout(ordersRefreshTimerRef.current);
-      }
+      scheduler.cancel();
       window.removeEventListener("adminOrdersUpdated", onOrdersUpdated);
       window.removeEventListener("storage", onStorage);
     };
@@ -277,8 +285,8 @@ export function Finances() {
     [scopedAllTransactions, subscriptionCardTotals.gross]
   );
 
-  const commissionPayoutStatTotal =
-    totalCommission + subscriptionCardTotals.vendorPayout;
+  /** Vendor net from accrued orders only — aligned with the Revenue card scope. */
+  const commissionPayoutStatTotal = totalVendorPayout;
 
   const periodDays = chartPeriod === "7days" ? 7 : chartPeriod === "30days" ? 30 : 90;
 
@@ -327,24 +335,7 @@ export function Finances() {
     const emailById = new Map<string, string>(
       vendorPayouts.map((p: any) => [String(p.id), String(p.email || "")])
     );
-    const map = new Map<string, { id: string; vendor: string; email: string; payout: number; orders: number; status: string }>();
-    for (const t of scopedTransactions) {
-      const id = String(t.vendorId || t.vendor || "unknown");
-      const cur =
-        map.get(id) || {
-          id,
-          vendor: String(t.vendor || "Unknown"),
-          email: emailById.get(id) || "",
-          payout: 0,
-          orders: 0,
-          status: "pending",
-        };
-      cur.payout += Number(t.vendorPayout) || 0;
-      cur.orders += 1;
-      if (!cur.email && emailById.has(id)) cur.email = emailById.get(id)!;
-      map.set(id, cur);
-    }
-    return Array.from(map.values());
+    return aggregateVendorPayoutsFromTransactions(scopedTransactions, emailById);
   }, [scopedTransactions, vendorPayouts]);
 
   const filteredTransactions = scopedTransactions.filter((t: any) => {
@@ -903,11 +894,28 @@ export function Finances() {
                           <td className="py-3 px-4 text-sm font-medium text-slate-900">{payout.vendor}</td>
                           <td className="py-3 px-4 text-sm text-slate-600">{payout.email}</td>
                           <td className="py-3 px-4 text-sm text-center text-slate-900">{payout.orders}</td>
-                          <td className="py-3 px-4 text-sm font-medium text-right text-slate-900">
-                            ${(payout.payout || 0).toFixed(2)}
+                          <td className="py-3 px-4 text-sm font-medium text-right text-slate-900 tabular-nums">
+                            {formatNumber(payout.payout || 0)}{" "}
+                            <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                              MMK
+                            </span>
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <Badge variant="secondary">{payout.status}</Badge>
+                            <Badge
+                              variant={
+                                payout.status === "completed"
+                                  ? "default"
+                                  : payout.status === "accrued"
+                                    ? "outline"
+                                    : "secondary"
+                              }
+                            >
+                              {payout.status === "completed"
+                                ? t("finances.completed")
+                                : payout.status === "accrued"
+                                  ? t("finances.accrued")
+                                  : t("finances.pending")}
+                            </Badge>
                           </td>
                         </tr>
                       ))
@@ -939,7 +947,12 @@ export function Finances() {
                       </div>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-slate-900">${(method.amount || 0).toFixed(2)}</p>
+                      <p className="text-2xl font-bold text-slate-900 tabular-nums">
+                        {formatNumber(method.amount || 0)}{" "}
+                        <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                          MMK
+                        </span>
+                      </p>
                       <p className="text-sm text-slate-600 mt-1">{(method.percentage || 0).toFixed(1)}% of total</p>
                     </div>
                   </CardContent>

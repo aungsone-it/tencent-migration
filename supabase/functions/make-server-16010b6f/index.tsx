@@ -58,6 +58,15 @@ import {
   assertAdminMonitoringAllowed,
   assertDestructiveOperationAllowed,
 } from "./admin_operation_guard.tsx";
+import {
+  explicitCommissionPercent,
+  productHasExplicitCommissionRate,
+  resolveLineCommissionPercentFromCatalog,
+} from "./commission_rate.ts";
+import {
+  countSubscriptionTestData,
+  resetSubscriptionTestData,
+} from "./reset_subscription_test_data.ts";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import { applyNormalizedShippingToOrderBody, normalizeOrderShippingFields } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
@@ -2132,6 +2141,40 @@ app.post("/make-server-16010b6f/admin/clear-test-data", async (c) => {
   } catch (error) {
     console.error("❌ Error clearing test data:", error);
     return c.json({ error: "Failed to clear test data", details: String(error) }, 500);
+  }
+});
+
+// Admin: reset subscription + vendor withdrawal KV test data (Finances commission wallet)
+app.post("/make-server-16010b6f/admin/reset-subscription-test-data", async (c) => {
+  const denied = assertDestructiveOperationAllowed(c);
+  if (denied) return denied;
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const dryRun = Boolean((body as { dryRun?: boolean }).dryRun);
+    const before = await countSubscriptionTestData();
+
+    if (dryRun) {
+      return c.json({ success: true, dryRun: true, before }, 200);
+    }
+
+    if (!(body as { confirmDelete?: boolean }).confirmDelete) {
+      return c.json({ error: "Confirmation required", before }, 400);
+    }
+
+    const { after, deletedByStep } = await resetSubscriptionTestData();
+    return c.json(
+      {
+        success: true,
+        message: "Subscription and vendor withdrawal test data cleared",
+        before,
+        after,
+        deletedByStep,
+      },
+      200,
+    );
+  } catch (error) {
+    console.error("❌ Error resetting subscription test data:", error);
+    return c.json({ error: "Failed to reset subscription test data", details: String(error) }, 500);
   }
 });
 
@@ -10843,15 +10886,9 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
     };
 
     /** Commission % from number or string; null when unset. */
-    const parseCommissionPercent = (v: unknown): number | null => {
-      if (v == null || v === "") return null;
-      if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
-      const n = parseFloat(String(v).replace(/[^0-9.-]/g, ""));
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    };
+    const parseCommissionPercent = (v: unknown): number | null => explicitCommissionPercent(v);
 
-    const productHasExplicitRate = (rate: unknown) =>
-      rate !== undefined && rate !== null && String(rate).trim() !== "";
+    const productHasExplicitRate = (rate: unknown) => productHasExplicitCommissionRate({ commissionRate: rate });
 
     // 🔥 Create product lookup map for commission rates + owning vendor (line-level payout split)
     const productMap = new Map<string, { name: string; commissionRate: unknown; vendorId: string | null; hasExplicitRate: boolean }>();
@@ -10952,7 +10989,16 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
 
         for (const item of order.items) {
           const productInfo = resolveProductInfo(item);
-          const lineSub = parseMoney(item.price) * (item.quantity || 1);
+          const lineGross =
+            item.subtotal != null && item.subtotal !== ""
+              ? parseMoney(item.subtotal)
+              : parseMoney(item.price) * (item.quantity || 1);
+          const orderSub = parseMoney(order.subtotal);
+          const orderDisc = parseMoney(order.discount);
+          let lineNet = lineGross;
+          if (orderSub > 0 && orderDisc > 0) {
+            lineNet = Math.max(0, Math.round((lineGross - (orderDisc * lineGross) / orderSub) * 100) / 100);
+          }
 
           const lineVendorKey =
             (item.vendorId != null && String(item.vendorId).trim() !== "" && String(item.vendorId)) ||
@@ -10960,19 +11006,15 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
             (productInfo?.vendorId != null && String(productInfo.vendorId)) ||
             String(orderVendorFallback);
 
-          // Per-line %: line snapshot → product admin rate → vendor contract → 0% default
-          const rateFromLine = parseCommissionPercent(
-            item.commissionRate ?? item.commission ?? item.product?.commissionRate
-          );
-          const rateFromProduct = productInfo?.hasExplicitRate
-            ? parseCommissionPercent(productInfo.commissionRate)
-            : null;
           const vMetaForRate =
             vendorMap.get(lineVendorKey) ||
             (lineVendorKey === String(orderVendorFallback) ? vendorInfoFallback : null);
-          const rateFromVendor = parseCommissionPercent(vMetaForRate?.commission);
-          const rate = rateFromLine ?? rateFromProduct ?? rateFromVendor ?? 0;
-          const lineComm = lineSub * (rate / 100);
+          const rate = resolveLineCommissionPercentFromCatalog(
+            item,
+            productMap,
+            vMetaForRate?.commission ?? vendorInfoFallback.commission ?? 0,
+          );
+          const lineComm = lineNet * (rate / 100);
           commission += lineComm;
 
           const vMeta =
@@ -10986,33 +11028,21 @@ app.get("/make-server-16010b6f/finances/analytics", async (c) => {
             vendorKey: lineVendorKey,
             vendorName: vMeta.name || String(lineVendorKey),
             email: vMeta.email || "",
-            sub: lineSub,
+            sub: lineNet,
             comm: lineComm,
           });
         }
 
-        const vendorPool = Math.max(0, orderTotal - commission);
-        const sumLineNet = lineParts.reduce((s, p) => s + (p.sub - p.comm), 0);
-        const delta = vendorPool - sumLineNet;
-        if (lineParts.length > 0 && Math.abs(delta) > 0.01) {
-          lineParts[0].sub += delta;
-        }
+        // Vendor payout = product line net minus commission only (shipping excluded).
+        vendorPayout = lineParts.reduce((sum, p) => sum + Math.max(0, p.sub - p.comm), 0);
 
         for (const p of lineParts) {
           const net = Math.max(0, p.sub - p.comm);
           addVendorNet(p.vendorKey, p.vendorName, p.email, net);
         }
-
-        vendorPayout = vendorPool;
       } else {
         commission = 0;
-        vendorPayout = orderTotal;
-        addVendorNet(
-          String(orderVendorFallback),
-          vendorInfoFallback.name,
-          vendorInfoFallback.email,
-          vendorPayout
-        );
+        vendorPayout = 0;
       }
 
       if (commission === 0 && order.items?.length) {

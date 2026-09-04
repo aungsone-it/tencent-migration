@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 /** Min gap between tab-focus order refetches (Realtime is primary; this is HTTP fallback). */
-const ORDERS_VISIBILITY_RESYNC_MIN_MS = 45_000;
+const ORDERS_VISIBILITY_RESYNC_MIN_MS = 12_000;
 
 /**
  * When Realtime websocket drops (flaky network), refetch orders after the tab becomes visible.

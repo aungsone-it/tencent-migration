@@ -16,8 +16,8 @@ import {
   type StaffSessionRevokedPayload,
 } from "../utils/staffSessionRealtime";
 
-const PULSE_POLL_MS = 2_000;
-const PULSE_DEBOUNCE_MS = 350;
+const PULSE_POLL_MS = 1_000;
+const PULSE_DEBOUNCE_MS = 100;
 
 type PulseCounter = {
   bump: number;

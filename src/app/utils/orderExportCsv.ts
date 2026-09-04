@@ -57,8 +57,8 @@ const EXPORT_HEADERS = [
   "Status",
   "Payment",
   "logistic",
-  "delivery date",
   "Order note",
+  "delivery date",
 ] as const;
 
 function escapeCsvField(v: unknown): string {
@@ -296,8 +296,8 @@ export function buildOrderExportSpreadsheetHtml(orders: OrderExportInput[]): str
         cells.push(rowspanCell(escapeHtml(order.status), span));
         cells.push(rowspanCell(escapeHtml(order.paymentStatus), span));
         cells.push(rowspanCell(escapeHtml(order.logistic), span));
-        cells.push(rowspanCell(escapeHtml(order.deliveryDate), span));
         cells.push(rowspanCell(escapeHtml(order.notes), span));
+        cells.push(rowspanCell(escapeHtml(order.deliveryDate), span));
       }
 
       bodyRows.push(`<tr>${cells.join("")}</tr>`);
@@ -345,8 +345,8 @@ export function buildOrderExportCsv(orders: OrderExportInput[]): string {
           isFirstLine ? escapeCsvField(order.status) : "",
           isFirstLine ? escapeCsvField(order.paymentStatus) : "",
           isFirstLine ? escapeCsvField(order.logistic) : "",
-          isFirstLine ? escapeCsvField(order.deliveryDate) : "",
           isFirstLine ? escapeCsvField(order.notes) : "",
+          isFirstLine ? escapeCsvField(order.deliveryDate) : "",
         ].join(","),
       );
     });

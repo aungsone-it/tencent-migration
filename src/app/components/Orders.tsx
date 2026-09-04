@@ -30,7 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { AdminDateRangeFilterPopover } from "./AdminDateRangeFilterPopover";
+import { AdminDateRangeFilterSectionModal, formatAdminDateRangeLabel } from "./AdminDateRangeFilterPopover";
 import { Label } from "./ui/label";
 import { Separator } from "./ui/separator";
 import { Skeleton } from "./ui/skeleton";
@@ -93,11 +93,12 @@ import {
   subscribeOrderStatusUpdates,
 } from "../utils/ordersRealtime";
 import {
-  buildOrderShippingAddressLine,
-  extractOrderShippingFields,
-  resolveOrderSellerId,
-} from "../utils/orderShippingAddress";
-import { buildOrderExportSpreadsheetHtml } from "../utils/orderExportCsv";
+  downloadOrderExportSpreadsheet,
+  enrichOrdersForExport,
+  fetchAllAdminOrdersForExport,
+  fetchFilteredAdminOrdersForExport,
+  resolveSelectedOrdersForExport,
+} from "../utils/orderExportActions";
 import {
   mapApiOrdersToOrderItems,
   type AdminOrderItem,
@@ -683,12 +684,15 @@ export function Orders({
   const [orderDateRange, setOrderDateRange] = useState<DateRange | undefined>(undefined);
   const [orderDatePickerOpen, setOrderDatePickerOpen] = useState(false);
   const dateFrom = orderDateRange?.from;
-  const dateTo = orderDateRange?.to;
+  const dateTo = orderDateRange?.to ?? dateFrom;
+  const orderDateFromParam = dateFrom ? format(dateFrom, "yyyy-MM-dd") : "";
+  const orderDateToParam = dateTo ? format(dateTo, "yyyy-MM-dd") : "";
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<OrderStatus>("processing");
   const [isDeletingOrders, setIsDeletingOrders] = useState(false);
+  const [isExportingOrders, setIsExportingOrders] = useState(false);
   
   const initialOrdersPayload = useMemo(
     () =>
@@ -865,8 +869,8 @@ export function Orders({
             status: statusFilter,
             payment: paymentFilter,
             vendor: vendorFilter,
-            dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : "",
-            dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : "",
+            dateFrom: orderDateFromParam,
+            dateTo: orderDateToParam,
             sort: sortOrder,
           },
           forceRefresh
@@ -1493,52 +1497,81 @@ export function Orders({
 
   const hasActiveFilters = searchQuery || statusFilter !== "all" || paymentFilter !== "all" || vendorFilter !== "all" || dateFrom || dateTo;
 
-  const exportOrders = () => {
-    void (async () => {
-      const rows = [...displayOrders];
-      const missingSellerId = rows.filter(
-        (order) => !resolveOrderSellerId(order as Record<string, unknown>),
-      );
-
-      if (missingSellerId.length > 0) {
-        await Promise.all(
-          missingSellerId.map(async (order) => {
-            const lookup = String(order.orderNumber || order.id || "").trim();
-            if (!lookup) return;
-            try {
-              const response = await ordersApi.getById(lookup);
-              const full = response?.order as Record<string, unknown> | undefined;
-              if (!full) return;
-              const shipping = extractOrderShippingFields(full);
-              const sellerId = resolveOrderSellerId(full);
-              if (!sellerId) return;
-              const rowKey = getOrderListRowKey(order);
-              const idx = rows.findIndex((row) => getOrderListRowKey(row) === rowKey);
-              if (idx < 0) return;
-              rows[idx] = {
-                ...rows[idx],
-                sellerId,
-                zipCode: shipping.zipCode || rows[idx].zipCode,
-                address: rows[idx].address || shipping.address,
-                city: rows[idx].city || shipping.city,
-                state: rows[idx].state || shipping.state,
-              };
-            } catch {
-              /* keep row without seller ID */
-            }
-          }),
-        );
+  const runOrderExport = async (
+    loadRows: () => Promise<AdminOrderItem[]>,
+    filenamePrefix: string,
+    emptyMessage: string,
+  ) => {
+    if (isExportingOrders) return;
+    setIsExportingOrders(true);
+    try {
+      const rows = await loadRows();
+      if (rows.length === 0) {
+        toast.error(emptyMessage);
+        return;
       }
+      const enriched = await enrichOrdersForExport(rows);
+      downloadOrderExportSpreadsheet(enriched, filenamePrefix);
+      toast.success(
+        t("orders.exportSuccess")?.replace("{count}", String(rows.length)) ||
+          `Exported ${rows.length} order(s).`,
+      );
+    } catch (error) {
+      console.error("Order export failed:", error);
+      toast.error(t("orders.exportError"));
+    } finally {
+      setIsExportingOrders(false);
+    }
+  };
 
-      const spreadsheetHtml = buildOrderExportSpreadsheetHtml(rows);
-      const blob = new Blob([spreadsheetHtml], { type: "application/vnd.ms-excel;charset=utf-8" });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `orders_${format(new Date(), "yyyy-MM-dd")}.xls`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    })();
+  const exportSelectedOrders = () => {
+    if (selectedOrders.length === 0) {
+      toast.error(t("orders.exportSelectFirst"));
+      return;
+    }
+    void runOrderExport(
+      () => resolveSelectedOrdersForExport(selectedOrders, orders),
+      "orders_selected",
+      t("orders.exportSelectFirst"),
+    );
+  };
+
+  const exportAllOrders = () => {
+    void runOrderExport(
+      fetchAllAdminOrdersForExport,
+      "orders_all",
+      t("orders.exportEmpty"),
+    );
+  };
+
+  const buildFilteredExportFilename = () => {
+    const from = orderDateFromParam;
+    const to = orderDateToParam;
+    if (from && to) return `orders_${from}_to_${to}`;
+    if (from) return `orders_from_${from}`;
+    if (to) return `orders_to_${to}`;
+    return "orders_filtered";
+  };
+
+  const exportFilteredOrders = () => {
+    if (!hasActiveFilters) {
+      toast.error(t("orders.exportSetFiltersFirst"));
+      return;
+    }
+    void runOrderExport(
+      () =>
+        fetchFilteredAdminOrdersForExport({
+          q: debouncedSearch,
+          status: statusFilter,
+          payment: paymentFilter,
+          vendor: vendorFilter,
+          dateFrom: orderDateFromParam,
+          dateTo: orderDateToParam,
+          sort: sortOrder,
+        }),
+      buildFilteredExportFilename(),
+      t("orders.exportFilteredEmpty"),
+    );
   };
 
   const performOrderDeletes = async (rowsToDelete: OrderItem[]) => {
@@ -1850,9 +1883,40 @@ export function Orders({
                       {t("orders.clearFilters")}
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={exportOrders}>
+                  {hasActiveFilters && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={exportFilteredOrders}
+                      disabled={isExportingOrders}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      {t("orders.exportFilteredCount")?.replace("{count}", String(ordersTotal)) ||
+                        `Export filtered (${ordersTotal})`}
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportSelectedOrders}
+                    disabled={isExportingOrders || selectedOrders.length === 0}
+                  >
                     <Download className="w-4 h-4 mr-2" />
-                    {t("orders.export")}
+                    {selectedOrders.length > 0
+                      ? (t("orders.exportSelectedCount")?.replace(
+                          "{count}",
+                          String(selectedOrders.length),
+                        ) || `Export selected (${selectedOrders.length})`)
+                      : t("orders.exportSelected")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportAllOrders}
+                    disabled={isExportingOrders}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    {t("orders.exportAll")}
                   </Button>
                   {SHOW_ORDERS_DELETE_BUTTON && (
                     <Button
@@ -1925,25 +1989,16 @@ export function Orders({
                     ))}
                   </SelectContent>
                 </Select>
-                <AdminDateRangeFilterPopover
-                  value={orderDateRange}
-                  onChange={setOrderDateRange}
-                  hintText={t("admin.dateFilter.hintOrders")}
-                  open={orderDatePickerOpen}
-                  onOpenChange={setOrderDatePickerOpen}
-                  align="start"
+                <Button
+                  variant="outline"
+                  className="w-full sm:w-auto justify-start border-slate-300"
+                  onClick={() => setOrderDatePickerOpen(true)}
                 >
-                  <Button variant="outline" className="w-full sm:w-auto justify-start border-slate-300">
-                    <Calendar className="mr-2 h-4 w-4 shrink-0" />
-                    <span className="truncate text-left">
-                      {!orderDateRange?.from
-                        ? t("finances.allTime")
-                        : !orderDateRange.to
-                          ? t("finances.selectEndDate")
-                          : `${format(orderDateRange.from, "MMM d, yyyy")} – ${format(orderDateRange.to, "MMM d, yyyy")}`}
-                    </span>
-                  </Button>
-                </AdminDateRangeFilterPopover>
+                  <Calendar className="mr-2 h-4 w-4 shrink-0" />
+                  <span className="truncate text-left">
+                    {formatAdminDateRangeLabel(orderDateRange, t("finances.allTime"))}
+                  </span>
+                </Button>
               </div>
             </div>
           </Card>
@@ -2177,6 +2232,15 @@ export function Orders({
               </div>
             </div>
           </Card>
+          <AdminDateRangeFilterSectionModal
+            open={orderDatePickerOpen}
+            onOpenChange={setOrderDatePickerOpen}
+            value={orderDateRange}
+            onChange={setOrderDateRange}
+            hintText={t("admin.dateFilter.hintOrders")}
+            showPresets
+            initialPickerMode="single"
+          />
         </TabsContent>
 
         {/* Analytics Tab */}

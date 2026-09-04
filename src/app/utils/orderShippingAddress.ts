@@ -56,13 +56,43 @@ export function extractOrderShippingFields(
 }
 
 export function buildOrderShippingAddressLine(fields: OrderShippingFields): string {
-  const structured = [fields.address, fields.city, fields.state, fields.zipCode, fields.country]
+  const structured = [fields.address, fields.city, fields.state, fields.country]
     .map((part) => String(part || "").trim())
     .filter(Boolean);
 
   if (structured.length >= 2) return structured.join(", ");
   if (fields.shippingAddress?.trim()) return fields.shippingAddress.trim();
   return structured.join(", ");
+}
+
+/** Remove seller ID suffix from a joined address line (legacy rows may include it). */
+export function stripSellerIdFromAddressLine(
+  addressLine: string,
+  sellerId: string | undefined,
+): string {
+  const sid = String(sellerId || "").trim();
+  if (!sid || !addressLine.trim()) return addressLine;
+  const trimmed = addressLine.trim();
+  if (trimmed === sid) return "";
+  if (trimmed.endsWith(`, ${sid}`)) return trimmed.slice(0, -(sid.length + 2)).trim();
+  if (trimmed.endsWith(`,${sid}`)) return trimmed.slice(0, -(sid.length + 1)).trim();
+  return addressLine;
+}
+
+/** Address lines for invoice/print — seller ID is shown on its own line. */
+export function shippingAddressLinesForInvoice(
+  shippingAddress: string | undefined,
+  sellerId: string | undefined,
+): string[] {
+  const sid = String(sellerId || "").trim();
+  const raw = (shippingAddress || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lines = sid
+    ? raw.map((line) => stripSellerIdFromAddressLine(line, sid)).filter(Boolean)
+    : raw;
+  return lines.length > 0 ? lines : ["No address provided"];
 }
 
 export function hasStructuredShippingFields(fields: OrderShippingFields): boolean {

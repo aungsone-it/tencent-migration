@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLanguage } from "../contexts/LanguageContext";
 import {
   cloudbaseApiBaseUrl,
   cloudbasePublishableKey,
@@ -126,6 +127,7 @@ function Metric({
 }
 
 export function AdminSubscriptionPlans() {
+  const { t } = useLanguage();
   const [plans, setPlans] = useState<PlatformPlan[]>([]);
   const [summary, setSummary] = useState({ total: 0, active: 0, inactive: 0, vendors: 0, activePlanValue: 0 });
   const [query, setQuery] = useState("");
@@ -140,11 +142,11 @@ export function AdminSubscriptionPlans() {
       setPlans(Array.isArray(data.plans) ? data.plans : []);
       setSummary(data.summary || {});
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load plans");
+      toast.error(error instanceof Error ? error.message : t("subscriptions.loadPlansFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -171,18 +173,28 @@ export function AdminSubscriptionPlans() {
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-lg shadow-violet-200">
           <Crown className="h-6 w-6" />
         </span>
-        <div><h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Subscription Plans</h1><p className="mt-1 text-sm text-slate-500">Monitor memberships published across every vendor storefront.</p></div>
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{t("subscriptions.plans.title")}</h1>
+          <p className="mt-1 text-sm text-slate-500">{t("subscriptions.plans.subtitle")}</p>
+        </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Total plans" value={summary.total} icon={Layers3} tone="bg-violet-50 text-violet-600" />
-        <Metric label="Active plans" value={summary.active} icon={UserCheck} tone="bg-emerald-50 text-emerald-600" />
-        <Metric label="Vendors offering plans" value={summary.vendors} icon={Building2} tone="bg-blue-50 text-blue-600" />
-        <Metric label="Combined plan value" value={mmk(summary.activePlanValue)} icon={CircleDollarSign} tone="bg-amber-50 text-amber-600" />
+        <Metric label={t("subscriptions.metrics.totalPlans")} value={summary.total} icon={Layers3} tone="bg-violet-50 text-violet-600" />
+        <Metric label={t("subscriptions.metrics.activePlans")} value={summary.active} icon={UserCheck} tone="bg-emerald-50 text-emerald-600" />
+        <Metric label={t("subscriptions.metrics.vendorsOfferingPlans")} value={summary.vendors} icon={Building2} tone="bg-blue-50 text-blue-600" />
+        <Metric label={t("subscriptions.metrics.combinedPlanValue")} value={mmk(summary.activePlanValue)} icon={CircleDollarSign} tone="bg-amber-50 text-amber-600" />
       </div>
       <Card className="overflow-hidden rounded-3xl border-slate-200 shadow-[0_12px_40px_rgba(15,23,42,0.05)]">
-        <SearchBar query={query} setQuery={setQuery} placeholder="Search plan, vendor, description, or status..." resultLabel={`${visible.length} of ${plans.length} plans`} />
+        <SearchBar
+          query={query}
+          setQuery={setQuery}
+          placeholder={t("subscriptions.searchPlansPlaceholder")}
+          resultLabel={t("subscriptions.plansCount")
+            .replace("{visible}", String(visible.length))
+            .replace("{total}", String(plans.length))}
+        />
         {visible.length === 0 ? (
-          <div className="py-16 text-center text-sm text-slate-500">No subscription plans found.</div>
+          <div className="py-16 text-center text-sm text-slate-500">{t("subscriptions.noPlans")}</div>
         ) : (
           <div className={`${planGridClass} gap-5 bg-slate-50/60 p-5 sm:p-6`}>
             {visible.map((plan) => (
@@ -195,12 +207,14 @@ export function AdminSubscriptionPlans() {
                     </span>
                     <div className="min-w-0"><h2 className="truncate text-lg font-extrabold tracking-tight text-slate-900">{plan.name}</h2><p className="mt-1 flex items-center gap-1.5 truncate text-sm font-medium text-slate-500"><Building2 className="h-3.5 w-3.5" />{plan.vendorName}</p></div>
                   </div>
-                  <Badge className={plan.status === "active" ? "border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700" : "border border-slate-200 bg-slate-100 px-2.5 py-1 text-slate-600"}>{plan.status}</Badge>
+                  <Badge className={plan.status === "active" ? "border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700" : "border border-slate-200 bg-slate-100 px-2.5 py-1 text-slate-600"}>
+                    {t(`subscriptions.status.${plan.status}`)}
+                  </Badge>
                 </div>
                 <div className="mt-6 rounded-2xl bg-gradient-to-br from-slate-950 to-slate-800 px-5 py-4 text-white">
-                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">Monthly membership</p>
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">{t("subscriptions.monthlyMembership")}</p>
                   <p className="mt-1 text-3xl font-black tracking-tight">{Math.round(plan.price || 0).toLocaleString()} <span className="text-sm font-semibold text-violet-300">MMK</span></p>
-                  <p className="mt-1 text-xs text-slate-400">Renews manually every 30 days</p>
+                  <p className="mt-1 text-xs text-slate-400">{t("subscriptions.renewsManually")}</p>
                 </div>
                 {plan.description && <p className="mt-4 line-clamp-2 text-sm leading-6 text-slate-600">{plan.description}</p>}
                 <div className="mt-4 space-y-2">
@@ -212,8 +226,8 @@ export function AdminSubscriptionPlans() {
                   ))}
                 </div>
                 <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-4 text-xs font-medium text-slate-500">
-                  <span>{plan.promises?.length || 0} subscriber promises</span>
-                  <span className="text-violet-600">Vendor managed</span>
+                  <span>{t("subscriptions.subscriberPromises").replace("{count}", String(plan.promises?.length || 0))}</span>
+                  <span className="text-violet-600">{t("subscriptions.vendorManaged")}</span>
                 </div>
               </article>
             ))}
@@ -225,6 +239,7 @@ export function AdminSubscriptionPlans() {
 }
 
 export function AdminSubscriptionSubscribers() {
+  const { t } = useLanguage();
   const [subscribers, setSubscribers] = useState<PlatformSubscriber[]>([]);
   const [summary, setSummary] = useState({ total: 0, active: 0, expired: 0, vendors: 0, activeValue: 0 });
   const [query, setQuery] = useState("");
@@ -239,11 +254,11 @@ export function AdminSubscriptionSubscribers() {
       setSubscribers(Array.isArray(data.subscribers) ? data.subscribers : []);
       setSummary(data.summary || {});
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load subscribers");
+      toast.error(error instanceof Error ? error.message : t("subscriptions.loadSubscribersFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -264,25 +279,39 @@ export function AdminSubscriptionSubscribers() {
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-      <div><h1 className="text-2xl font-bold text-slate-900">Platform Subscribers</h1><p className="text-slate-600">View memberships purchased across all vendor storefronts.</p></div>
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">{t("subscriptions.subscribers.title")}</h1>
+        <p className="text-slate-600">{t("subscriptions.subscribers.subtitle")}</p>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Total subscribers" value={summary.total} icon={Users} tone="bg-violet-50 text-violet-600" />
-        <Metric label="Active" value={summary.active} icon={UserCheck} tone="bg-emerald-50 text-emerald-600" />
-        <Metric label="Vendors with subscribers" value={summary.vendors} icon={Building2} tone="bg-blue-50 text-blue-600" />
-        <Metric label="Active membership value" value={mmk(summary.activeValue)} icon={CircleDollarSign} tone="bg-amber-50 text-amber-600" />
+        <Metric label={t("subscriptions.metrics.totalSubscribers")} value={summary.total} icon={Users} tone="bg-violet-50 text-violet-600" />
+        <Metric label={t("subscriptions.metrics.active")} value={summary.active} icon={UserCheck} tone="bg-emerald-50 text-emerald-600" />
+        <Metric label={t("subscriptions.metrics.vendorsWithSubscribers")} value={summary.vendors} icon={Building2} tone="bg-blue-50 text-blue-600" />
+        <Metric label={t("subscriptions.metrics.activeMembershipValue")} value={mmk(summary.activeValue)} icon={CircleDollarSign} tone="bg-amber-50 text-amber-600" />
       </div>
       <Card className="overflow-hidden">
-        <SearchBar query={query} setQuery={setQuery} placeholder="Search subscriber, phone, vendor, plan, or status..." resultLabel={`${visible.length} of ${subscribers.length} subscribers`} />
+        <SearchBar
+          query={query}
+          setQuery={setQuery}
+          placeholder={t("subscriptions.searchSubscribersPlaceholder")}
+          resultLabel={t("subscriptions.subscribersCount")
+            .replace("{visible}", String(visible.length))
+            .replace("{total}", String(subscribers.length))}
+        />
         {visible.length === 0 ? (
-          <div className="py-16 text-center text-sm text-slate-500">No subscribers found.</div>
+          <div className="py-16 text-center text-sm text-slate-500">{t("subscriptions.noSubscribers")}</div>
         ) : (
           <div>
             <div className="hidden grid-cols-[minmax(240px,1.2fr)_minmax(180px,0.8fr)_minmax(170px,0.8fr)_110px_minmax(210px,1fr)] gap-5 border-b bg-slate-50 px-6 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 lg:grid">
-              <span>Subscriber</span><span>Vendor</span><span>Membership</span><span>Status</span><span>Billing period</span>
+              <span>{t("subscriptions.table.subscriber")}</span>
+              <span>{t("subscriptions.table.vendor")}</span>
+              <span>{t("subscriptions.table.membership")}</span>
+              <span>{t("subscriptions.table.status")}</span>
+              <span>{t("subscriptions.table.billingPeriod")}</span>
             </div>
             <div className="divide-y">
               {visible.map((item) => {
-                const name = item.customerName || "Customer";
+                const name = item.customerName || t("subscriptions.customerFallback");
                 const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
                 return (
                   <article key={item.id} className="grid gap-4 px-4 py-5 hover:bg-slate-50 sm:px-6 lg:grid-cols-[minmax(240px,1.2fr)_minmax(180px,0.8fr)_minmax(170px,0.8fr)_110px_minmax(210px,1fr)] lg:items-center lg:gap-5">
@@ -292,8 +321,10 @@ export function AdminSubscriptionSubscribers() {
                     </div>
                     <p className="flex items-center gap-2 font-medium"><Building2 className="h-4 w-4 text-slate-400" />{item.vendorName}</p>
                     <div><p className="font-medium">{item.plan?.name}</p><p className="text-xs text-slate-500">{mmk(item.plan?.price)}</p></div>
-                    <Badge className={item.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}>{item.status}</Badge>
-                    <div className="rounded-xl bg-slate-50 p-3 text-sm"><p className="flex items-center gap-2 font-medium"><CalendarClock className="h-4 w-4 text-slate-500" />{date(item.currentPeriodStart)} – {date(item.currentPeriodEnd)}</p><p className="mt-1 pl-6 text-xs text-slate-500">Manual renewal</p></div>
+                    <Badge className={item.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}>
+                      {t(`subscriptions.status.${item.status}`)}
+                    </Badge>
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm"><p className="flex items-center gap-2 font-medium"><CalendarClock className="h-4 w-4 text-slate-500" />{date(item.currentPeriodStart)} – {date(item.currentPeriodEnd)}</p><p className="mt-1 pl-6 text-xs text-slate-500">{t("subscriptions.manualRenewal")}</p></div>
                   </article>
                 );
               })}

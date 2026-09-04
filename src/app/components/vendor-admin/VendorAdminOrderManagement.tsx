@@ -29,7 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
-import { AdminDateRangeFilterPopover } from "../AdminDateRangeFilterPopover";
+import { AdminDateRangeFilterPopover, formatAdminDateRangeLabel } from "../AdminDateRangeFilterPopover";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { formatOrderNumberDisplay } from "../../utils/orderNumber";
 import { Label } from "../ui/label";
@@ -1503,15 +1503,13 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
                   open={orderDatePickerOpen}
                   onOpenChange={setOrderDatePickerOpen}
                   align="start"
+                  showPresets
+                  initialPickerMode="single"
                 >
                   <Button variant="outline" className="w-full sm:w-auto justify-start border-slate-300">
                     <Calendar className="mr-2 h-4 w-4 shrink-0" />
                     <span className="truncate text-left">
-                      {!orderDateRange?.from
-                        ? t("finances.allTime")
-                        : !orderDateRange.to
-                          ? t("finances.selectEndDate")
-                          : `${format(orderDateRange.from, "MMM d, yyyy")} – ${format(orderDateRange.to, "MMM d, yyyy")}`}
+                      {formatAdminDateRangeLabel(orderDateRange, t("finances.allTime"))}
                     </span>
                   </Button>
                 </AdminDateRangeFilterPopover>

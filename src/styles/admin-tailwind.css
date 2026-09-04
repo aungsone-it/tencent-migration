@@ -66,3 +66,18 @@
 @source '../app/components/CacheDebugPanel.tsx';
 @source '../app/components/RequestAnalyzer.tsx';
 @source '../app/components/ui/chart.tsx';
+
+@keyframes admin-date-modal-enter {
+  0% {
+    transform: translateY(-32px) scale(0.98);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.admin-date-modal-box {
+  animation: admin-date-modal-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

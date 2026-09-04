@@ -87,6 +87,8 @@ function navKeyForLabel(label: string): string {
     "Collaborator profile": "nav.collaborator",
     "Collaborator applications": "nav.collaborator",
     Search: "nav.search",
+    "Subscription Plans": "subscriptions.plans.title",
+    "Subscription Subscribers": "subscriptions.subscribers.title",
   };
   return map[label] ?? label;
 }

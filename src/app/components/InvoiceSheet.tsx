@@ -6,6 +6,7 @@ import {
   formatPaymentStatusLabel,
 } from "../utils/normalizeOrderBadgeStatus";
 import { isKPayOrderLike } from "../utils/orderPaymentMethod";
+import { shippingAddressLinesForInvoice } from "../utils/orderShippingAddress";
 
 export interface InvoiceLineItem {
   id?: string;
@@ -105,9 +106,10 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
   const discountPercentage =
     subtotal > 0 ? Math.round((actualDiscount / subtotal) * 100) : 0;
 
-  const shippingLines = (order.shippingAddress || "No address provided")
-    .split("\n")
-    .filter((line) => line.trim());
+  const shippingLines = shippingAddressLinesForInvoice(
+    order.shippingAddress,
+    order.sellerId,
+  );
 
   const customerName =
     typeof order.customer === "string"

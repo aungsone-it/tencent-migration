@@ -1,5 +1,6 @@
 import type { InvoiceSheetOrder } from "../components/InvoiceSheet";
 import { derivePaymentStatusFromOrder } from "./normalizeOrderBadgeStatus";
+import { shippingAddressLinesForInvoice } from "./orderShippingAddress";
 
 /** Map admin order detail / list row → printable invoice payload. */
 export function toInvoiceSheetOrder(order: {
@@ -39,13 +40,19 @@ export function toInvoiceSheetOrder(order: {
   const shippingFee =
     order.shippingFee ?? order.shippingCost ?? order.shipping ?? 0;
 
+  const sellerId = String(order.sellerId || order.zipCode || "").trim() || undefined;
+  const shippingAddress = shippingAddressLinesForInvoice(
+    order.shippingAddress,
+    sellerId,
+  ).join("\n");
+
   return {
     orderNumber: order.orderNumber,
     date: order.date,
     customer: order.customer,
     phone: order.phone,
-    sellerId: String(order.sellerId || order.zipCode || "").trim() || undefined,
-    shippingAddress: order.shippingAddress,
+    sellerId,
+    shippingAddress,
     products: order.products,
     items: order.items,
     total: order.total,

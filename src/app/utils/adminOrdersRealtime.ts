@@ -75,8 +75,11 @@ export function createAdminOrdersRealtimeRefetchScheduler(
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlight = false;
   let queued = false;
+  let retryWanted = false;
+  let cancelled = false;
 
   const run = () => {
+    if (cancelled) return;
     if (inFlight) {
       queued = true;
       return;
@@ -84,6 +87,7 @@ export function createAdminOrdersRealtimeRefetchScheduler(
     inFlight = true;
     queued = false;
     void Promise.resolve(load(true, { silent: true })).finally(() => {
+      if (cancelled) return;
       inFlight = false;
       if (queued) run();
     });
@@ -91,22 +95,28 @@ export function createAdminOrdersRealtimeRefetchScheduler(
 
   return {
     schedule(withRetry = false) {
+      if (cancelled) return;
+      if (withRetry) retryWanted = true;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
+        const doRetry = retryWanted;
+        retryWanted = false;
         run();
         if (retryTimer) clearTimeout(retryTimer);
-        if (withRetry) {
+        if (doRetry) {
           retryTimer = setTimeout(() => run(), ADMIN_ORDERS_REALTIME_RETRY_MS);
         }
       }, ADMIN_ORDERS_REALTIME_DEBOUNCE_MS);
     },
     cancel() {
+      cancelled = true;
       if (debounceTimer) clearTimeout(debounceTimer);
       if (retryTimer) clearTimeout(retryTimer);
       debounceTimer = null;
       retryTimer = null;
       queued = false;
+      retryWanted = false;
     },
   };
 }

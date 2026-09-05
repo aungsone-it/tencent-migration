@@ -18,12 +18,8 @@ const port = Number(process.env.LOCAL_API_PORT || 8787);
 function ensureBundle() {
   const bundleEntry = path.join(fnDir, "index.js");
   const bundledApp = path.join(fnDir, "app.cjs");
-  const sourceIndex = path.join(root, "supabase", "functions", "make-server-16010b6f", "index.tsx");
-  const orderNumberModule = path.join(root, "supabase", "functions", "make-server-16010b6f", "order_number.ts");
-  const sourceMtime = Math.max(
-    fs.existsSync(sourceIndex) ? fs.statSync(sourceIndex).mtimeMs : 0,
-    fs.existsSync(orderNumberModule) ? fs.statSync(orderNumberModule).mtimeMs : 0,
-  );
+  const sourceDir = path.join(root, "supabase", "functions", "make-server-16010b6f");
+  const sourceMtime = latestMtime(sourceDir);
   const bundleMtime = fs.existsSync(bundledApp) ? fs.statSync(bundledApp).mtimeMs : 0;
   const needsRebuild = !fs.existsSync(bundleEntry) || sourceMtime > bundleMtime;
 
@@ -45,6 +41,21 @@ function ensureBundle() {
     });
     if (install.status !== 0) process.exit(install.status || 1);
   }
+}
+
+function latestMtime(dir) {
+  let latest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      latest = Math.max(latest, latestMtime(fullPath));
+      continue;
+    }
+    if (!/\.(tsx?|jsx?|mjs|cjs|json)$/.test(entry.name)) continue;
+    latest = Math.max(latest, fs.statSync(fullPath).mtimeMs);
+  }
+  return latest;
 }
 
 loadEnvFile();

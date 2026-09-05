@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import * as kv from "./kv_store.tsx";
+import { assertVendorSession } from "./vendor_session_guard.tsx";
+import { deleteVendorSubscriberRecords, resolveVendorIdFromSlugOrId } from "./subscription_subscriber_delete.ts";
 
 type PlanStatus = "active" | "inactive";
 type SubscriptionPlan = {
@@ -277,6 +279,40 @@ app.get("/vendor/subscribers/:vendorId", async (c) => {
   } catch (error) {
     console.error("Failed to load vendor subscribers", error);
     return c.json({ error: "Failed to load subscribers" }, 500);
+  }
+});
+
+app.delete("/vendor/subscribers/:vendorId/all", async (c) => {
+  try {
+    const vendorIdParam = text(c.req.param("vendorId"), 160);
+    if (!vendorIdParam) return c.json({ error: "vendorId is required" }, 400);
+    const vendorId = await resolveVendorIdFromSlugOrId(vendorIdParam);
+    const authError = await assertVendorSession(c, vendorId);
+    if (authError) return authError;
+    const result = await deleteVendorSubscriberRecords(vendorId, undefined);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Failed to clear vendor subscribers", error);
+    return c.json({ error: "Failed to clear subscribers" }, 500);
+  }
+});
+
+app.delete("/vendor/subscribers/:vendorId/:customerId", async (c) => {
+  try {
+    const vendorIdParam = text(c.req.param("vendorId"), 160);
+    const customerId = decodeURIComponent(text(c.req.param("customerId"), 160));
+    if (!vendorIdParam || !customerId) {
+      return c.json({ error: "vendorId and customerId are required" }, 400);
+    }
+    const vendorId = await resolveVendorIdFromSlugOrId(vendorIdParam);
+    const authError = await assertVendorSession(c, vendorId);
+    if (authError) return authError;
+    const result = await deleteVendorSubscriberRecords(vendorId, customerId);
+    if (result.deleted === 0) return c.json({ error: "Subscriber not found" }, 404);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Failed to delete vendor subscriber", error);
+    return c.json({ error: "Failed to delete subscriber" }, 500);
   }
 });
 

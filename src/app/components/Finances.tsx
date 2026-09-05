@@ -39,6 +39,7 @@ import {
   isAccruedFinancesOrder,
   isCancelledFinancesOrder,
 } from "../utils/financesOrderStatus";
+import { platformCommissionExcludingShipping, vendorPayoutExcludingShipping } from "../utils/vendorPayoutFromTransaction";
 import {
   LS_ADMIN_FINANCES_ANALYTICS,
   readPersistedPayloadSavedAt,
@@ -219,9 +220,13 @@ export function Finances() {
   // Extract data from API response
   const allTransactions = useMemo(
     () =>
-      (financialData?.transactions || []).filter(
-        (t: any) => !isCancelledFinancesOrder(t.status),
-      ),
+      (financialData?.transactions || [])
+        .filter((t: any) => !isCancelledFinancesOrder(t.status))
+        .map((t: any) => ({
+          ...t,
+          vendorPayout: vendorPayoutExcludingShipping(t),
+          commission: platformCommissionExcludingShipping(t),
+        })),
     [financialData?.transactions],
   );
   const transactions = useMemo(
@@ -298,7 +303,8 @@ export function Finances() {
       const key = format(startOfDay(d), "yyyy-MM-dd");
       const cur = daily.get(key) || { revenue: 0, commission: 0 };
       cur.revenue += Number(t.amount) || 0;
-      cur.commission += Number(t.commission) || 0;
+      // Same product-only vendor net as the Commission Payout card (shipping excluded).
+      cur.commission += Number(t.vendorPayout) || 0;
       daily.set(key, cur);
     }
     const sorted = Array.from(daily.entries()).sort((a, b) => a[0].localeCompare(b[0]));
@@ -593,7 +599,8 @@ export function Finances() {
                 <LineChart data={chartDataFromScope}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="date" stroke="#64748b" />
-                  <YAxis stroke="#64748b" />
+                  <YAxis yAxisId="revenue" stroke="#64748b" />
+                  <YAxis yAxisId="commission" orientation="right" stroke="#22c55e" />
                   <Tooltip 
                     contentStyle={{ 
                       backgroundColor: '#fff', 
@@ -604,17 +611,19 @@ export function Finances() {
                   <Legend />
                   <Line 
                     type="monotone" 
+                    yAxisId="revenue"
                     dataKey="revenue" 
                     stroke="#3b82f6" 
                     strokeWidth={2}
-                    name="Revenue"
+                    name={t("finances.revenue")}
                   />
                   <Line 
                     type="monotone" 
+                    yAxisId="commission"
                     dataKey="commission" 
                     stroke="#22c55e" 
                     strokeWidth={2}
-                    name="Commission"
+                    name={t("finances.commissionPayout")}
                   />
                 </LineChart>
               </ResponsiveContainer>

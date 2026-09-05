@@ -1,5 +1,7 @@
 /** Status helpers for super-admin Finances cards and transaction filters. */
 
+import { vendorPayoutExcludingShipping } from "./vendorPayoutFromTransaction";
+
 export function normalizeFinancesOrderStatus(raw: unknown): string {
   return String(raw ?? "")
     .trim()
@@ -110,7 +112,7 @@ export function aggregateVendorPayoutsFromTransactions(
         status: "pending" as const,
         statuses: [] as unknown[],
       };
-    cur.payout += Number(txn.vendorPayout) || 0;
+    cur.payout += vendorPayoutExcludingShipping(txn);
     cur.orders += 1;
     cur.statuses.push(txn.status);
     if (!cur.email && emailById?.has(id)) cur.email = emailById.get(id)!;

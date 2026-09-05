@@ -1228,10 +1228,10 @@ export const enTranslations: Record<string, string> = {
     'finances.totalRevenue': 'Total Revenue',
     'finances.platformCommission': 'Platform Commission',
     'finances.vendorPayout': 'Vendor Payout',
-    /** Top stat card: vendor net earnings (order total − platform commission) for accrued orders. */
+    /** Top stat card: vendor net earnings (product value − platform commission) for accrued orders. */
     'finances.commissionPayout': 'Commission Payout',
     'finances.commissionPayoutHint':
-      'Total vendor payout for accrued orders in the filtered period (order total minus platform commission).',
+      'Total vendor payout for accrued orders in the filtered period (product value minus platform commission; shipping excluded).',
     'finances.pendingPayouts': 'Pending Payouts',
     'finances.overview': 'Overview',
     'finances.transactions': 'Transactions',

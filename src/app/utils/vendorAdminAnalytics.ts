@@ -1,8 +1,5 @@
 import { vendorOrderGrandTotalDisplay } from "./vendorOrderTotals";
-import {
-  normalizeOrderStatusKey,
-  VENDOR_COMMISSION_ACCRUE_STATUSES,
-} from "./vendorCommissionEarned";
+import { isVendorOrderAccrued } from "./vendorCommissionEarned";
 
 /** Parse order timestamp for sorting / windows (ms). */
 export function vendorOrderTimeMs(order: any): number {
@@ -41,11 +38,7 @@ export function isVendorOrderActive(order: any): boolean {
  * Legacy rows may omit the field (`undefined`) and still accrue when status is accrued.
  */
 export function isVendorOrderFinanciallyAccrued(order: any): boolean {
-  const raw =
-    typeof order?.status === "string" ? order.status : String(order?.status ?? "");
-  if (!VENDOR_COMMISSION_ACCRUE_STATUSES.has(normalizeOrderStatusKey(raw))) return false;
-  if (order?.inventoryDeducted === false) return false;
-  return true;
+  return isVendorOrderAccrued(order);
 }
 
 export function daysForVendorDashboardLabel(label: string): number {

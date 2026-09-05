@@ -1,6 +1,9 @@
 /**
- * Vendor commission earned — aligned with server-side vendor_commission_withdraw.tsx:
- * accrues on ready-to-ship+ orders with collected payment, per line net of order-level discount.
+ * Vendor commission / payout math.
+ *
+ * Dashboard "Commission Earned" = vendor net (product line − platform commission) on
+ * processing/ready-to-ship+ orders. Payment does not need to be collected yet (COD unpaid
+ * still accrues). KBZPay withdrawal uses the stricter withdrawable helper.
  */
 import {
   defaultVendorCommissionPercent,
@@ -19,6 +22,7 @@ export function normalizeOrderStatusKey(status: string | undefined): string {
   return String(status || "")
     .trim()
     .toLowerCase()
+    .replace(/_/g, "-")
     .replace(/\s+/g, "-");
 }
 
@@ -41,25 +45,13 @@ export const VENDOR_COMMISSION_ACCRUE_STATUSES = new Set([
 /** Platform default when admin has not set vendor contract or product rate. */
 export const PLATFORM_DEFAULT_COMMISSION_PERCENT = 0;
 
-/** Orders eligible for KBZPay commission withdrawal (ready-to-ship onward, payment collected). */
+/** Orders eligible for KBZPay commission withdrawal — order status only (ready-to-ship onward). */
 export const VENDOR_WITHDRAWABLE_STATUSES = new Set([
   "ready-to-ship",
   "fulfilled",
   "shipped",
   "delivered",
 ]);
-
-const COD_COLLECTED_STATUSES = new Set(["fulfilled", "delivered"]);
-
-function isCodPaymentMethod(order: any): boolean {
-  const method = normalizePaymentKey(order?.paymentMethod);
-  return method === "cod" || method.includes("cash-on-delivery") || method.includes("cash on delivery");
-}
-
-function isKpayPaymentMethod(order: any): boolean {
-  const method = normalizePaymentKey(order?.paymentMethod);
-  return method.includes("kpay") || method.includes("kbz");
-}
 
 function orderRefundBlocksWithdraw(order: any): boolean {
   const pay = normalizePaymentKey(order?.paymentStatus);
@@ -72,23 +64,14 @@ function orderRefundBlocksWithdraw(order: any): boolean {
   );
 }
 
-function isOrderPaymentCollected(order: any): boolean {
-  const pay = normalizePaymentKey(order?.paymentStatus);
-  const st = normalizeOrderStatusKey(String(order?.status ?? ""));
-  const kpayStatus = normalizePaymentKey(order?.kpay?.status);
-
-  if (orderRefundBlocksWithdraw(order)) return false;
-  if (pay === "unpaid" || pay === "pending" || pay === "pending-verification") return false;
-
-  if (isCodPaymentMethod(order)) {
-    return COD_COLLECTED_STATUSES.has(st);
-  }
-
-  if (isKpayPaymentMethod(order)) {
-    return pay === "paid" || kpayStatus === "paid";
-  }
-
-  return pay === "paid" || pay === "complete";
+/** Dashboard accrual: inventory committed and status in the fulfillment pipeline. */
+export function isVendorOrderAccrued(order: any): boolean {
+  if (order == null || typeof order !== "object") return false;
+  const st = normalizeOrderStatusKey(String(order.status ?? ""));
+  if (st === "cancelled" || st === "canceled") return false;
+  if (!VENDOR_COMMISSION_ACCRUE_STATUSES.has(st)) return false;
+  if (order.inventoryDeducted === false) return false;
+  return true;
 }
 
 export function isVendorOrderWithdrawable(order: any): boolean {
@@ -97,7 +80,7 @@ export function isVendorOrderWithdrawable(order: any): boolean {
   if (st === "cancelled" || st === "canceled") return false;
   if (!VENDOR_WITHDRAWABLE_STATUSES.has(st)) return false;
   if (order.inventoryDeducted === false) return false;
-  if (!isOrderPaymentCollected(order)) return false;
+  if (orderRefundBlocksWithdraw(order)) return false;
   return true;
 }
 
@@ -162,8 +145,92 @@ function lineCommissionPercent(item: any, products: any[], vendorContractPercent
   return resolveLineCommissionPercentFromProducts(item, products, vendorContractPercent);
 }
 
+function orderVendorKey(order: any): string {
+  if (order?.vendorId != null && String(order.vendorId).trim() !== "") {
+    return String(order.vendorId).trim();
+  }
+  if (order?.vendor != null && String(order.vendor).trim() !== "") {
+    return String(order.vendor).trim();
+  }
+  if (order?.vendorName != null && String(order.vendorName).trim() !== "") {
+    return String(order.vendorName).trim();
+  }
+  return "";
+}
+
+function vendorKeysMatch(left: string, right: string): boolean {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  if (!a || !b) return false;
+  return a === b || a.toLowerCase() === b.toLowerCase();
+}
+
+function vendorLineItemsForOrder(
+  order: any,
+  vendorId: string,
+  catalog: VendorCatalogKeys,
+): any[] {
+  const lineItems = Array.isArray(order.items)
+    ? order.items
+    : Array.isArray(order.products)
+      ? order.products
+      : [];
+  const matched = lineItems.filter((item: any) => lineItemBelongsToVendor(item, vendorId, catalog));
+  if (matched.length > 0) return matched;
+  if (lineItems.length === 0) return [];
+  const orderVendor = orderVendorKey(order);
+  const vid = String(vendorId ?? "").trim();
+  // Vendor-admin SQL pages omit order.vendorId; items often store the store name ("go go")
+  // instead of the internal vendor_* id. Those lists are already vendor-scoped.
+  if (!orderVendor || vendorKeysMatch(orderVendor, vid)) return lineItems;
+  return [];
+}
+
+function orderProductSubtotal(order: any): number {
+  const sub = parseOrderMoney(order?.subtotal);
+  if (sub > 0) return sub;
+  const total = parseOrderMoney(order?.total);
+  const shipping = parseOrderMoney(order?.shippingFee ?? order?.shippingCost ?? order?.shipping);
+  if (total > 0 && shipping > 0 && total >= shipping) return Math.round((total - shipping) * 100) / 100;
+  return 0;
+}
+
+function sumVendorLineAmounts(
+  orders: any[],
+  products: any[],
+  vendorId: string,
+  defaultCommissionPercent: number,
+  eligible: (order: any) => boolean,
+  amountForLine: (net: number, pct: number) => number,
+): number {
+  const catalog = buildVendorCatalogKeys(products);
+  const contractPct = defaultVendorCommissionPercent(defaultCommissionPercent);
+  let total = 0;
+
+  for (const order of orders) {
+    if (order == null || typeof order !== "object") continue;
+    if (!eligible(order)) continue;
+    const lines = vendorLineItemsForOrder(order, vendorId, catalog);
+    if (lines.length > 0) {
+      for (const item of lines) {
+        const gross = orderLineGross(item);
+        const net = orderLineNetAfterDiscount(gross, order);
+        const pct = lineCommissionPercent(item, products, contractPct);
+        total += amountForLine(net, pct);
+      }
+      continue;
+    }
+    const subtotal = orderProductSubtotal(order);
+    if (subtotal > 0) {
+      total += amountForLine(subtotal, contractPct);
+    }
+  }
+
+  return Math.round(total * 100) / 100;
+}
+
 /**
- * Total commission (MMK) the vendor has earned on accrued statuses.
+ * Platform commission (MMK) on accrued statuses — product lines only, shipping excluded.
  */
 export function computeVendorCommissionEarned(
   orders: any[],
@@ -171,69 +238,49 @@ export function computeVendorCommissionEarned(
   vendorId: string,
   defaultCommissionPercent: number
 ): number {
-  const catalog = buildVendorCatalogKeys(products);
-  let commission = 0;
-
-  for (const order of orders) {
-    if (order == null || typeof order !== "object") continue;
-    const st = normalizeOrderStatusKey(String(order.status ?? ""));
-    if (!VENDOR_COMMISSION_ACCRUE_STATUSES.has(st)) continue;
-    if (order.inventoryDeducted === false) continue;
-
-    const lineItems = Array.isArray(order.items) ? order.items : [];
-    for (const item of lineItems) {
-      if (!lineItemBelongsToVendor(item, vendorId, catalog)) continue;
-      const gross = orderLineGross(item);
-      const net = orderLineNetAfterDiscount(gross, order);
-      const pct = lineCommissionPercent(item, products, defaultCommissionPercent);
-      commission += (net * pct) / 100;
-    }
-  }
-
-  return Math.round(commission * 100) / 100;
+  return sumVendorLineAmounts(
+    orders,
+    products,
+    vendorId,
+    defaultCommissionPercent,
+    isVendorOrderAccrued,
+    (net, pct) => (net * pct) / 100,
+  );
 }
 
-/** Vendor net earnings after platform commission (withdrawable balance basis). */
+/**
+ * Vendor net (product − platform commission) on accrued statuses.
+ * Unpaid COD ready-to-ship still counts; this is the dashboard "Commission Earned" card.
+ */
+export function computeVendorPayoutAccrued(
+  orders: any[],
+  products: any[],
+  vendorId: string,
+  defaultCommissionPercent: number
+): number {
+  return sumVendorLineAmounts(
+    orders,
+    products,
+    vendorId,
+    defaultCommissionPercent,
+    isVendorOrderAccrued,
+    (net, pct) => Math.max(0, net - (net * pct) / 100),
+  );
+}
+
+/** Vendor net on withdrawable orders (ready-to-ship+; payment status ignored). */
 export function computeVendorPayoutEarned(
   orders: any[],
   products: any[],
   vendorId: string,
   defaultCommissionPercent: number
 ): number {
-  const catalog = buildVendorCatalogKeys(products);
-  const contractPct = defaultVendorCommissionPercent(defaultCommissionPercent);
-  let payout = 0;
-
-  for (const order of orders) {
-    if (order == null || typeof order !== "object") continue;
-    if (!isVendorOrderWithdrawable(order)) continue;
-
-    const lineItems = Array.isArray(order.items) ? order.items : [];
-    let matchedAnyLine = false;
-    for (const item of lineItems) {
-      if (!lineItemBelongsToVendor(item, vendorId, catalog)) continue;
-      matchedAnyLine = true;
-      const gross = orderLineGross(item);
-      const net = orderLineNetAfterDiscount(gross, order);
-      const pct = lineCommissionPercent(item, products, contractPct);
-      payout += Math.max(0, net - (net * pct) / 100);
-    }
-
-    const orderVendor =
-      order.vendorId != null
-        ? String(order.vendorId).trim()
-        : order.vendor != null
-          ? String(order.vendor).trim()
-          : "";
-    if (!matchedAnyLine && lineItems.length > 0 && orderVendor && orderVendor === String(vendorId).trim()) {
-      for (const item of lineItems) {
-        const gross = orderLineGross(item);
-        const net = orderLineNetAfterDiscount(gross, order);
-        const pct = lineCommissionPercent(item, products, contractPct);
-        payout += Math.max(0, net - (net * pct) / 100);
-      }
-    }
-  }
-
-  return Math.round(payout * 100) / 100;
+  return sumVendorLineAmounts(
+    orders,
+    products,
+    vendorId,
+    defaultCommissionPercent,
+    isVendorOrderWithdrawable,
+    (net, pct) => Math.max(0, net - (net * pct) / 100),
+  );
 }

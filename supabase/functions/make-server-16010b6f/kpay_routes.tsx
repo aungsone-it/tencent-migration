@@ -1146,6 +1146,7 @@ function businessPayNeedsVpsJsonRetry(body: AnyRecord, message: string): boolean
   return (
     haystack.includes("merchantorderid missing") ||
     haystack.includes("merch_order_id") ||
+    haystack.includes("payee_info") ||
     haystack.includes("no required ssl certificate")
   );
 }
@@ -2859,6 +2860,9 @@ function businessPayPayloadPair(params: {
     total_amount: params.amount,
     trans_currency: params.currency,
     payee_info: payeeInfo,
+    identifier_value: params.payeePhone,
+    identifier_type: "01",
+    identity_type: "1000",
   };
   if (text(params.title)) bizContent.title = params.title;
   if (text(params.note)) bizContent.note = params.note;
@@ -2982,12 +2986,31 @@ async function businessPayViaVpsProxy(params: {
   const amount = normalizeAmountMMK(params.amountMmk);
   const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 15_000), 45_000);
   const headers = buildRefundProviderHeaders(cfg);
+  const payeeInfo: AnyRecord = {
+    identifier_value: params.payeePhone,
+    identifier_type: "01",
+    identity_type: "1000",
+  };
+  if (text(params.payeeName)) {
+    payeeInfo.name = params.payeeName;
+  }
   const payload = {
     merch_order_id: params.merchantOrderId,
     merchantOrderId: params.merchantOrderId,
     total_amount: amount,
     trans_currency: "MMK",
     trade_type: "BUSINESS_PAY",
+    payee_info: payeeInfo,
+    payee_info_json: JSON.stringify(payeeInfo),
+    biz_content: {
+      merch_order_id: params.merchantOrderId,
+      merch_code: cfg.merchCode,
+      appid: cfg.appId,
+      trade_type: "BUSINESS_PAY",
+      total_amount: amount,
+      trans_currency: "MMK",
+      payee_info: payeeInfo,
+    },
     identifier_value: params.payeePhone,
     identifier_type: "01",
     identity_type: "1000",

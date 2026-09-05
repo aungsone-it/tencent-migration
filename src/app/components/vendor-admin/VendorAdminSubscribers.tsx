@@ -6,6 +6,7 @@ import {
   Mail,
   Phone,
   Search,
+  Trash2,
   UserCheck,
   Users,
   X,
@@ -17,8 +18,10 @@ import {
   getCloudBaseRequestHeaders,
 } from "../../../../utils/supabase/info";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
+import { getVendorSessionHeaders } from "../../utils/vendorSessionHeaders";
 
 type Subscriber = {
   id: string;
@@ -48,6 +51,7 @@ type Summary = {
 function headers(): Record<string, string> {
   return {
     ...getCloudBaseRequestHeaders(),
+    ...getVendorSessionHeaders(),
     ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
   };
 }
@@ -152,6 +156,8 @@ export function VendorAdminSubscribers({
   });
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
 
   const loadSubscribers = useCallback(async () => {
     setLoading(true);
@@ -175,6 +181,65 @@ export function VendorAdminSubscribers({
   useEffect(() => {
     void loadSubscribers();
   }, [loadSubscribers]);
+
+  const removeSubscriber = async (subscriber: Subscriber) => {
+    const name = subscriber.customerName?.trim() || "this subscriber";
+    if (
+      !window.confirm(
+        `Remove ${name}? This deletes their membership record and related test payments for your store.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(subscriber.customerId);
+    try {
+      const response = await fetch(
+        `${cloudbaseApiBaseUrl}/vendor/subscribers/${encodeURIComponent(vendorId)}/${encodeURIComponent(subscriber.customerId)}`,
+        { method: "DELETE", headers: headers() },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.message || `Failed to remove subscriber (${response.status})`,
+        );
+      }
+      toast.success("Subscriber removed");
+      await loadSubscribers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove subscriber");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const clearAllSubscribers = async () => {
+    if (
+      !window.confirm(
+        `Remove all ${subscribers.length} subscribers? This wipes every membership record and related payments for your store.`,
+      )
+    ) {
+      return;
+    }
+    setClearingAll(true);
+    try {
+      const response = await fetch(
+        `${cloudbaseApiBaseUrl}/vendor/subscribers/${encodeURIComponent(vendorId)}/all`,
+        { method: "DELETE", headers: headers() },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.message || `Failed to clear subscribers (${response.status})`,
+        );
+      }
+      toast.success("All subscribers removed");
+      await loadSubscribers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to clear subscribers");
+    } finally {
+      setClearingAll(false);
+    }
+  };
 
   const visibleSubscribers = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -262,9 +327,24 @@ export function VendorAdminSubscribers({
               </button>
             )}
           </div>
-          <p className="text-xs text-slate-500">
-            {query ? `${visibleSubscribers.length} of ${subscribers.length} subscribers` : `${subscribers.length} subscribers`}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {subscribers.length > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-red-600 hover:text-red-700"
+                disabled={clearingAll || Boolean(deletingId)}
+                onClick={() => void clearAllSubscribers()}
+              >
+                {clearingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Clear all
+              </Button>
+            ) : null}
+            <p className="text-xs text-slate-500">
+              {query ? `${visibleSubscribers.length} of ${subscribers.length} subscribers` : `${subscribers.length} subscribers`}
+            </p>
+          </div>
         </div>
 
         {visibleSubscribers.length === 0 ? (
@@ -281,11 +361,12 @@ export function VendorAdminSubscribers({
           </div>
         ) : (
           <div>
-            <div className="hidden grid-cols-[minmax(260px,1.4fr)_minmax(160px,0.8fr)_110px_minmax(220px,1fr)] gap-5 border-b bg-slate-50/80 px-6 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 lg:grid">
+            <div className="hidden grid-cols-[minmax(260px,1.4fr)_minmax(160px,0.8fr)_110px_minmax(220px,1fr)_72px] gap-5 border-b bg-slate-50/80 px-6 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 lg:grid">
               <span>Subscriber</span>
               <span>Membership</span>
               <span>Status</span>
               <span>Billing period</span>
+              <span className="text-right">Actions</span>
             </div>
             <div className="divide-y">
               {visibleSubscribers.map((subscriber) => {
@@ -298,7 +379,7 @@ export function VendorAdminSubscribers({
                 return (
                   <article
                     key={subscriber.id}
-                    className="grid gap-4 px-4 py-5 transition-colors hover:bg-slate-50/70 sm:px-6 lg:grid-cols-[minmax(260px,1.4fr)_minmax(160px,0.8fr)_110px_minmax(220px,1fr)] lg:items-center lg:gap-5"
+                    className="grid gap-4 px-4 py-5 transition-colors hover:bg-slate-50/70 sm:px-6 lg:grid-cols-[minmax(260px,1.4fr)_minmax(160px,0.8fr)_110px_minmax(220px,1fr)_72px] lg:items-center lg:gap-5"
                   >
                     <div className="flex min-w-0 items-start gap-3.5">
                       <SubscriberAvatar subscriber={subscriber} initials={initials} />
@@ -343,6 +424,24 @@ export function VendorAdminSubscribers({
                       <p className="mt-1 pl-6 text-xs text-slate-500">
                         {subscriber.status === "active" ? "Manual renewal before expiry" : "Membership period ended"}
                       </p>
+                    </div>
+
+                    <div className="flex justify-end lg:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="text-red-600 hover:text-red-700"
+                        disabled={deletingId === subscriber.customerId || clearingAll}
+                        aria-label={`Remove ${name}`}
+                        onClick={() => void removeSubscriber(subscriber)}
+                      >
+                        {deletingId === subscriber.customerId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
                     </div>
                   </article>
                 );

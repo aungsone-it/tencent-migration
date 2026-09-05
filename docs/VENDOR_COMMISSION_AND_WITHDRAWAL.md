@@ -49,13 +49,22 @@ When calculating platform commission and vendor net payout:
 
 ---
 
-## 2) When earnings become withdrawable
+## 2) When earnings accrue vs when they become withdrawable
 
-Vendor net earnings (order total minus platform commission) accrue only when **all** of the following are true:
+Vendor net = **product line net minus platform commission**. Shipping is never included.
 
-### Order fulfillment status
+### Dashboard cards (Commission Earned)
 
-Must be one of:
+Accrues when:
+
+- Status is `processing`, `ready-to-ship`, `fulfilled`, `shipped`, or `delivered`
+- `inventoryDeducted` is not `false`
+
+**Payment does not need to be collected.** Unpaid COD that is ready-to-ship still shows on Commission Earned (e.g. product 2 MMK − 1 MMK platform commission = **1 MMK** earned).
+
+### KBZPay withdrawal (Available to withdraw)
+
+Uses **order status only** (not unpaid/paid):
 
 - `ready-to-ship`
 - `fulfilled`
@@ -64,23 +73,11 @@ Must be one of:
 
 `processing` alone does **not** qualify for withdrawal (it may still appear on dashboard accrual cards).
 
-### Inventory commit
-
-- `inventoryDeducted === false` blocks accrual (stock not committed at ready-to-ship/fulfilled).
-
-### Payment collected
-
-| Payment method | Rule |
-|----------------|------|
-| **COD** | Delivered or fulfilled status, **or** `paymentStatus: paid` |
-| **KBZPay** | `paymentStatus: paid` **or** `kpay.status: paid` |
-| **Card / bank / other** | `paymentStatus: paid` (not `unpaid`, `pending`, `pending_verification`) |
-
-**Excluded:** cancelled orders, refunded orders, `pending_refund`, successful KPay refunds.
+`inventoryDeducted === false` still blocks withdrawal. Cancelled and refunded orders stay excluded.
 
 ### Subscriptions
 
-Paid subscription payments (`subscription_payment:*` with `status: paid`) contribute **90% vendor / 10% platform** per `subscription_finance.ts`, included in the withdrawable wallet total.
+Paid subscription payments (`subscription_payment:*` with `status: paid`) contribute **90% vendor / 10% platform** per `subscription_finance.ts`. They are **excluded** from the KBZPay commission withdraw wallet (`orderEarned` only); super-admin Finances still tracks subscription revenue separately.
 
 ---
 
@@ -184,7 +181,7 @@ Before enabling vendor withdrawals in production:
 2. `make-server-16010b6f` redeployed with latest `vendor_commission_withdraw.tsx` and `vendor_session_guard.tsx`.
 3. Vendor login returns `sessionToken`; Finances loads without 401.
 4. Test withdraw in UAT with `KPAY_BUSINESS_PAY_MOCK=1` if gateway unavailable.
-5. Confirm earnings only include **paid/collected** orders in **ready-to-ship+** statuses.
+5. Confirm dashboard Commission Earned includes ready-to-ship+ (including unpaid COD), while KBZPay withdraw only includes **paid/collected** orders in **ready-to-ship+** statuses.
 6. Confirm commission defaults to **0%** for vendors/products without admin-defined rates.
 
 ---

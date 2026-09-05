@@ -29,6 +29,7 @@ import {
   isAccruedFinancesOrder,
   isCancelledFinancesOrder,
 } from "./financesOrderStatus";
+import { vendorPayoutExcludingShipping } from "./vendorPayoutFromTransaction";
 import { isPendingOrderForBadge, normalizeAdminOrderStatusForBadge, dedupeOrdersByCanonicalForBadge } from "./normalizeOrderBadgeStatus";
 import {
   isVendorUncategorizedFilter,
@@ -3064,7 +3065,7 @@ function recomputeFinancesSummaryFromTransactions(
     if (isCancelledFinancesOrder(txn.status)) continue;
     const amount = Number(txn.amount) || 0;
     const commission = Number(txn.commission) || 0;
-    const vendorPayout = Number(txn.vendorPayout) || Math.max(0, amount - commission);
+    const vendorPayout = vendorPayoutExcludingShipping(txn);
     totalRevenue += amount;
     totalCommission += commission;
     totalVendorPayout += vendorPayout;

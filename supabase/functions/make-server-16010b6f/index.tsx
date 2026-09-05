@@ -38,7 +38,9 @@ import {
   saveVendorKpayAccount,
   postVendorCommissionWithdraw,
 } from "./vendor_commission_withdraw.tsx";
-import { issueVendorSessionToken, revokeVendorSession } from "./vendor_session_guard.tsx";
+import { issueVendorSessionToken, revokeVendorSession, assertVendorSession } from "./vendor_session_guard.tsx";
+import { deleteVendorSubscriberRecords } from "./subscription_subscriber_delete.ts";
+import { correctFinancesAnalyticsVendorPayouts } from "./finances_vendor_payout.ts";
 import { assertCustomerSession } from "./customer_session_guard.tsx";
 import {
   deletePwaCheckoutDraft,
@@ -10827,9 +10829,10 @@ async function jsonFinancesAnalyticsFromReadModel(
     const body = data as Record<string, unknown>;
     const readModelRows = Number(body.readModelRows ?? 0);
     if (readModelRows <= 0) return null;
+    const corrected = correctFinancesAnalyticsVendorPayouts(body);
     return {
-      summary: body.summary,
-      transactions: Array.isArray(body.transactions) ? body.transactions : [],
+      summary: corrected.summary,
+      transactions: Array.isArray(corrected.transactions) ? corrected.transactions : [],
       paymentMethods: Array.isArray(body.paymentMethods) ? body.paymentMethods : [],
       revenueChartData: Array.isArray(body.revenueChartData) ? body.revenueChartData : [],
       vendorPayouts: Array.isArray(body.vendorPayouts) ? body.vendorPayouts : [],
@@ -14522,6 +14525,42 @@ app.delete("/make-server-16010b6f/vendor/audience/:vendorId/member/:memberId", a
   } catch (error: any) {
     console.error("❌ vendor audience member delete:", error);
     return c.json({ error: error.message || "Failed to remove customer" }, 500);
+  }
+});
+
+/** Remove all membership subscribers and related subscription payment KV rows for this vendor. */
+app.delete("/make-server-16010b6f/vendor/subscribers/:vendorId/all", async (c) => {
+  try {
+    const vendorIdParam = String(c.req.param("vendorId") || "").trim().slice(0, 160);
+    if (!vendorIdParam) return c.json({ error: "vendorId is required" }, 400);
+    const vendorId = await resolveVendorIdFromSlugOrId(vendorIdParam);
+    const authError = await assertVendorSession(c, vendorId);
+    if (authError) return authError;
+    const result = await deleteVendorSubscriberRecords(vendorId);
+    return c.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("❌ vendor subscribers clear:", error);
+    return c.json({ error: error.message || "Failed to clear subscribers" }, 500);
+  }
+});
+
+/** Remove one membership subscriber and related subscription payment KV rows for this vendor. */
+app.delete("/make-server-16010b6f/vendor/subscribers/:vendorId/:customerId", async (c) => {
+  try {
+    const vendorIdParam = String(c.req.param("vendorId") || "").trim().slice(0, 160);
+    const customerId = decodeURIComponent(String(c.req.param("customerId") || "").trim());
+    if (!vendorIdParam || !customerId) {
+      return c.json({ error: "vendorId and customerId are required" }, 400);
+    }
+    const vendorId = await resolveVendorIdFromSlugOrId(vendorIdParam);
+    const authError = await assertVendorSession(c, vendorId);
+    if (authError) return authError;
+    const result = await deleteVendorSubscriberRecords(vendorId, customerId);
+    if (result.deleted === 0) return c.json({ error: "Subscriber not found" }, 404);
+    return c.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("❌ vendor subscriber delete:", error);
+    return c.json({ error: error.message || "Failed to delete subscriber" }, 500);
   }
 });
 

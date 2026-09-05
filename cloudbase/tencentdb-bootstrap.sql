@@ -2193,16 +2193,24 @@ BEGIN
     FROM line_parts lp
     GROUP BY lp.order_id, lp.vendor_key
   ),
+  order_tx_vendor_payout AS (
+    SELECT
+      order_id,
+      coalesce(sum(net), 0) AS vendor_payout
+    FROM order_vendor_net
+    GROUP BY order_id
+  ),
   summary AS (
     SELECT
-      coalesce(sum(o.order_total), 0) AS total_revenue,
-      coalesce(sum(coalesce(oc.commission, 0)), 0) AS total_commission,
-      coalesce(sum(greatest(0, o.order_total - coalesce(oc.commission, 0))), 0) AS total_vendor_payout,
-      coalesce(sum(greatest(0, o.order_total - coalesce(oc.commission, 0))) FILTER (
+      (SELECT coalesce(sum(order_total), 0) FROM orders_base) AS total_revenue,
+      (SELECT coalesce(sum(commission), 0) FROM order_commission) AS total_commission,
+      (SELECT coalesce(sum(net), 0) FROM order_vendor_net) AS total_vendor_payout,
+      (
+        SELECT coalesce(sum(ovn.net), 0)
+        FROM order_vendor_net ovn
+        JOIN orders_base o ON o.id = ovn.order_id
         WHERE lower(coalesce(o.status, '')) IN ('completed', 'delivered')
-      ), 0) AS pending_payouts
-    FROM orders_base o
-    LEFT JOIN order_commission oc ON oc.order_id = o.id
+      ) AS pending_payouts
   ),
   payment_methods AS (
     SELECT coalesce(jsonb_agg(jsonb_build_object(
@@ -2267,7 +2275,7 @@ BEGIN
       'method', o.method,
       'status', CASE WHEN lower(coalesce(o.status, '')) IN ('delivered', 'completed') THEN 'completed' ELSE o.status END,
       'commission', coalesce(oc.commission, 0),
-      'vendorPayout', greatest(0, o.order_total - coalesce(oc.commission, 0)),
+      'vendorPayout', coalesce(otp.vendor_payout, 0),
       'products', coalesce(o.raw->'items', '[]'::jsonb),
       'gatewayFee', CASE WHEN o.method NOT IN ('Cash', 'COD') THEN o.order_total * 0.01 ELSE 0 END,
       'shippingAddress', coalesce(o.raw->>'shippingAddress', ''),
@@ -2275,6 +2283,7 @@ BEGIN
     ) ORDER BY o.order_ts DESC), '[]'::jsonb) AS rows
     FROM orders_base o
     LEFT JOIN order_commission oc ON oc.order_id = o.id
+    LEFT JOIN order_tx_vendor_payout otp ON otp.order_id = o.id
   ),
   read_model_total AS (
     SELECT count(*)::bigint AS c FROM public.app_orders
@@ -2300,7 +2309,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.rpc_admin_customers_page IS 'Paged admin customers backed by app_customers read model; preserves Edge API response shape.';
-COMMENT ON FUNCTION public.rpc_finances_analytics IS 'Finance analytics backed by app_orders/app_order_items/app_products/app_vendors read models.';
+COMMENT ON FUNCTION public.rpc_finances_analytics IS 'Finance analytics: commission on product lines only; vendor payout excludes shipping.';
 
 -- ========================================
 -- 20260616090000_kv_domain_realtime_pulse.sql

@@ -59,7 +59,7 @@ import {
   ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
 } from "../../utils/module-cache";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
-import { computeVendorCommissionEarned } from "../../utils/vendorCommissionEarned";
+import { computeVendorPayoutAccrued } from "../../utils/vendorCommissionEarned";
 import {
   daysForVendorDashboardLabel,
   filterOrdersInRollingWindow,
@@ -581,13 +581,13 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     const commDays = daysForVendorDashboardLabel(statDateFilters.commission);
     const commCurrent = filterOrdersInRollingWindow(activePool, commDays, endMs);
     const commPrev = filterOrdersInPriorWindow(activePool, commDays, endMs - commDays * 86400000);
-    const commissionCurrent = computeVendorCommissionEarned(
+    const commissionCurrent = computeVendorPayoutAccrued(
       commCurrent,
       vendorProducts,
       vendorId,
       vendorCommissionPct
     );
-    const commissionPrev = computeVendorCommissionEarned(
+    const commissionPrev = computeVendorPayoutAccrued(
       commPrev,
       vendorProducts,
       vendorId,

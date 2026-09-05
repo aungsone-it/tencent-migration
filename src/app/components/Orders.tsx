@@ -39,9 +39,8 @@ import { PrintInvoice } from "./PrintInvoice";
 import { runBrowserPrintThen } from "../utils/invoicePrintSession";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { ordersApi } from "../../utils/api";
-import { ApiError, getAdminOperationHeaders } from "../../utils/api-client";
+import { ApiError } from "../../utils/api-client";
 import { toast } from "sonner";
-import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { canWriteSuperAdminSection } from "../utils/superAdminRolePermissions";
@@ -664,7 +663,10 @@ export function Orders({
   const ordersWrite = canWriteSuperAdminSection(sessionUser?.role, "orders");
   /** False after unmount when the admin switches to another section — PUT may still be in flight. */
   const ordersSurfaceActiveRef = useRef(true);
-  const hasHydratedOrdersRef = useRef(false);
+  const loadOrdersRequestIdRef = useRef(0);
+  const loadOrdersRef = useRef<(force?: boolean, opts?: AdminOrdersLoadOptions) => Promise<void>>(
+    async () => {},
+  );
   useEffect(() => {
     ordersSurfaceActiveRef.current = true;
     return () => {
@@ -723,7 +725,8 @@ export function Orders({
     () => initialOrdersPayload?.aggregates
   );
   const [isLoading, setIsLoading] = useState(() => !initialOrdersPayload);
-  const [listRefreshing, setListRefreshing] = useState(false);
+  /** True once we have shown a cache or network result (including an empty list). */
+  const hasHydratedOrdersRef = useRef(initialOrdersPayload != null);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [showBulkInvoices, setShowBulkInvoices] = useState(false); // For printing multiple invoices
   const [orderSaveState, setOrderSaveState] = useState<Record<string, "saving" | "saved">>({});
@@ -800,144 +803,136 @@ export function Orders({
     };
   }, []);
 
-  useEffect(() => {
-    if (orders.length > 0 || ordersTotal > 0) {
-      hasHydratedOrdersRef.current = true;
+  const ordersQueryRef = useRef({
+    page: ordersPage,
+    pageSize: ordersPageSize,
+    q: debouncedSearch,
+    status: statusFilter,
+    payment: paymentFilter,
+    vendor: vendorFilter,
+    dateFrom: orderDateFromParam,
+    dateTo: orderDateToParam,
+    sort: sortOrder,
+  });
+  ordersQueryRef.current = {
+    page: ordersPage,
+    pageSize: ordersPageSize,
+    q: debouncedSearch,
+    status: statusFilter,
+    payment: paymentFilter,
+    vendor: vendorFilter,
+    dateFrom: orderDateFromParam,
+    dateTo: orderDateToParam,
+    sort: sortOrder,
+  };
+
+  const ordersFilterKey = `${debouncedSearch}|${statusFilter}|${paymentFilter}|${vendorFilter}|${orderDateFromParam}|${orderDateToParam}|${sortOrder}|${ordersPageSize}`;
+  const prevOrdersFilterKeyRef = useRef(ordersFilterKey);
+  if (prevOrdersFilterKeyRef.current !== ordersFilterKey) {
+    prevOrdersFilterKeyRef.current = ordersFilterKey;
+    if (ordersPage !== 1) {
+      setOrdersPage(1);
     }
-  }, [orders.length, ordersTotal]);
+  }
 
-  useEffect(() => {
-    setOrdersPage(1);
-  }, [debouncedSearch, statusFilter, paymentFilter, vendorFilter, dateFrom, dateTo, sortOrder, ordersPageSize]);
+  const loadOrders = useCallback(async (forceRefresh = false, options?: AdminOrdersLoadOptions) => {
+    const requestId = ++loadOrdersRequestIdRef.current;
+    const silent = options?.silent === true;
+    const query = ordersQueryRef.current;
+    const shouldBlockUi = !silent && !hasHydratedOrdersRef.current;
+    if (shouldBlockUi) {
+      setIsLoading(true);
+    }
+    try {
+      const payload = await getCachedAdminOrdersPage(
+        {
+          page: query.page,
+          pageSize: query.pageSize,
+          q: query.q,
+          status: query.status,
+          payment: query.payment,
+          vendor: query.vendor,
+          dateFrom: query.dateFrom,
+          dateTo: query.dateTo,
+          sort: query.sort,
+        },
+        forceRefresh
+      );
 
-  useEffect(() => {
-    const triggerCacheRebuild = async () => {
-      const sessionKey = "admin-orders-cache-rebuild-requested";
-      try {
-        if (sessionStorage.getItem(sessionKey)) {
-          return;
-        }
-      } catch {
-        /* ignore sessionStorage failures */
+      const queryStillCurrent =
+        query.page === ordersQueryRef.current.page &&
+        query.pageSize === ordersQueryRef.current.pageSize &&
+        query.q === ordersQueryRef.current.q &&
+        query.status === ordersQueryRef.current.status &&
+        query.payment === ordersQueryRef.current.payment &&
+        query.vendor === ordersQueryRef.current.vendor &&
+        query.dateFrom === ordersQueryRef.current.dateFrom &&
+        query.dateTo === ordersQueryRef.current.dateTo &&
+        query.sort === ordersQueryRef.current.sort;
+      if (
+        requestId !== loadOrdersRequestIdRef.current ||
+        !ordersSurfaceActiveRef.current ||
+        !queryStillCurrent
+      ) {
+        return;
       }
-      try {
-        const response = await fetch(
-          `${cloudbaseApiBaseUrl}/rebuild-cache`,
-          {
-            method: "POST",
-            headers: {
-              ...getCloudBaseRequestHeaders(),
 
-              ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
-              "Content-Type": "application/json",
-              ...getAdminOperationHeaders(),
-            },
-          }
+      if (payload.warning) {
+        toast.warning(payload.warning, { duration: 4000 });
+      }
+
+      const nextOrders = applyPendingStatusDrafts(
+        dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems(payload.orders || []))
+      );
+      const nextTotal = payload.total;
+      const nextHasMore = !!payload.hasMore;
+      const nextAggregates = payload.aggregates;
+
+      const applyPayload = () => {
+        setOrders((prev) => (adminOrdersRowsSnapshotEqual(prev, nextOrders) ? prev : nextOrders));
+        setOrdersTotal((prev) => (prev === nextTotal ? prev : nextTotal));
+        setOrdersHasMore((prev) => (prev === nextHasMore ? prev : nextHasMore));
+        setOrdersAggregates((prev) =>
+          adminOrdersAggregatesEqual(prev, nextAggregates) ? prev : nextAggregates
         );
-        if (response.ok) {
-          try {
-            sessionStorage.setItem(sessionKey, String(Date.now()));
-          } catch {
-            /* ignore sessionStorage failures */
-          }
-        }
-        console.log("🔨 Cache rebuild triggered");
-      } catch (error) {
-        console.log("ℹ️ Could not trigger cache rebuild:", error);
-      }
-    };
-    triggerCacheRebuild();
-  }, []);
+      };
 
-  const loadOrders = useCallback(
-    async (forceRefresh = false, options?: AdminOrdersLoadOptions) => {
-      const silent = options?.silent === true;
-      let showLoadingTimer: ReturnType<typeof setTimeout> | null = null;
-      const shouldBlockUi = !forceRefresh && !hasHydratedOrdersRef.current;
-      if (shouldBlockUi) {
-        showLoadingTimer = setTimeout(() => setIsLoading(true), 300);
+      if (silent) {
+        startTransition(applyPayload);
+      } else {
+        applyPayload();
       }
-      if (!silent) {
-        setListRefreshing(forceRefresh);
+      hasHydratedOrdersRef.current = true;
+    } catch (error: any) {
+      if (requestId !== loadOrdersRequestIdRef.current || !ordersSurfaceActiveRef.current) {
+        return;
       }
-      try {
-        const payload = await getCachedAdminOrdersPage(
-          {
-            page: ordersPage,
-            pageSize: ordersPageSize,
-            q: debouncedSearch,
-            status: statusFilter,
-            payment: paymentFilter,
-            vendor: vendorFilter,
-            dateFrom: orderDateFromParam,
-            dateTo: orderDateToParam,
-            sort: sortOrder,
-          },
-          forceRefresh
+      console.error("Failed to load orders:", error);
+      if (silent) return;
+      if (error.message?.includes("Failed to fetch")) {
+        toast.error(
+          "Cannot connect to server. The Edge Function may still be deploying. Please wait 30 seconds and refresh the page.",
+          { duration: 8000 }
         );
-
-        if (payload.warning) {
-          toast.warning(payload.warning, { duration: 4000 });
-        }
-
-        const nextOrders = applyPendingStatusDrafts(
-          dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems(payload.orders || []))
-        );
-        const nextTotal = payload.total;
-        const nextHasMore = !!payload.hasMore;
-        const nextAggregates = payload.aggregates;
-
-        const applyPayload = () => {
-          setOrders((prev) =>
-            silent && adminOrdersRowsSnapshotEqual(prev, nextOrders) ? prev : nextOrders
-          );
-          setOrdersTotal((prev) => (silent && prev === nextTotal ? prev : nextTotal));
-          setOrdersHasMore((prev) => (silent && prev === nextHasMore ? prev : nextHasMore));
-          setOrdersAggregates((prev) =>
-            silent && adminOrdersAggregatesEqual(prev, nextAggregates) ? prev : nextAggregates
-          );
-        };
-
-        if (silent) {
-          startTransition(applyPayload);
-        } else {
-          applyPayload();
-        }
-      } catch (error: any) {
-        console.error("Failed to load orders:", error);
-        if (silent) return;
-        if (error.message?.includes("Failed to fetch")) {
-          toast.error(
-            "Cannot connect to server. The Edge Function may still be deploying. Please wait 30 seconds and refresh the page.",
-            { duration: 8000 }
-          );
-        } else if (error.message?.includes("timeout") || error.message?.includes("connection")) {
-          toast.error("Database connection timeout. Please refresh the page.", { duration: 5000 });
-        } else {
-          toast.error(`Failed to load orders: ${error.message || "Unknown error"}`, { duration: 5000 });
-        }
+      } else if (error.message?.includes("timeout") || error.message?.includes("connection")) {
+        toast.error("Database connection timeout. Please refresh the page.", { duration: 5000 });
+      } else {
+        toast.error(`Failed to load orders: ${error.message || "Unknown error"}`, { duration: 5000 });
+      }
+      if (!hasHydratedOrdersRef.current) {
         setOrders([]);
         setOrdersTotal(0);
         setOrdersHasMore(false);
         setOrdersAggregates(undefined);
-      } finally {
-        if (showLoadingTimer) clearTimeout(showLoadingTimer);
-        if (shouldBlockUi) setIsLoading(false);
-        if (!silent) setListRefreshing(false);
       }
-    },
-    [
-      ordersPage,
-      ordersPageSize,
-      debouncedSearch,
-      statusFilter,
-      paymentFilter,
-      vendorFilter,
-      dateFrom,
-      dateTo,
-      sortOrder,
-    ]
-  );
+    } finally {
+      if (requestId !== loadOrdersRequestIdRef.current || !ordersSurfaceActiveRef.current) {
+        return;
+      }
+      setIsLoading(false);
+    }
+  }, []);
+  loadOrdersRef.current = loadOrders;
 
   const handlePwaOrderRecovered = useCallback(
     (recovered?: Record<string, unknown>) => {
@@ -1000,8 +995,22 @@ export function Orders({
   );
 
   useEffect(() => {
-    void loadOrders(false);
-  }, [loadOrders]);
+    loadOrdersRequestIdRef.current += 1;
+    const timer = window.setTimeout(() => {
+      void loadOrdersRef.current(false);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [
+    ordersPage,
+    ordersPageSize,
+    debouncedSearch,
+    statusFilter,
+    paymentFilter,
+    vendorFilter,
+    orderDateFromParam,
+    orderDateToParam,
+    sortOrder,
+  ]);
 
   useEffect(() => {
     return subscribeOrderStatusUpdates(({ orderId, status, updatedAt }) => {
@@ -1023,21 +1032,10 @@ export function Orders({
   }, []);
 
   /** Refetch when storefront/admin creates or mutates orders (same tab + other tabs via storage). */
-  const realtimeSchedulerRef = useRef<ReturnType<typeof createAdminOrdersRealtimeRefetchScheduler> | null>(
-    null,
-  );
-
   useEffect(() => {
-    realtimeSchedulerRef.current = createAdminOrdersRealtimeRefetchScheduler((force, opts) =>
-      loadOrders(force, opts),
+    const scheduler = createAdminOrdersRealtimeRefetchScheduler((force, opts) =>
+      loadOrdersRef.current(force, opts),
     );
-    return () => realtimeSchedulerRef.current?.cancel();
-  }, [loadOrders]);
-
-  useEffect(() => {
-    const refresh = (retry = false) => {
-      realtimeSchedulerRef.current?.schedule(retry);
-    };
     const bump = (ev: Event) => {
       const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
       // Local optimistic status patches already updated the visible rows — skip full refetch blink.
@@ -1049,7 +1047,7 @@ export function Orders({
       ) {
         return;
       }
-      refresh(shouldRetryAdminOrdersRealtime(reason));
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(reason));
     };
     const onStorage = (e: StorageEvent) => {
       if (e.key !== adminOrdersUpdatedStorageKey()) return;
@@ -1060,19 +1058,19 @@ export function Orders({
       ) {
         return;
       }
-      refresh(shouldRetryAdminOrdersRealtime(payload?.reason));
+      scheduler.schedule(shouldRetryAdminOrdersRealtime(payload?.reason));
     };
     window.addEventListener("adminOrdersUpdated", bump);
     window.addEventListener("storage", onStorage);
     return () => {
-      realtimeSchedulerRef.current?.cancel();
+      scheduler.cancel();
       window.removeEventListener("adminOrdersUpdated", bump);
       window.removeEventListener("storage", onStorage);
     };
-  }, [loadOrders]);
+  }, []);
 
   useAdminOrdersResyncOnVisible(() => {
-    void loadOrders(true, { silent: true });
+    void loadOrdersRef.current(true, { silent: true });
   });
 
   const uniqueVendors =
@@ -2027,8 +2025,8 @@ export function Orders({
                   </tr>
                 </thead>
                 <tbody>
-                  {isLoading ? (
-                    // Loading skeleton rows
+                  {isLoading && displayOrders.length === 0 ? (
+                    // Loading skeleton rows — never replace an already-painted page with placeholders.
                     Array.from({ length: 5 }).map((_, index) => (
                       <tr key={`skeleton-${index}`} className="border-b border-slate-100 animate-pulse">
                         <td className="py-3 px-4">

@@ -23,9 +23,6 @@ const WITHDRAWABLE_STATUSES = new Set([
   "delivered",
 ]);
 
-/** COD is only withdrawable once delivery is confirmed. */
-const COD_COLLECTED_STATUSES = new Set(["fulfilled", "delivered"]);
-
 const LOCK_STALE_MS = 2 * 60 * 60 * 1000;
 const RECONCILE_MIN_AGE_MS = 45 * 1000;
 
@@ -47,6 +44,7 @@ function normalizeOrderStatus(status: unknown): string {
   return String(status || "")
     .trim()
     .toLowerCase()
+    .replace(/_/g, "-")
     .replace(/\s+/g, "-");
 }
 
@@ -55,16 +53,6 @@ function normalizePaymentKey(value: unknown): string {
     .trim()
     .toLowerCase()
     .replace(/_/g, "-");
-}
-
-function isCodPaymentMethod(order: AnyRecord): boolean {
-  const method = normalizePaymentKey(order.paymentMethod);
-  return method === "cod" || method.includes("cash-on-delivery") || method.includes("cash on delivery");
-}
-
-function isKpayPaymentMethod(order: AnyRecord): boolean {
-  const method = normalizePaymentKey(order.paymentMethod);
-  return method.includes("kpay") || method.includes("kbz");
 }
 
 function orderRefundBlocksWithdraw(order: AnyRecord): boolean {
@@ -76,25 +64,6 @@ function orderRefundBlocksWithdraw(order: AnyRecord): boolean {
     kpayRefund === "already-refunded" ||
     kpayRefund === "already_refunded"
   );
-}
-
-function isOrderPaymentCollected(order: AnyRecord): boolean {
-  const pay = normalizePaymentKey(order.paymentStatus);
-  const st = normalizeOrderStatus(order.status);
-  const kpayStatus = normalizePaymentKey((order.kpay as AnyRecord | undefined)?.status);
-
-  if (orderRefundBlocksWithdraw(order)) return false;
-  if (pay === "unpaid" || pay === "pending" || pay === "pending-verification") return false;
-
-  if (isCodPaymentMethod(order)) {
-    return COD_COLLECTED_STATUSES.has(st);
-  }
-
-  if (isKpayPaymentMethod(order)) {
-    return pay === "paid" || kpayStatus === "paid";
-  }
-
-  return pay === "paid" || pay === "complete";
 }
 
 function orderLineGross(item: AnyRecord): number {
@@ -129,7 +98,7 @@ function isOrderWithdrawable(order: AnyRecord): boolean {
   if (st === "cancelled" || st === "canceled") return false;
   if (!WITHDRAWABLE_STATUSES.has(st)) return false;
   if (order.inventoryDeducted === false) return false;
-  if (!isOrderPaymentCollected(order)) return false;
+  if (orderRefundBlocksWithdraw(order)) return false;
   return true;
 }
 
@@ -212,6 +181,10 @@ async function resolveVendorIdentifierSet(vendorId: string): Promise<Set<string>
     if (vendor.id) ids.add(String(vendor.id));
     if (vendor.email) ids.add(String(vendor.email).toLowerCase());
     if (vendor.storeSlug) ids.add(String(vendor.storeSlug));
+    for (const name of [vendor.storeName, vendor.businessName, vendor.name]) {
+      const label = String(name || "").trim();
+      if (label) ids.add(label);
+    }
   }
   return ids;
 }
@@ -270,7 +243,11 @@ function computeVendorAccruedPayout(
     }
 
     // Single-vendor order with no line-level vendor tags — attribute matched lines only.
-    if (!matchedAnyLine && items.length > 0 && orderBelongsToVendor(order, vendorIds)) {
+    if (
+      !matchedAnyLine &&
+      items.length > 0 &&
+      (orderBelongsToVendor(order, vendorIds) || !order.vendorId && !order.vendor)
+    ) {
       for (const item of items) {
         const gross = orderLineGross(item as AnyRecord);
         const net = orderLineNetAfterDiscount(gross, order);
@@ -558,7 +535,10 @@ async function computeVendorWallet(vendorId: string) {
     Array.isArray(subscriptionPayments) ? subscriptionPayments.filter(Boolean) : [],
     vendorId,
   );
-  const totalEarned = Math.round((orderPayout + subscriptionPayout) * 100) / 100;
+  const orderEarned = Math.round(orderPayout * 100) / 100;
+  const subscriptionEarned = Math.round(subscriptionPayout * 100) / 100;
+  // KBZPay commission withdraw covers product-order earnings only — not subscriptions.
+  const totalEarned = orderEarned;
   const reserved = withdrawnTotal(withdrawals);
   const availableBalance = withdrawableMmk(totalEarned, reserved);
 
@@ -566,6 +546,8 @@ async function computeVendorWallet(vendorId: string) {
     vendorId,
     vendorName: text(vendor.businessName) || text(vendor.name) || vendorId,
     kpayPhone: text(vendor.kpayPhone) || text(vendor.kpayAccount) || "",
+    orderEarned,
+    subscriptionEarned,
     totalEarned,
     totalWithdrawn: withdrawals
       .filter(paidWithdrawalCountsTowardBalance)

@@ -28,6 +28,7 @@ import {
   CheckCircle,
   Clock,
   Copy,
+  Wrench,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -70,6 +71,7 @@ import {
 } from "../utils/superAdminRolePermissions";
 import { toast } from 'sonner';
 import { VendorDomainsList } from "./VendorDomainsList";
+import { TestDataManager } from "./TestDataManager";
 import {
   moduleCache,
   CACHE_KEYS,
@@ -269,12 +271,14 @@ export function Settings() {
     { id: "users", label: t('settings.users'), icon: Users },
     { id: "appearance", label: t('settings.appearance'), icon: Palette },
     { id: "activities", label: t('settings.activities'), icon: Activity },
+    { id: "testdata", label: "Test data", icon: Wrench },
   ];
 
   const visibleSettingsTabs = settingsTabs.filter((tab) => {
     if (tab.id === "appearance") return false;
     if (tab.id === "users") return isOwnerRole(user?.role);
     if (tab.id === "activities") return canViewStaffActivities(user?.role);
+    if (tab.id === "testdata") return isOwnerRole(user?.role);
     return true;
   });
 
@@ -2487,6 +2491,13 @@ export function Settings() {
                 </>
               )}
             </div>
+          </div>
+        );
+
+      case "testdata":
+        return (
+          <div className="p-8 overflow-y-auto h-full">
+            <TestDataManager />
           </div>
         );
 

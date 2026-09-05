@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   computeVendorCommissionEarned,
+  computeVendorPayoutAccrued,
   computeVendorPayoutEarned,
+  isVendorOrderWithdrawable,
   orderLineGross,
   orderLineNetAfterDiscount,
 } from "./vendorCommissionEarned";
@@ -67,5 +69,69 @@ describe("vendorCommissionEarned", () => {
 
     const vendorPayout = computeVendorPayoutEarned([order], products, vendorId, 0);
     expect(vendorPayout).toBe(45);
+  });
+
+  it("makes unpaid COD ready-to-ship withdrawable from order status alone", () => {
+    const order = {
+      status: "ready-to-ship",
+      paymentStatus: "unpaid",
+      paymentMethod: "cod",
+      inventoryDeducted: true,
+      subtotal: 2,
+      discount: 0,
+      shippingFee: 3000,
+      total: 3002,
+      vendorId: "v1",
+      items: [
+        {
+          productId: "p1",
+          price: 2,
+          quantity: 1,
+          subtotal: 2,
+          commissionRate: 50,
+        },
+      ],
+    };
+
+    expect(isVendorOrderWithdrawable(order)).toBe(true);
+    expect(computeVendorPayoutEarned([order], products, vendorId, 0)).toBe(1);
+    expect(computeVendorPayoutAccrued([order], products, vendorId, 0)).toBe(1);
+    expect(computeVendorCommissionEarned([order], products, vendorId, 0)).toBe(1);
+  });
+
+  it("counts vendor-admin SQL orders that omit vendorId and tag lines with the store name", () => {
+    const order = {
+      status: "Ready to Ship",
+      paymentStatus: "unpaid",
+      paymentMethod: "Cash on Delivery",
+      subtotal: 2,
+      total: 3002,
+      items: [
+        {
+          productId: "test001",
+          price: 2,
+          quantity: 1,
+          subtotal: 2,
+          vendorId: "go go",
+          commissionRate: 50,
+        },
+      ],
+    };
+
+    expect(computeVendorPayoutAccrued([order], products, "vendor_gogo_internal", 0)).toBe(1);
+  });
+
+  it("falls back to product subtotal when line items are missing", () => {
+    const order = {
+      status: "ready-to-ship",
+      paymentStatus: "unpaid",
+      paymentMethod: "cod",
+      subtotal: 2,
+      shippingFee: 3000,
+      total: 3002,
+      items: [],
+    };
+
+    expect(computeVendorPayoutAccrued([order], [], "vendor_gogo_internal", 50)).toBe(1);
   });
 });

@@ -1190,7 +1190,7 @@ export const zhTranslations: Record<string, string> = {
     'finances.vendorPayout': '供应商付款',
     'finances.commissionPayout': '佣金支付占比',
     'finances.commissionPayoutHint':
-      '所选日期范围内已计提订单的供应商净收入（订单总额减去平台佣金）。',
+      '所选日期范围内已计提订单的供应商净收入（商品金额减去平台佣金，不含运费）。',
     'finances.pendingPayouts': '待处理付款',
     'finances.overview': '概览',
     'finances.transactions': '交易',

@@ -63,8 +63,11 @@ import {
   filterOrdersInPriorWindow,
   pctChangePriorWindow,
 } from "../../utils/vendorAdminAnalytics";
-import { computeVendorPayoutEarned } from "../../utils/vendorCommissionEarned";
-import { getVendorSessionHeaders } from "../../utils/vendorSessionHeaders";
+import {
+  computeVendorPayoutAccrued,
+  computeVendorPayoutEarned,
+} from "../../utils/vendorCommissionEarned";
+import { getVendorSessionHeaders, readVendorSessionToken } from "../../utils/vendorSessionHeaders";
 import { formatOrderNumberDisplay } from "../../utils/orderNumber";
 import {
   adminOrdersUpdatedStorageKey,
@@ -99,8 +102,13 @@ interface Transaction {
 
 interface VendorCommissionWallet {
   availableBalance: number;
+  /** Product-order earnings eligible for KBZPay commission withdraw. */
+  orderEarned: number;
+  /** Paid subscription share (90%) — tracked separately, not KBZ-withdrawable here. */
+  subscriptionEarned?: number;
   totalEarned: number;
   totalWithdrawn: number;
+  reservedBalance?: number;
   minWithdrawAmount: number;
   kpayPhone: string;
   withdrawals: Array<{
@@ -207,12 +215,24 @@ export function VendorAdminFinances({
   const [withdrawing, setWithdrawing] = useState(false);
   const walletRef = useRef<VendorCommissionWallet | null>(null);
   walletRef.current = wallet;
+  const walletAuthBlockedRef = useRef(false);
+  const walletAuthToastShownRef = useRef(false);
   const rawOrdersRef = useRef(rawOrders);
   rawOrdersRef.current = rawOrders;
   const rawProductsRef = useRef(rawProducts);
   rawProductsRef.current = rawProducts;
 
   const loadCommissionWallet = useCallback(async (options?: { silent?: boolean }) => {
+    if (walletAuthBlockedRef.current) return;
+    if (!readVendorSessionToken()) {
+      walletAuthBlockedRef.current = true;
+      setWalletLoading(false);
+      if (!walletAuthToastShownRef.current) {
+        walletAuthToastShownRef.current = true;
+        toast.error("Sign in again to load your commission wallet and withdraw.");
+      }
+      return;
+    }
     const silent = options?.silent === true && walletRef.current != null;
     if (!silent) setWalletLoading(true);
     try {
@@ -229,6 +249,7 @@ export function VendorAdminFinances({
         },
       );
       if (res.status === 401) {
+        walletAuthBlockedRef.current = true;
         throw new Error("Session expired. Please sign in again to view your commission wallet.");
       }
       if (!res.ok) throw new Error("Failed to load wallet");
@@ -239,7 +260,10 @@ export function VendorAdminFinances({
     } catch (error) {
       console.error("Failed to load commission wallet:", error);
       if (error instanceof Error && /sign in again/i.test(error.message)) {
-        toast.error(error.message);
+        if (!walletAuthToastShownRef.current) {
+          walletAuthToastShownRef.current = true;
+          toast.error(error.message);
+        }
       }
     } finally {
       if (!silent) setWalletLoading(false);
@@ -324,13 +348,13 @@ export function VendorAdminFinances({
 
     const commOrdersCurrent = filterOrdersInRollingWindow(rawOrders, commDays, endMs);
     const commOrdersPrev = filterOrdersInPriorWindow(rawOrders, commDays, endMs - commDays * 86400000);
-    const commissionEarned = computeVendorPayoutEarned(
+    const commissionEarned = computeVendorPayoutAccrued(
       commOrdersCurrent,
       rawProducts,
       vendorId,
       vendorContractCommissionPct
     );
-    const commissionPrev = computeVendorPayoutEarned(
+    const commissionPrev = computeVendorPayoutAccrued(
       commOrdersPrev,
       rawProducts,
       vendorId,
@@ -388,6 +412,26 @@ export function VendorAdminFinances({
     dateFilter,
   ]);
 
+  /** Order-only withdrawable balance (excludes subscription). Matches backend when API is updated. */
+  const orderWithdrawableAllTime = useMemo(
+    () =>
+      computeVendorPayoutEarned(rawOrders, rawProducts, vendorId, vendorContractCommissionPct),
+    [rawOrders, rawProducts, vendorId, vendorContractCommissionPct],
+  );
+
+  const displayAvailableBalance = useMemo(() => {
+    const reserved = wallet?.reservedBalance ?? 0;
+    // Order product net only — never take API availableBalance (legacy wallets still include subscription).
+    return Math.max(0, Math.floor(orderWithdrawableAllTime - reserved));
+  }, [wallet, orderWithdrawableAllTime]);
+
+  const subscriptionEarnedDisplay = useMemo(() => {
+    if ((wallet?.subscriptionEarned ?? 0) > 0) return wallet!.subscriptionEarned!;
+    if (wallet?.orderEarned != null) return 0;
+    const legacyInflated = Math.max(0, (wallet?.availableBalance ?? 0) - displayAvailableBalance);
+    return legacyInflated;
+  }, [wallet, displayAvailableBalance]);
+
   const chartRangeMonths =
     timeFilter === "3months" ? 3 : timeFilter === "6months" ? 6 : 12;
 
@@ -427,7 +471,7 @@ export function VendorAdminFinances({
       toast.error("Enter your KBZPay phone number");
       return;
     }
-    const available = wallet?.availableBalance ?? 0;
+    const available = displayAvailableBalance;
     const min = wallet?.minWithdrawAmount ?? 1;
     if (available < min) {
       toast.error(`Minimum withdrawable balance is ${min.toLocaleString()} MMK`);
@@ -474,7 +518,7 @@ export function VendorAdminFinances({
             "Content-Type": "application/json",
             ...sessionHeaders,
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ kpayPhone: phone }),
         },
       );
       const rawText = await withdrawRes.text().catch(() => "");
@@ -779,7 +823,7 @@ export function VendorAdminFinances({
                   <span className="font-semibold text-slate-900 tabular-nums">
                     {walletLoading
                       ? "…"
-                      : `${(wallet?.availableBalance ?? 0).toLocaleString(undefined, {
+                      : `${displayAvailableBalance.toLocaleString(undefined, {
                           maximumFractionDigits: 2,
                         })} MMK`}
                   </span>
@@ -797,11 +841,28 @@ export function VendorAdminFinances({
                   <Wallet className="w-4 h-4 mr-2" />
                   Withdraw to KBZPay
                 </Button>
-                {!walletLoading && (wallet?.availableBalance ?? 0) <= 0 && (
+                {!walletLoading && displayAvailableBalance <= 0 && (
                     <p className="text-[11px] text-amber-700 leading-snug">
-                      Withdrawals use ready-to-ship, fulfilled, and delivered order earnings with
-                      collected payment (minimum{" "}
+                      Withdrawals use ready-to-ship, fulfilled, and delivered order earnings
+                      (minimum{" "}
                       {(wallet?.minWithdrawAmount ?? 1).toLocaleString()} MMK).
+                      {subscriptionEarnedDisplay > 0 && (
+                        <>
+                          {" "}
+                          Subscription earnings (
+                          {subscriptionEarnedDisplay.toLocaleString()} MMK) are separate
+                          and not included here.
+                        </>
+                      )}
+                    </p>
+                  )}
+                {!walletLoading &&
+                  subscriptionEarnedDisplay > 0 &&
+                  displayAvailableBalance > 0 && (
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      Subscription earnings (
+                      {subscriptionEarnedDisplay.toLocaleString()} MMK) are not part of
+                      this withdraw balance.
                     </p>
                   )}
               </div>
@@ -1080,22 +1141,29 @@ export function VendorAdminFinances({
           <DialogHeader>
             <DialogTitle>Withdraw commission to KBZPay</DialogTitle>
             <DialogDescription>
-              Enter your KBZPay wallet phone number. Eligible earnings include ready-to-ship,
-              fulfilled, and delivered orders with collected payment. Payout is sent automatically via
-              KBZ Enterprise Payment.
+              Enter your KBZPay wallet phone number. Only product-order commission earnings
+              (ready-to-ship, fulfilled, or delivered — payment status is ignored) can be withdrawn here.
+              Subscription revenue is tracked separately. Payout uses KBZ Enterprise Payment.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm">
               <p className="text-slate-600">Available balance</p>
               <p className="text-xl font-semibold text-slate-900 tabular-nums">
-                {(wallet?.availableBalance ?? 0).toLocaleString(undefined, {
+                {displayAvailableBalance.toLocaleString(undefined, {
                   maximumFractionDigits: 2,
                 })} MMK
               </p>
               <p className="text-xs text-slate-500 mt-1">
                 Minimum withdrawal: {(wallet?.minWithdrawAmount ?? 1).toLocaleString()} MMK
               </p>
+              {subscriptionEarnedDisplay > 0 && (
+                <p className="text-xs text-amber-700 mt-2 leading-snug">
+                  Subscription earnings (
+                  {subscriptionEarnedDisplay.toLocaleString()} MMK) are not included in this
+                  balance.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="kpay-phone">KBZPay phone number</Label>
@@ -1120,7 +1188,7 @@ export function VendorAdminFinances({
               onClick={() => void handleWithdraw()}
               disabled={
                 withdrawing ||
-                (wallet?.availableBalance ?? 0) < (wallet?.minWithdrawAmount ?? 1)
+                displayAvailableBalance < (wallet?.minWithdrawAmount ?? 1)
               }
             >
               {withdrawing ? (

@@ -1428,9 +1428,9 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
         <TabsContent value="orders">
           <PwaOrphanedOrdersRecovery
             vendorId={vendorStoreSlug || vendorId}
+            anchorOrderNumbers={orders.slice(0, 8).map((order) => order.orderNumber)}
             searchQuery={searchQuery}
             onRecovered={handlePwaOrderRecovered}
-            compact
           />
           {/* Toolbar */}
           <Card className="mb-4 border-slate-200 shadow-sm">

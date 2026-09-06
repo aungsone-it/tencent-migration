@@ -43,6 +43,7 @@ export function AnimatedOutlet() {
         pathname === "/checkout" ||
         pathname === "/summary" ||
         pathname === "/kpay/return" ||
+        pathname === "/kpay/pwa/return" ||
         pathname === "/order-confirmation";
       const vendorRootReserved = new Set([
         "admin",

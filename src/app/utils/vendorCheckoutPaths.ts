@@ -42,6 +42,17 @@ export function isUnifiedKpaySummaryPath(pathname: string, hostname?: string): b
   return path === "/summary" && isUnifiedKpayReturnHost(hostname);
 }
 
+/** KBZ may return to `/kpay/return` or the backend-shaped `/kpay/pwa/return`. */
+export function isKpayCustomerReturnPath(pathname: string): boolean {
+  const path = (pathname.split("?")[0] || "").replace(/\/+$/, "") || "/";
+  return (
+    path === "/kpay/return" ||
+    path === "/kpay/pwa/return" ||
+    /\/kpay\/return$/.test(path) ||
+    /\/kpay\/pwa\/return$/.test(path)
+  );
+}
+
 /** @deprecated Use isUnifiedKpaySummaryPath */
 export function isApexKpaySummaryPath(pathname: string): boolean {
   return isUnifiedKpaySummaryPath(pathname);
@@ -104,7 +115,7 @@ export function hasVendorKpayReturnSignals(params?: {
 
   // KBZ often opens vendor `/summary` with no query after in-app payment.
   if (path === "/summary" && readKpayPendingStoreContext()) return true;
-  if (path === "/kpay/return") return true;
+  if (isKpayCustomerReturnPath(path)) return true;
 
   if (
     path === "/" &&
@@ -576,6 +587,7 @@ const HOST_ROOT_CHECKOUT_PATHS = new Set([
   "/checkout/success",
   "/summary",
   "/kpay/return",
+  "/kpay/pwa/return",
   "/order-confirmation",
 ]);
 
@@ -659,7 +671,7 @@ export function toMarketplaceVendorCheckoutPath(
   if (p === "/checkout/success") return `/vendor/${enc}/checkout/success`;
   if (p === "/checkout") return `/vendor/${enc}/checkout`;
   if (p === "/summary") return `/vendor/${enc}/summary`;
-  if (p === "/kpay/return") return `/vendor/${enc}/kpay/return`;
+  if (p === "/kpay/return" || p === "/kpay/pwa/return") return `/vendor/${enc}/kpay/return`;
   if (p === "/order-confirmation") return `/vendor/${enc}/order-confirmation`;
   return `/vendor/${enc}${p.startsWith("/") ? p : `/${p}`}`;
 }
@@ -679,7 +691,7 @@ export function resolveSummaryRedirectTarget(params: {
   ).trim();
   if (!merchOrderId) return null;
 
-  if (path === "/kpay/return") return null;
+  if (isKpayCustomerReturnPath(path)) return null;
 
   const search = params.search || "";
 

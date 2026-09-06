@@ -2,6 +2,7 @@ import {
   UNIFIED_KPAY_SUMMARY_PATH,
   buildUnifiedKpaySummaryRedirectUrl,
   enrichKpayReturnSearch,
+  isKpayCustomerReturnPath,
   isUnifiedKpayReturnHost,
 } from "./vendorCheckoutPaths";
 
@@ -39,10 +40,10 @@ function enrichUnifiedSummarySearchInPlace(): void {
   window.history.replaceState(null, "", `${UNIFIED_KPAY_SUMMARY_PATH}${enriched}`);
 }
 
-/** `/kpay/return` on unified apex → `/summary` without reloading the document. */
+/** `/kpay/return` or `/kpay/pwa/return` on unified apex → `/summary`. */
 function promoteKpayReturnPathInPlace(): void {
   if (!isUnifiedKpayReturnHost()) return;
-  if (normalizePathname(window.location.pathname) !== "/kpay/return") return;
+  if (!isKpayCustomerReturnPath(window.location.pathname)) return;
 
   const enriched = enrichKpayReturnSearch(window.location.search);
   window.history.replaceState(null, "", `${UNIFIED_KPAY_SUMMARY_PATH}${enriched}`);

@@ -13,7 +13,7 @@ interface State {
 
 export class ErrorBoundary extends Component<Props, State> {
   private static isPaymentReturnPath(pathname: string): boolean {
-    return /\/summary$/.test(pathname) || pathname === "/kpay/return";
+    return /\/summary$/.test(pathname) || /\/kpay\/(?:pwa\/)?return$/.test(pathname);
   }
 
   private static autoRecoverKey(pathname: string): string {

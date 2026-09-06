@@ -134,14 +134,54 @@ export async function savePwaCheckoutDraft(record: PwaCheckoutDraftRecord): Prom
   });
 }
 
+function orderIdLookupVariants(id: string): string[] {
+  const trimmed = text(id).toUpperCase();
+  if (!trimmed) return [];
+  const match = trimmed.match(/^(ORD|MOS|NOS)-(.+)$/);
+  if (!match) return [trimmed];
+  const code = match[2];
+  return [`ORD-${code}`, `MOS-${code}`, `NOS-${code}`];
+}
+
 export async function getPwaCheckoutDraft(
   merchantOrderId: string,
 ): Promise<PwaCheckoutDraftRecord | null> {
-  const id = text(merchantOrderId);
-  if (!id) return null;
-  const row = (await kv.get(`${DRAFT_KEY_PREFIX}${id}`)) as PwaCheckoutDraftRecord | null;
-  if (!row || typeof row !== "object") return null;
-  return row;
+  const variants = [
+    ...new Set([text(merchantOrderId), ...orderIdLookupVariants(merchantOrderId)]),
+  ];
+  let draftFromKey: PwaCheckoutDraftRecord | null = null;
+  for (const id of variants) {
+    if (!id) continue;
+    const row = (await kv.get(`${DRAFT_KEY_PREFIX}${id}`)) as PwaCheckoutDraftRecord | null;
+    if (row && typeof row === "object") {
+      draftFromKey = row;
+      break;
+    }
+  }
+
+  let txn: Record<string, unknown> | null = null;
+  for (const id of variants) {
+    if (!id) continue;
+    const row = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
+    if (row && typeof row === "object") {
+      txn = row;
+      break;
+    }
+  }
+  const txnDraft = checkoutDraftFromTxn(text(merchantOrderId), txn);
+
+  if (draftFromKey) {
+    if (!draftFromKey.draftOrder && txnDraft?.draftOrder) {
+      return {
+        ...draftFromKey,
+        draftOrder: txnDraft.draftOrder,
+        prepayId: text(draftFromKey.prepayId) || txnDraft.prepayId,
+        savedAt: text(draftFromKey.savedAt) || txnDraft.savedAt,
+      };
+    }
+    return draftFromKey;
+  }
+  return txnDraft;
 }
 
 function looksLikeBadRecoveryCustomerName(value: string): boolean {
@@ -150,6 +190,23 @@ function looksLikeBadRecoveryCustomerName(value: string): boolean {
   if (v.startsWith("/")) return true;
   if (/^https?:\/\//i.test(v)) return true;
   return false;
+}
+
+function isKpayQrTxn(txn: Record<string, unknown> | null | undefined): boolean {
+  if (!txn || typeof txn !== "object") return false;
+  const method = text(txn.method).toLowerCase();
+  const tradeType = text(txn.tradeType).toUpperCase();
+  return method === "qr" || tradeType === "PAY_BY_QRCODE";
+}
+
+function resolveKpayOrderLabels(txn: Record<string, unknown> | null): {
+  paymentMethod: string;
+  kpayMethod: string;
+} {
+  if (isKpayQrTxn(txn)) {
+    return { paymentMethod: "KBZPay", kpayMethod: "qr" };
+  }
+  return { paymentMethod: "KBZPay (PWA)", kpayMethod: "pwa" };
 }
 
 function resolveRecoveryCustomerName(
@@ -192,6 +249,7 @@ function buildOrderBodyFromDraft(
 
   const customerName = resolveRecoveryCustomerName(d.customerName, ship.fullName, d.email);
   const shippingFee = Number(d.shippingFee ?? d.shippingCost ?? d.shipping ?? 0) || 0;
+  const { paymentMethod, kpayMethod } = resolveKpayOrderLabels(txn);
 
   return {
     orderNumber: merchantOrderId,
@@ -202,7 +260,7 @@ function buildOrderBodyFromDraft(
     phone: d.phone || ship.phone || "",
     status: "pending",
     paymentStatus: "paid",
-    paymentMethod: "KBZPay (PWA)",
+    paymentMethod,
     total: Number(d.total || 0),
     subtotal: Number(d.subtotal || 0),
     discount: Number(d.discount || 0),
@@ -231,12 +289,82 @@ function buildOrderBodyFromDraft(
     shippingAddress: shipping.shippingAddress,
     notes: d.notes || "",
     kpay: {
-      method: "pwa",
+      method: kpayMethod,
       merchantOrderId,
       prepayId: text(txn?.prepayId) || text(draft.prepayId) || "",
       status: "paid",
       providerStatus: text(txn?.providerStatus) || "paid",
       payUrl: text(txn?.payUrl) || "",
+      ...(kpayMethod === "qr"
+        ? {
+            qrContent: text(txn?.qrContent) || "",
+            qrImageUrl: text(txn?.qrImageUrl) || "",
+          }
+        : {}),
+    },
+  };
+}
+
+function checkoutDraftFromTxn(
+  merchantOrderId: string,
+  txn: Record<string, unknown> | null,
+): PwaCheckoutDraftRecord | null {
+  const draftOrder = txn?.draftOrder;
+  if (!draftOrder || typeof draftOrder !== "object") return null;
+  return {
+    merchantOrderId,
+    prepayId: text(txn?.prepayId) || undefined,
+    draftOrder: draftOrder as Record<string, unknown>,
+    savedAt: text(txn?.paidAt) || text(txn?.createdAt) || nowIso(),
+  };
+}
+
+function buildOrderBodyFromPaidTxn(
+  merchantOrderId: string,
+  txn: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const fromTxnDraft = checkoutDraftFromTxn(merchantOrderId, txn);
+  if (fromTxnDraft) {
+    const body = buildOrderBodyFromDraft(merchantOrderId, fromTxnDraft, txn);
+    if (body) return body;
+  }
+  if (!txn || typeof txn !== "object") return null;
+  const total = Number(txn.amount || 0) || 0;
+  const { paymentMethod, kpayMethod } = resolveKpayOrderLabels(txn);
+  const title = text(txn.title) || (kpayMethod === "qr" ? "KBZPay QR" : "KBZPay PWA");
+  return {
+    orderNumber: merchantOrderId,
+    userId: null,
+    customer: "KBZPay Guest",
+    customerName: "KBZPay Guest",
+    email: "",
+    phone: "",
+    status: "pending",
+    paymentStatus: "paid",
+    paymentMethod,
+    total,
+    subtotal: total,
+    discount: 0,
+    shippingFee: 0,
+    shippingCost: 0,
+    shipping: 0,
+    date: nowIso(),
+    vendor: "",
+    items: [{ name: title, quantity: 1, price: total, subtotal: total }],
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+    country: "",
+    notes: "Recovered from paid KBZPay transaction (checkout draft missing)",
+    kpay: {
+      method: kpayMethod,
+      merchantOrderId,
+      prepayId: text(txn.prepayId) || "",
+      status: "paid",
+      providerStatus: text(txn.providerStatus) || "PAY_SUCCESS",
+      adminRecovered: true,
+      recoveredWithoutDraft: true,
     },
   };
 }
@@ -427,22 +555,21 @@ export async function finalizePwaCheckoutOrder(
   }
 
   const draft = await getPwaCheckoutDraft(id);
-  if (!draft?.draftOrder) {
-    return { ok: false, error: "no_checkout_draft" };
-  }
-
   const txn = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
-  const txnMethod = text(txn?.method).toLowerCase();
-  const txnTradeType = text(txn?.tradeType).toUpperCase();
-  if (txnMethod === "qr" || txnTradeType === "PAY_BY_QRCODE") {
-    return { ok: false, error: "not_pwa_payment", message: "qr" };
-  }
+  const txnDraft = checkoutDraftFromTxn(id, txn);
+  const snapshot = draft?.draftOrder ? draft : txnDraft;
   const txnStatus = text(txn?.status).toLowerCase();
   if (txnStatus !== "paid") {
     return { ok: false, error: "payment_not_confirmed", message: txnStatus || "pending" };
   }
 
-  const body = buildOrderBodyFromDraft(id, draft, txn);
+  if (!snapshot?.draftOrder && !options?.adminRecover) {
+    return { ok: false, error: "no_checkout_draft" };
+  }
+
+  const body = snapshot?.draftOrder
+    ? buildOrderBodyFromDraft(id, snapshot, txn)
+    : buildOrderBodyFromPaidTxn(id, txn);
   if (!body) return { ok: false, error: "invalid_draft" };
 
   if (options?.adminRecover) {

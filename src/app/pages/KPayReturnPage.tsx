@@ -13,6 +13,11 @@ import {
   type KPaySession,
 } from "../utils/kpayClient";
 import { maybeRedirectKpayReturnToUnifiedSummary } from "../utils/kpayUnifiedSummaryRedirect";
+import {
+  UNIFIED_KPAY_SUMMARY_PATH,
+  enrichKpayReturnSearch,
+  isKpayCustomerReturnPath,
+} from "../utils/vendorCheckoutPaths";
 import { notifyAdminOrdersUpdated } from "../utils/adminOrdersRealtime";
 import { readSubscriptionPwaPending } from "../utils/subscriptionPwa";
 
@@ -26,22 +31,20 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 45_000;
 
 function navigateToSummary(url: string, navigate: ReturnType<typeof useNavigate>) {
+  let pathWithSearch: string;
   if (/^https?:\/\//i.test(url)) {
     const target = new URL(url);
     const here = new URL(window.location.href);
-    if (target.origin === here.origin && target.pathname === here.pathname) {
-      if (target.search !== here.search) {
-        window.history.replaceState(null, "", target.pathname + target.search);
-      }
-      return;
-    }
-    if (target.origin !== here.origin || target.pathname !== here.pathname) {
+    if (target.origin !== here.origin) {
       window.location.replace(url);
       return;
     }
+    pathWithSearch = target.pathname + target.search;
+  } else {
+    pathWithSearch = url;
   }
-  const path = url.startsWith("http") ? new URL(url).pathname + new URL(url).search : url;
-  navigate(path, { replace: true });
+  // `replaceState` alone does not rematch React Router — always navigate on same origin.
+  navigate(pathWithSearch, { replace: true });
 }
 
 export function KPayReturnPage() {
@@ -113,7 +116,9 @@ export function KPayReturnPage() {
     redirectDoneRef.current = true;
 
     const path = (window.location.pathname.split("?")[0] || "").replace(/\/+$/, "") || "/";
-    if (path === "/summary") {
+    const search = enrichKpayReturnSearch(window.location.search || "");
+    if (path === UNIFIED_KPAY_SUMMARY_PATH || isKpayCustomerReturnPath(path)) {
+      navigate(`${UNIFIED_KPAY_SUMMARY_PATH}${search}`, { replace: true });
       return;
     }
 
@@ -177,14 +182,19 @@ export function KPayReturnPage() {
         setState({ kind: "ok", session });
 
         if (session.status === "paid" && !finalizeDoneRef.current) {
-          const fin = await finalizePwaCheckoutOrderApi({
-            projectId,
-            publicAnonKey,
-            merchantOrderId,
-          });
-          if (fin.ok) {
-            finalizeDoneRef.current = true;
-            notifyAdminOrdersUpdated("pwa-return-order-finalized");
+          for (let attempt = 0; attempt < 4; attempt++) {
+            const fin = await finalizePwaCheckoutOrderApi({
+              projectId,
+              publicAnonKey,
+              merchantOrderId,
+            });
+            if (fin.ok) {
+              finalizeDoneRef.current = true;
+              notifyAdminOrdersUpdated("pwa-return-order-finalized");
+              break;
+            }
+            if (fin.error !== "payment_not_confirmed" || attempt >= 3) break;
+            await new Promise((resolve) => setTimeout(resolve, 1500));
           }
         }
 

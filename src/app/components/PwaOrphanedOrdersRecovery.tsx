@@ -6,16 +6,30 @@ import { Badge } from "./ui/badge";
 import {
   fetchOrphanedPwaDrafts,
   finalizePwaCheckoutOrderApi,
+  hydrateOrphanedPwaDrafts,
   invalidateOrphanedPwaDraftsCache,
+  keepPaidOrphanedPwaDrafts,
+  mergeOrphanedPwaDraftRows,
+  probeRecentOrphanedPwaDrafts,
   type OrphanedPwaDraftRow,
 } from "../utils/kpayClient";
 import { projectId, publicAnonKey } from "../../../utils/supabase/info";
 import { normalizeOrderNumberSearch, formatOrderNumberDisplay } from "../utils/orderNumber";
-import { formatStorefrontPrice } from "../utils/formatStorefrontPrice";
+
+function formatDraftOrderDate(savedAt?: string): string {
+  if (!savedAt) return "—";
+  const ms = Date.parse(savedAt);
+  if (!Number.isFinite(ms)) return savedAt;
+  return new Date(ms).toISOString().split("T")[0];
+}
 
 type PwaOrphanedOrdersRecoveryProps = {
   /** Limit list to one vendor (vendor admin). */
   vendorId?: string;
+  /** Super-admin: query each store the same way vendor admin does. */
+  vendorIds?: string[];
+  /** Latest storefront order numbers so super-admin can probe nearby NOS- drafts. */
+  anchorOrderNumbers?: string[];
   /** When user searches an order id, surface a matching draft if the list is empty. */
   searchQuery?: string;
   /** Called after an order was recovered so parent lists can refresh. */
@@ -25,15 +39,18 @@ type PwaOrphanedOrdersRecoveryProps = {
 
 export function PwaOrphanedOrdersRecovery({
   vendorId,
+  vendorIds = [],
+  anchorOrderNumbers = [],
   searchQuery = "",
   onRecovered,
   compact = false,
 }: PwaOrphanedOrdersRecoveryProps) {
   const [drafts, setDrafts] = useState<OrphanedPwaDraftRow[]>([]);
   const [checked, setChecked] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [recoveringId, setRecoveringId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(!compact);
+  const [expanded, setExpanded] = useState(true);
   const hasLoadedOnceRef = useRef(false);
 
   const searchOrderId = useMemo(
@@ -41,29 +58,74 @@ export function PwaOrphanedOrdersRecovery({
     [searchQuery],
   );
 
+  const anchorKey = anchorOrderNumbers
+    .map((id) => String(id || "").trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, 8)
+    .join("|");
+  const scopedAnchors = useMemo(
+    () => (anchorKey ? anchorKey.split("|") : []),
+    [anchorKey],
+  );
+
   const loadDrafts = useCallback(async (opts?: { silent?: boolean }) => {
     if (opts?.silent) {
       setRefreshing(true);
     }
     try {
-      const rows = await fetchOrphanedPwaDrafts({
-        vendorId,
-        minAgeMinutes: 3,
-        limit: 25,
+      const request = {
+        minAgeMinutes: 0,
+        limit: 50,
         merchantOrderId: searchOrderId || undefined,
-      });
-      const paidDrafts = rows.filter(
-        (row) => row.txnStatus === "paid" && row.canRecover,
+        skipCache: true as const,
+      };
+      let rows: OrphanedPwaDraftRow[] = [];
+      if (vendorId) {
+        const [fromVendor, fromProbe] = await Promise.all([
+          fetchOrphanedPwaDrafts({ ...request, vendorId, timeoutMs: 25_000 }),
+          scopedAnchors.length > 0 || searchOrderId
+            ? probeRecentOrphanedPwaDrafts(
+                searchOrderId
+                  ? scopedAnchors.length > 0
+                    ? [searchOrderId, ...scopedAnchors]
+                    : [searchOrderId]
+                  : scopedAnchors,
+              )
+            : Promise.resolve([]),
+        ]);
+        rows = mergeOrphanedPwaDraftRows([...fromVendor, ...fromProbe]);
+      } else {
+        const [fromGlobal, fromProbe] = await Promise.all([
+          fetchOrphanedPwaDrafts({ ...request, timeoutMs: 25_000 }),
+          scopedAnchors.length > 0 || searchOrderId
+            ? probeRecentOrphanedPwaDrafts(
+                searchOrderId
+                  ? scopedAnchors.length > 0
+                    ? [searchOrderId, ...scopedAnchors]
+                    : [searchOrderId]
+                  : scopedAnchors,
+              )
+            : Promise.resolve([]),
+        ]);
+        rows = mergeOrphanedPwaDraftRows([...fromGlobal, ...fromProbe]);
+      }
+      const visible = await hydrateOrphanedPwaDrafts(
+        await keepPaidOrphanedPwaDrafts(rows),
       );
-      setDrafts(paidDrafts);
+      setDrafts(visible);
+      setLoadError(null);
+      if (visible.length > 0) setExpanded(true);
     } catch (error) {
       console.warn("[PwaOrphanedOrdersRecovery] load failed", error);
       setDrafts([]);
+      setLoadError(
+        error instanceof Error ? error.message : "Failed to load paid KBZPay drafts",
+      );
     } finally {
       setChecked(true);
       setRefreshing(false);
     }
-  }, [vendorId, searchOrderId]);
+  }, [vendorId, scopedAnchors, searchOrderId]);
 
   useEffect(() => {
     void loadDrafts({ silent: hasLoadedOnceRef.current });
@@ -81,7 +143,11 @@ export function PwaOrphanedOrdersRecovery({
       });
       if (!result.ok) {
         const detail = [result.error, result.message].filter(Boolean).join(": ");
-        toast.error(detail || "Could not create order from KBZPay draft");
+        toast.error(
+          result.error === "payment_not_confirmed"
+            ? "KBZPay has not confirmed this payment. It is not a recoverable draft."
+            : detail || "Could not create order from the paid KBZPay draft",
+        );
         return;
       }
       toast.success(`Order ${merchantOrderId} registered successfully`);
@@ -96,12 +162,13 @@ export function PwaOrphanedOrdersRecovery({
     }
   };
 
-  // Stay invisible while probing and whenever there are no paid orphan drafts.
-  if (!checked || drafts.length === 0) {
+  const title = vendorId ? "Paid KBZPay drafts (your store)" : "Paid KBZPay drafts (QR + PWA)";
+  const hasDrafts = drafts.length > 0;
+  const loading = !checked && !loadError;
+
+  if (!hasDrafts && !loadError && !loading && (vendorId || checked)) {
     return null;
   }
-
-  const title = vendorId ? "KBZPay drafts (your store)" : "KBZPay drafts missing orders";
 
   return (
     <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50/80 p-4">
@@ -111,8 +178,13 @@ export function PwaOrphanedOrdersRecovery({
           <div>
             <p className="font-semibold text-amber-950">{title}</p>
             <p className="text-sm text-amber-900/80 mt-0.5">
-              These checkouts were paid in KBZPay but never became real orders. Recover them to
-              show in admin and vendor panels.
+              {loadError
+                ? loadError
+                : loading
+                  ? "Loading paid KBZPay checkouts (QR or PWA) that never became an order…"
+                : hasDrafts
+                  ? `${drafts.length} paid KBZPay checkout${drafts.length === 1 ? "" : "s"} never became an order. Recover registers ${drafts.length === 1 ? "it" : "them"}.`
+                  : "No paid KBZPay checkouts waiting to be registered."}
             </p>
           </div>
         </div>
@@ -123,9 +195,9 @@ export function PwaOrphanedOrdersRecovery({
             size="sm"
             className="border-amber-300 bg-white"
             onClick={() => void loadDrafts({ silent: true })}
-            disabled={refreshing}
+            disabled={refreshing || loading}
           >
-            {refreshing ? (
+            {refreshing || loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
@@ -145,26 +217,47 @@ export function PwaOrphanedOrdersRecovery({
         </div>
       </div>
 
-      {expanded ? (
+      {expanded && hasDrafts ? (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-amber-900/70 border-b border-amber-200">
                   <th className="py-2 pr-3 font-medium">Order ID</th>
+                  <th className="py-2 pr-3 font-medium">Date</th>
+                  <th className="py-2 pr-3 font-medium">Customer</th>
                   <th className="py-2 pr-3 font-medium">Vendor</th>
                   <th className="py-2 pr-3 font-medium">Total</th>
                   <th className="py-2 pr-3 font-medium">Payment</th>
-                  <th className="py-2 pr-3 font-medium">Saved</th>
                   <th className="py-2 font-medium text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {drafts.map((draft) => (
                   <tr key={draft.merchantOrderId} className="border-b border-amber-100/80">
-                    <td className="py-2 pr-3 font-mono text-xs">{formatOrderNumberDisplay(draft.merchantOrderId)}</td>
+                    <td className="py-2 pr-3">
+                      <p className="font-mono text-xs font-medium text-amber-950">
+                        {formatOrderNumberDisplay(draft.merchantOrderId)}
+                      </p>
+                      {draft.itemCount ? (
+                        <p className="text-xs text-amber-900/70">
+                          {draft.itemCount} {draft.itemCount === 1 ? "item" : "items"}
+                        </p>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 text-amber-950">
+                      {formatDraftOrderDate(draft.savedAt)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <p className="text-amber-950">{draft.customer || "—"}</p>
+                      {draft.email ? (
+                        <p className="text-xs text-amber-900/70">{draft.email}</p>
+                      ) : null}
+                    </td>
                     <td className="py-2 pr-3">{draft.vendor || draft.vendorId || "—"}</td>
-                    <td className="py-2 pr-3 tabular-nums">
-                      {draft.total != null ? formatStorefrontPrice(draft.total) : "—"}
+                    <td className="py-2 pr-3 tabular-nums font-semibold text-amber-950">
+                      {draft.total != null
+                        ? `${Math.round(draft.total).toLocaleString()} MMK`
+                        : "—"}
                     </td>
                     <td className="py-2 pr-3">
                       <Badge
@@ -178,15 +271,17 @@ export function PwaOrphanedOrdersRecovery({
                         {draft.txnStatus || "unknown"}
                       </Badge>
                     </td>
-                    <td className="py-2 pr-3 text-xs text-amber-900/70">
-                      {draft.savedAt ? new Date(draft.savedAt).toLocaleString() : "—"}
-                    </td>
                     <td className="py-2 text-right">
                       <Button
                         type="button"
                         size="sm"
-                        className="bg-amber-800 hover:bg-amber-900 text-white"
-                        disabled={!draft.canRecover || recoveringId === draft.merchantOrderId}
+                        className="bg-amber-800 hover:bg-amber-900 text-white disabled:opacity-50"
+                        disabled={recoveringId === draft.merchantOrderId || draft.canRecover === false}
+                        title={
+                          draft.canRecover === false
+                            ? "Checkout cart snapshot is incomplete — cannot safely recover this order"
+                            : undefined
+                        }
                         onClick={() => void handleRecover(draft.merchantOrderId)}
                       >
                         {recoveringId === draft.merchantOrderId ? (

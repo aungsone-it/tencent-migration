@@ -68,6 +68,14 @@ type CreateKPayQrParams = KPayBaseParams & {
    */
   title?: string;
   notifyUrl?: string;
+  /** Checkout path before QR display — used for post-payment summary routing. */
+  originPath?: string;
+  /** Order summary route, e.g. `/summary`. */
+  summaryPath?: string;
+  /** Where checkout started, e.g. `https://gogo.walwal.online`. */
+  storefrontOrigin?: string;
+  /** Full cart + shipping payload — stored server-side for QR orphan recovery. */
+  draftOrder?: Record<string, unknown>;
 };
 
 function deriveUiStatus(rawStatus: unknown, rawProviderStatus: unknown): "pending" | "paid" | "failed" {
@@ -363,6 +371,10 @@ export async function createKPayQrSession(params: CreateKPayQrParams): Promise<K
     merchantOrderId: merchantOrderIdParam,
     currency = "MMK",
     notifyUrl,
+    originPath,
+    summaryPath,
+    storefrontOrigin,
+    draftOrder,
   } = params;
   const merchantOrderId = merchantOrderIdParam || (await buildMerchantOrderId());
   const response = await fetch(
@@ -377,6 +389,10 @@ export async function createKPayQrSession(params: CreateKPayQrParams): Promise<K
         amount,
         currency,
         ...(notifyUrl ? { notifyUrl } : {}),
+        ...(originPath ? { originPath } : {}),
+        ...(summaryPath ? { summaryPath } : {}),
+        ...(storefrontOrigin ? { storefrontOrigin } : {}),
+        ...(draftOrder ? { draftOrder } : {}),
       }),
     },
   );
@@ -602,6 +618,7 @@ export type PwaCheckoutDraftResponse = {
   summaryPath?: string;
   storefrontOrigin?: string;
   draftOrder?: Record<string, unknown>;
+  savedAt?: string;
 };
 
 export type KPayPwaSession = {
@@ -787,9 +804,45 @@ async function recoverPwaDraftViaDirectOrderCreate(
   message?: string;
 }> {
   const draft = await fetchPwaCheckoutDraft(params);
-  const draftOrder = draft?.draftOrder;
+  let draftOrder = draft?.draftOrder;
+  let prepayId = draft?.prepayId || "";
   if (!draftOrder || typeof draftOrder !== "object") {
-    return { ok: false, error: "no_checkout_draft" };
+    const status = await fetchPwaDraftStatusRow(params.merchantOrderId).catch(() => null);
+    const txnRes = await fetch(
+      `${API_ROOT}/kpay/status/${encodeURIComponent(params.merchantOrderId)}`,
+      { headers: cloudbaseHeaders() },
+    );
+    const txn = (await txnRes.json().catch(() => ({}))) as {
+      status?: string;
+      amount?: number | string;
+      title?: string;
+      prepayId?: string;
+    };
+    const paid =
+      String(status?.txnStatus || txn.status || "").toLowerCase() === "paid";
+    if (!paid) {
+      return { ok: false, error: "no_checkout_draft" };
+    }
+    const total = Number(status?.total ?? txn.amount ?? 0) || 0;
+    prepayId = status?.prepayId || String(txn.prepayId || "") || prepayId;
+    draftOrder = {
+      customerName: status?.customer || "KBZPay Guest",
+      email: status?.email || "",
+      phone: "",
+      total,
+      subtotal: total,
+      vendor: status?.vendor || "",
+      vendorId: status?.vendorId || undefined,
+      items: [
+        {
+          name: String(txn.title || "KBZPay PWA"),
+          quantity: 1,
+          price: total,
+          subtotal: total,
+        },
+      ],
+      notes: "Recovered from paid KBZPay transaction (checkout draft missing)",
+    };
   }
 
   const d = draftOrder as Record<string, unknown>;
@@ -834,7 +887,7 @@ async function recoverPwaDraftViaDirectOrderCreate(
     kpay: {
       method: "pwa",
       merchantOrderId: params.merchantOrderId,
-      prepayId: draft.prepayId || "",
+      prepayId,
       status: "paid",
       adminRecovered: true,
     },
@@ -887,7 +940,7 @@ export async function finalizePwaCheckoutOrderApi(
   if (parsed.ok && parsed.order) return parsed;
 
   const shouldFallback =
-    response.status === 404 || parsed.error === "cloudbase_env_missing";
+    !parsed.ok && parsed.error !== "not_pwa_payment";
 
   if (shouldFallback) {
     const statusRes = await fetch(
@@ -928,10 +981,140 @@ export type OrphanedPwaDraftRow = {
   vendor?: string;
   vendorId?: string;
   total?: number;
+  customer?: string;
+  email?: string;
+  itemCount?: number;
   txnStatus?: string;
   hasOrder: boolean;
   canRecover: boolean;
 };
+
+function textish(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function fieldsFromDraftOrder(
+  draftOrder: Record<string, unknown> | undefined,
+): Partial<OrphanedPwaDraftRow> {
+  if (!draftOrder) return {};
+  const ship =
+    draftOrder.shippingInfo && typeof draftOrder.shippingInfo === "object"
+      ? (draftOrder.shippingInfo as Record<string, unknown>)
+      : {};
+  const customer =
+    textish(draftOrder.customerName) ||
+    textish(ship.fullName) ||
+    textish(draftOrder.customer);
+  const email = textish(draftOrder.email) || textish(ship.email);
+  let vendor = textish(draftOrder.vendor);
+  let vendorId = textish(draftOrder.vendorId) || vendor;
+  if (!vendor && !vendorId && Array.isArray(draftOrder.items)) {
+    for (const raw of draftOrder.items) {
+      if (!raw || typeof raw !== "object") continue;
+      const item = raw as Record<string, unknown>;
+      vendor = textish(item.vendor);
+      vendorId = textish(item.vendorId) || vendor;
+      if (vendor || vendorId) break;
+    }
+  }
+  const total = Number(draftOrder.total || 0);
+  const itemCount = Array.isArray(draftOrder.items) ? draftOrder.items.length : 0;
+  return {
+    customer: customer || undefined,
+    email: email || undefined,
+    vendor: vendor || undefined,
+    vendorId: vendorId || undefined,
+    total: Number.isFinite(total) && total > 0 ? total : undefined,
+    itemCount: itemCount > 0 ? itemCount : undefined,
+  };
+}
+
+export function mergeOrphanedPwaDraftRow(
+  a: OrphanedPwaDraftRow,
+  b: OrphanedPwaDraftRow,
+): OrphanedPwaDraftRow {
+  return {
+    ...a,
+    ...b,
+    savedAt: b.savedAt || a.savedAt,
+    prepayId: b.prepayId || a.prepayId,
+    vendor: b.vendor || a.vendor,
+    vendorId: b.vendorId || a.vendorId,
+    total: b.total ?? a.total,
+    customer: b.customer || a.customer,
+    email: b.email || a.email,
+    itemCount: b.itemCount ?? a.itemCount,
+    txnStatus: b.txnStatus || a.txnStatus,
+    hasOrder: b.hasOrder || a.hasOrder,
+    canRecover: Boolean(b.canRecover || a.canRecover),
+  };
+}
+
+export function mergeOrphanedPwaDraftRows(rows: OrphanedPwaDraftRow[]): OrphanedPwaDraftRow[] {
+  const byId = new Map<string, OrphanedPwaDraftRow>();
+  for (const row of rows) {
+    if (!row?.merchantOrderId) continue;
+    const prev = byId.get(row.merchantOrderId);
+    byId.set(row.merchantOrderId, prev ? mergeOrphanedPwaDraftRow(prev, row) : row);
+  }
+  return [...byId.values()];
+}
+
+async function enrichOrphanedPwaDraftRow(
+  row: OrphanedPwaDraftRow,
+): Promise<Partial<OrphanedPwaDraftRow> | null> {
+  const draft = await fetchPwaCheckoutDraft({
+    projectId: "",
+    publicAnonKey: "",
+    merchantOrderId: row.merchantOrderId,
+  }).catch(() => null);
+  if (draft?.draftOrder) {
+    return {
+      savedAt: textish(draft.savedAt) || undefined,
+      prepayId: draft.prepayId || undefined,
+      ...fieldsFromDraftOrder(draft.draftOrder),
+    };
+  }
+
+  // Draft key may be gone after finalize attempts; cart snapshot is also copied onto kpay_txn.
+  const status = await fetchPwaDraftStatusRow(row.merchantOrderId).catch(() => null);
+  if (!status) return null;
+  return {
+    savedAt: status.savedAt || undefined,
+    prepayId: status.prepayId,
+    vendor: status.vendor,
+    vendorId: status.vendorId,
+    customer: status.customer,
+    email: status.email,
+    itemCount: status.itemCount,
+    total: status.total,
+  };
+}
+
+/** Fill customer/vendor/total from the saved checkout draft or txn snapshot. */
+export async function hydrateOrphanedPwaDrafts(
+  rows: OrphanedPwaDraftRow[],
+): Promise<OrphanedPwaDraftRow[]> {
+  const merged = mergeOrphanedPwaDraftRows(rows);
+  if (merged.length === 0) return merged;
+
+  const extras = new Map<string, Partial<OrphanedPwaDraftRow>>();
+  const concurrency = 6;
+  for (let i = 0; i < merged.length; i += concurrency) {
+    const chunk = merged.slice(i, i + concurrency);
+    const enriched = await Promise.all(chunk.map((row) => enrichOrphanedPwaDraftRow(row)));
+    enriched.forEach((extra, index) => {
+      if (!extra) return;
+      extras.set(chunk[index].merchantOrderId, extra);
+    });
+  }
+
+  return merged.map((row) => {
+    const extra = extras.get(row.merchantOrderId);
+    if (!extra) return row;
+    return mergeOrphanedPwaDraftRow(row, { ...row, ...extra });
+  });
+}
 
 const ORPHANED_PWA_DRAFTS_CACHE_MS = 60_000;
 const orphanedPwaDraftsCache = new Map<
@@ -957,15 +1140,117 @@ export function invalidateOrphanedPwaDraftsCache(): void {
   orphanedPwaDraftsCache.clear();
 }
 
+export async function fetchPwaDraftStatusRow(merchantOrderId: string): Promise<{
+  hasDraft: boolean;
+  hasOrder: boolean;
+  txnStatus: string;
+  savedAt: string;
+  canRecover: boolean;
+  prepayId?: string;
+  vendor?: string;
+  vendorId?: string;
+  customer?: string;
+  email?: string;
+  itemCount?: number;
+  total?: number;
+} | null> {
+  const response = await fetch(
+    `${API_ROOT}/kpay/pwa/draft-status/${encodeURIComponent(merchantOrderId)}`,
+    { headers: cloudbaseHeaders() },
+  );
+  const data = (await response.json().catch(() => ({}))) as {
+    hasDraft?: boolean;
+    hasOrder?: boolean;
+    txnStatus?: string | null;
+    savedAt?: string | null;
+    canRecover?: boolean;
+    prepayId?: string | null;
+    vendor?: string | null;
+    vendorId?: string | null;
+    customer?: string | null;
+    email?: string | null;
+    itemCount?: number | string | null;
+    amount?: number | string | null;
+    total?: number | string | null;
+  };
+  if (!response.ok) return null;
+  const total = Number(data.total ?? data.amount ?? 0);
+  const itemCount = Number(data.itemCount ?? 0);
+  return {
+    hasDraft: Boolean(data.hasDraft),
+    hasOrder: Boolean(data.hasOrder),
+    txnStatus: String(data.txnStatus || "").toLowerCase(),
+    savedAt: String(data.savedAt || ""),
+    canRecover: Boolean(data.canRecover),
+    prepayId: data.prepayId ? String(data.prepayId) : undefined,
+    vendor: data.vendor ? String(data.vendor) : undefined,
+    vendorId: data.vendorId ? String(data.vendorId) : undefined,
+    customer: data.customer ? String(data.customer) : undefined,
+    email: data.email ? String(data.email) : undefined,
+    itemCount: Number.isFinite(itemCount) && itemCount > 0 ? itemCount : undefined,
+    total: Number.isFinite(total) && total > 0 ? total : undefined,
+  };
+}
+
+/** Keep paid-but-unregistered drafts only. Cancelled / unpaid PWA starts are not drafts. */
+export async function keepPaidOrphanedPwaDrafts(
+  rows: OrphanedPwaDraftRow[],
+): Promise<OrphanedPwaDraftRow[]> {
+  const paid: OrphanedPwaDraftRow[] = [];
+  const pending: OrphanedPwaDraftRow[] = [];
+  for (const row of rows) {
+    if (row.hasOrder) continue;
+    const status = String(row.txnStatus || "").toLowerCase();
+    if (status === "failed" || status === "cancelled" || status === "canceled") continue;
+    if (status === "paid") {
+      paid.push({ ...row, canRecover: row.canRecover !== false });
+      continue;
+    }
+    pending.push(row);
+  }
+
+  const concurrency = 4;
+  for (let i = 0; i < pending.length; i += concurrency) {
+    const chunk = pending.slice(i, i + concurrency);
+    const synced = await Promise.all(
+      chunk.map((row) =>
+        fetchPwaDraftStatusRow(row.merchantOrderId).catch(() => null),
+      ),
+    );
+    synced.forEach((status, index) => {
+      const row = chunk[index];
+      if (!status || status.hasOrder) return;
+      if (status.txnStatus !== "paid") return;
+      if (!status.canRecover && !status.hasDraft) return;
+      paid.push({
+        ...row,
+        txnStatus: "paid",
+        savedAt: status.savedAt || row.savedAt,
+        prepayId: status.prepayId || row.prepayId,
+        vendor: status.vendor || row.vendor,
+        vendorId: status.vendorId || row.vendorId,
+        customer: status.customer || row.customer,
+        email: status.email || row.email,
+        itemCount: status.itemCount ?? row.itemCount,
+        total: status.total ?? row.total,
+        canRecover: status.canRecover,
+      });
+    });
+  }
+  return paid;
+}
+
 export async function fetchOrphanedPwaDrafts(params?: {
   vendorId?: string;
   minAgeMinutes?: number;
   limit?: number;
   merchantOrderId?: string;
+  skipCache?: boolean;
+  timeoutMs?: number;
 }): Promise<OrphanedPwaDraftRow[]> {
   const cacheKey = orphanedPwaDraftsCacheKey(params);
   const cached = orphanedPwaDraftsCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < ORPHANED_PWA_DRAFTS_CACHE_MS) {
+  if (!params?.skipCache && cached && Date.now() - cached.at < ORPHANED_PWA_DRAFTS_CACHE_MS) {
     return cached.rows;
   }
 
@@ -975,10 +1260,13 @@ export async function fetchOrphanedPwaDrafts(params?: {
   if (params?.limit != null) qs.set("limit", String(params.limit));
   if (params?.merchantOrderId?.trim()) qs.set("merchantOrderId", params.merchantOrderId.trim());
   const query = qs.toString();
+  const controller = new AbortController();
+  const timeoutMs = params?.timeoutMs ?? (params?.vendorId ? 20_000 : 25_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const response = await fetch(
     `${API_ROOT}/kpay/pwa/orphaned-drafts${query ? `?${query}` : ""}`,
-    { headers: cloudbaseHeaders() },
-  );
+    { headers: cloudbaseHeaders(), signal: controller.signal },
+  ).finally(() => clearTimeout(timer));
   const data = (await response.json().catch(() => ({}))) as {
     drafts?: OrphanedPwaDraftRow[];
     error?: string;
@@ -989,4 +1277,95 @@ export async function fetchOrphanedPwaDrafts(params?: {
   const rows = Array.isArray(data.drafts) ? data.drafts : [];
   orphanedPwaDraftsCache.set(cacheKey, { at: Date.now(), rows });
   return rows;
+}
+
+/** Same vendor-scoped query the vendor admin strip uses, merged for super-admin. */
+export async function fetchOrphanedPwaDraftsForVendors(
+  vendorIds: string[],
+  params?: {
+    minAgeMinutes?: number;
+    limit?: number;
+    merchantOrderId?: string;
+    skipCache?: boolean;
+  },
+): Promise<OrphanedPwaDraftRow[]> {
+  const ids = [...new Set(vendorIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const batches: OrphanedPwaDraftRow[][] = [];
+  const concurrency = 8;
+  for (let i = 0; i < ids.length; i += concurrency) {
+    const chunk = ids.slice(i, i + concurrency);
+    batches.push(
+      ...(await Promise.all(
+        chunk.map((vendorId) =>
+          fetchOrphanedPwaDrafts({ ...params, vendorId }).catch(() => [] as OrphanedPwaDraftRow[]),
+        ),
+      )),
+    );
+  }
+  return mergeOrphanedPwaDraftRows(batches.flat());
+}
+
+function nearbyDraftIds(anchorOrderNumbers: string[]): string[] {
+  const parsed = anchorOrderNumbers
+    .map((id) => {
+      const match = String(id || "").toUpperCase().match(/^(ORD|MOS|NOS)-(\d+)$/);
+      if (!match) return null;
+      return {
+        prefix: match[1],
+        num: Number(match[2]),
+        width: match[2].length,
+      };
+    })
+    .filter((row): row is { prefix: string; num: number; width: number } => row !== null && Number.isFinite(row.num));
+  if (parsed.length === 0) return [];
+  const max = Math.max(...parsed.map((row) => row.num));
+  const width = Math.max(5, ...parsed.map((row) => row.width));
+  const existing = new Set(
+    anchorOrderNumbers.map((id) => String(id || "").toUpperCase().trim()),
+  );
+  const ids: string[] = [];
+  for (let n = max + 16; n >= Math.max(1, max - 8); n -= 1) {
+    const id = `NOS-${String(n).padStart(width, "0")}`;
+    if (!existing.has(id)) ids.push(id);
+  }
+  return ids;
+}
+
+/** Find paid KBZ txns that never became orders — even if the checkout draft was deleted. */
+export async function probeRecentOrphanedPwaDrafts(
+  anchorOrderNumbers: string[],
+): Promise<OrphanedPwaDraftRow[]> {
+  const ids = nearbyDraftIds(anchorOrderNumbers);
+  if (ids.length === 0) return [];
+  const found: OrphanedPwaDraftRow[] = [];
+  const concurrency = 6;
+  for (let i = 0; i < ids.length; i += concurrency) {
+    const chunk = ids.slice(i, i + concurrency);
+    const statuses = await Promise.all(
+      chunk.map((merchantOrderId) =>
+        fetchPwaDraftStatusRow(merchantOrderId).catch(() => null),
+      ),
+    );
+    statuses.forEach((status, index) => {
+      if (!status || status.hasOrder) return;
+      if (status.txnStatus !== "paid") return;
+      if (!status.canRecover && !status.hasDraft) return;
+      found.push({
+        merchantOrderId: chunk[index],
+        savedAt: status.savedAt,
+        prepayId: status.prepayId,
+        vendor: status.vendor,
+        vendorId: status.vendorId || status.vendor,
+        customer: status.customer,
+        email: status.email,
+        itemCount: status.itemCount,
+        total: status.total,
+        txnStatus: "paid",
+        hasOrder: false,
+        canRecover: status.canRecover,
+      });
+    });
+  }
+  return found;
 }

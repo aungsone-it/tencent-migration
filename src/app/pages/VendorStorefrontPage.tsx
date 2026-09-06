@@ -18,6 +18,7 @@ import {
   hasVendorKpayReturnSignals,
   isUnifiedKpaySummaryPath,
   navigateUnifiedSummaryContinueShopping,
+  readKpayReturnPrepayId,
   readKpayReturnQueryOrderId,
   resolveKpayReturnStoreSlug,
   resolveStoreSlugFromPwaCheckoutDraft,
@@ -507,9 +508,15 @@ export function VendorStorefrontPage() {
     return <StorefrontAwareRouteFallback />;
   }
 
-  // Unified PWA return (`/summary?prepay_id&merch_order_id`) must render Checkout +
-  // the paid draft even when vendor slug lookup fails or the KBZ WebView has no store.
-  if (unifiedSummaryRoute) {
+  const pwaReturnReceipt = Boolean(
+    unifiedSummaryRoute ||
+      readKpayReturnPrepayId(location.search) ||
+      readKpayReturnQueryOrderId(location.search),
+  );
+
+  // PWA return must render Checkout + the paid draft even when vendor slug lookup
+  // fails (that 404 is why customers never see the summary).
+  if (pwaReturnReceipt) {
     return (
       <AuthProvider>
         <CartProvider>

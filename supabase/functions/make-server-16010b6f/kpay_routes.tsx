@@ -8,8 +8,8 @@ import {
   enrichPwaDraftWithCallback,
 } from "./pwa_finalize.ts";
 import {
-  getOrphanedPwaDraftsRoute,
-  getPwaDraftStatusRoute,
+  getOrphanedPwaDraftsRoute as listOrphanedPwaDraftsHttp,
+  getPwaDraftStatusRoute as readPwaDraftStatusHttp,
   postPwaReconcileRoute as runPwaReconcileRoute,
 } from "./pwa_reconcile.ts";
 import { queueOrderReadModelSync, syncOrderReadModel } from "./read_model.ts";
@@ -1929,6 +1929,13 @@ export async function createKPayQr(c: Context) {
     const amount = normalizeAmountMMK(body.amount);
     const currency = text(body.currency || "MMK") || "MMK";
     const notifyUrl = text(body.notifyUrl) || cfg.notifyUrl;
+    const originPath = text(body.originPath);
+    const summaryPath = text(body.summaryPath);
+    const storefrontOrigin = text(body.storefrontOrigin);
+    const draftOrder =
+      body.draftOrder && typeof body.draftOrder === "object"
+        ? (body.draftOrder as Record<string, unknown>)
+        : undefined;
 
     // In strict mode, keep create endpoint fixed only when explicitly configured.
     // Otherwise, allow fallback candidates to support provider variants.
@@ -1993,7 +2000,18 @@ export async function createKPayQr(c: Context) {
       rawCreateResponse: provider.body,
       endpointUsed: provider.endpoint,
       wrapRequest: cfg.wrapRequest,
+      ...(draftOrder ? { draftOrder } : {}),
     });
+    if (draftOrder) {
+      await savePwaCheckoutDraft({
+        merchantOrderId,
+        originPath: originPath || undefined,
+        summaryPath: summaryPath || undefined,
+        storefrontOrigin: storefrontOrigin || undefined,
+        draftOrder,
+        savedAt: timestamp,
+      });
+    }
 
     return c.json({
       success: true,
@@ -2319,6 +2337,13 @@ export async function startKPayPwa(c: Context) {
 
     const providerStatus = providerStatusFrom(provider.body);
     const ts2 = nowIso();
+    const originPath = originPathEarly;
+    const summaryPath = summaryPathEarly;
+    const storefrontOrigin = storefrontOriginEarly;
+    const draftOrder =
+      body.draftOrder && typeof body.draftOrder === "object"
+        ? (body.draftOrder as Record<string, unknown>)
+        : undefined;
     await kv.set(`kpay_txn:${merchantOrderId}`, {
       merchantOrderId,
       amount,
@@ -2335,15 +2360,8 @@ export async function startKPayPwa(c: Context) {
       rawCreateResponse: provider.body,
       endpointUsed: provider.endpoint,
       wrapRequest: winningWrapRequest,
+      ...(draftOrder ? { draftOrder } : {}),
     });
-
-    const originPath = originPathEarly;
-    const summaryPath = summaryPathEarly;
-    const storefrontOrigin = storefrontOriginEarly;
-    const draftOrder =
-      body.draftOrder && typeof body.draftOrder === "object"
-        ? (body.draftOrder as Record<string, unknown>)
-        : undefined;
     if (draftOrder) {
       await savePwaCheckoutDraft({
         merchantOrderId,
@@ -2395,10 +2413,37 @@ export async function startKPayPwa(c: Context) {
 // PWA payment is completed (success or cancelled). We optionally call queryorder to
 // confirm the trade_status, then redirect the user to the SPA route that shows the
 // final result UI.
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Preserve KBZ echo params (callback_info, alternate key spellings) on the SPA redirect. */
+function mergeKpayReturnQueryParams(
+  targetUrl: string,
+  incoming: URLSearchParams,
+): string {
+  const u = new URL(targetUrl);
+  for (const [key, value] of incoming.entries()) {
+    if (!u.searchParams.has(key)) {
+      u.searchParams.set(key, value);
+    }
+  }
+  const altMerch = incoming.get("merchOrderId");
+  if (altMerch && !u.searchParams.get("merch_order_id")) {
+    u.searchParams.set("merch_order_id", altMerch);
+  }
+  const altPrepay = incoming.get("prepayId");
+  if (altPrepay && !u.searchParams.get("prepay_id")) {
+    u.searchParams.set("prepay_id", altPrepay);
+  }
+  return u.toString();
+}
+
 export async function handleKPayPwaReturn(c: Context) {
   const url = new URL(c.req.url);
-  const prepayId = text(url.searchParams.get("prepay_id"));
-  const merchantOrderId = text(url.searchParams.get("merch_order_id")) || text(url.searchParams.get("merchOrderId"));
+  const prepayId = text(url.searchParams.get("prepay_id")) || text(url.searchParams.get("prepayId"));
+  const merchantOrderId =
+    text(url.searchParams.get("merch_order_id")) || text(url.searchParams.get("merchOrderId"));
   const callbackInfo = text(url.searchParams.get("callback_info"));
 
   const spaReturnBase = text(Deno.env.get("KPAY_PWA_FRONTEND_RETURN_URL"));
@@ -2413,16 +2458,26 @@ export async function handleKPayPwaReturn(c: Context) {
   const draft = enrichPwaDraftWithCallback(draftRaw, callbackInfo);
 
   if (merchantOrderId) {
-    await syncKPayTxnStatusFromProvider(merchantOrderId);
-    const fin = await finalizePwaCheckoutOrder(merchantOrderId);
-    if (fin.ok && fin.created) {
-      console.log(`✅ PWA order finalized on return for ${merchantOrderId}`);
-    } else if (
-      !fin.ok &&
-      fin.error !== "payment_not_confirmed" &&
-      fin.error !== "no_checkout_draft"
-    ) {
-      console.warn(`PWA finalize on return: ${merchantOrderId}`, fin.error, fin.message);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await syncKPayTxnStatusFromProvider(merchantOrderId);
+      const fin = await finalizePwaCheckoutOrder(merchantOrderId);
+      if (fin.ok && fin.created) {
+        console.log(`✅ PWA order finalized on return for ${merchantOrderId}`);
+        break;
+      }
+      if (fin.ok && fin.duplicate) break;
+      if (fin.error === "payment_not_confirmed" && attempt < 3) {
+        await sleepMs(1500);
+        continue;
+      }
+      if (
+        !fin.ok &&
+        fin.error !== "payment_not_confirmed" &&
+        fin.error !== "no_checkout_draft"
+      ) {
+        console.warn(`PWA finalize on return: ${merchantOrderId}`, fin.error, fin.message);
+      }
+      break;
     }
   }
 
@@ -2432,11 +2487,7 @@ export async function handleKPayPwaReturn(c: Context) {
     prepayId,
     merchantOrderId,
   );
-  if (callbackInfo) {
-    const u = new URL(targetUrl);
-    u.searchParams.set("callback_info", callbackInfo);
-    targetUrl = u.toString();
-  }
+  targetUrl = mergeKpayReturnQueryParams(targetUrl, url.searchParams);
 
   return c.redirect(targetUrl, 302);
 }
@@ -2460,13 +2511,13 @@ async function maybeFinalizeSubscriptionAfterPaid(merchantOrderId: string): Prom
 async function maybeFinalizePwaOrderAfterPaid(merchantOrderId: string): Promise<void> {
   const fin = await finalizePwaCheckoutOrder(merchantOrderId);
   if (fin.ok && fin.created) {
-    console.log(`✅ PWA order finalized for ${merchantOrderId}`);
+    console.log(`✅ KBZPay order finalized for ${merchantOrderId}`);
   } else if (
     !fin.ok &&
     fin.error !== "no_checkout_draft" &&
     fin.error !== "payment_not_confirmed"
   ) {
-    console.warn(`PWA finalize: ${merchantOrderId}`, fin.error, fin.message);
+    console.warn(`KBZPay finalize: ${merchantOrderId}`, fin.error, fin.message);
   }
 }
 
@@ -2622,7 +2673,13 @@ export async function postPwaAdminRecoverRoute(c: Context) {
   return c.json({ success: true, adminRecover: true, ...result });
 }
 
-export { getOrphanedPwaDraftsRoute, getPwaDraftStatusRoute };
+export async function getOrphanedPwaDraftsRoute(c: Context) {
+  return listOrphanedPwaDraftsHttp(c, syncKPayTxnStatusFromProvider);
+}
+
+export async function getPwaDraftStatusRoute(c: Context) {
+  return readPwaDraftStatusHttp(c, syncKPayTxnStatusFromProvider);
+}
 
 export async function postPwaReconcileRoute(c: Context) {
   return runPwaReconcileRoute(c, syncKPayTxnStatusFromProvider);
@@ -2762,6 +2819,9 @@ export async function getKPayStatus(c: Context) {
       merchantOrderId,
       status: safeStatus,
       providerStatus,
+      amount: existing?.amount ?? null,
+      title: existing?.title ?? null,
+      prepayId: existing?.prepayId ?? null,
       qrContent: qr.qrContent || text(existing?.qrContent),
       qrImageUrl: qr.qrImageUrl || text(existing?.qrImageUrl),
       payUrl: qr.payUrl || text(existing?.payUrl),
@@ -3374,7 +3434,7 @@ export async function handleKPayWebhook(c: Context) {
     if (safeStatus === "paid") {
       const fin = await finalizePwaCheckoutOrder(merchantOrderId);
       if (fin.ok && fin.created) {
-        console.log(`✅ PWA order created from webhook for ${merchantOrderId}`);
+        console.log(`✅ KBZPay order created from webhook for ${merchantOrderId}`);
       } else if (!fin.ok && fin.error !== "no_checkout_draft" && fin.error !== "payment_not_confirmed") {
         console.warn(`PWA webhook finalize: ${merchantOrderId}`, fin.error, fin.message);
       }

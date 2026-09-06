@@ -38,6 +38,7 @@
             (hasKpayQuery ||
               pendingKpay ||
               path === "/kpay/return" ||
+              path === "/kpay/pwa/return" ||
               (path === "/" && pendingKpay))
           ) {
             document.documentElement.className += " kpay-unified-redirect";
@@ -86,13 +87,13 @@
             pendingKpay = Boolean(localStorage.getItem("kpay_pwa_pending_order"));
           } catch (e) {}
 
-          if (isUnifiedApex && (path === "/summary" || path === "/kpay/return")) {
+          if (isUnifiedApex && (path === "/summary" || path === "/kpay/return" || path === "/kpay/pwa/return")) {
             try {
               document.documentElement.classList.remove("kpay-unified-redirect");
             } catch (e) {}
           }
 
-          if (isUnifiedApex && path === "/kpay/return") {
+          if (isUnifiedApex && (path === "/kpay/return" || path === "/kpay/pwa/return")) {
             if (!hasKpayQuery && pendingKpay) {
               try {
                 var rawReturn = localStorage.getItem("kpay_pwa_pending_order");
@@ -161,11 +162,11 @@
           }
 
           var shouldRedirect = false;
-          if (hasKpayQuery && (path === "/summary" || path === "/kpay/return" || path === "/")) {
+          if (hasKpayQuery && (path === "/summary" || path === "/kpay/return" || path === "/kpay/pwa/return" || path === "/")) {
             shouldRedirect = true;
           } else if (path === "/summary" && pendingKpay) {
             shouldRedirect = true;
-          } else if (path === "/kpay/return") {
+          } else if (path === "/kpay/return" || path === "/kpay/pwa/return") {
             shouldRedirect = true;
           }
 

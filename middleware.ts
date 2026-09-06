@@ -205,7 +205,12 @@ function hasKpayReturnQuery(search: string): boolean {
 
 function shouldEdgeRedirectVendorKpayToUnifiedSummary(path: string, search: string): boolean {
   if (!hasKpayReturnQuery(search)) return false;
-  return path === "/summary" || path === "/kpay/return" || path === "/";
+  return (
+    path === "/summary" ||
+    path === "/kpay/return" ||
+    path === "/kpay/pwa/return" ||
+    path === "/"
+  );
 }
 
 function isBarePlatformApexHost(host: string): boolean {
@@ -269,7 +274,11 @@ export default function vercelMiddleware(request: Request): Response {
     return next();
   }
 
-  if (shouldEdgeRedirectVendorKpayToUnifiedSummary(path, search) || path === "/kpay/return") {
+  if (
+    shouldEdgeRedirectVendorKpayToUnifiedSummary(path, search) ||
+    path === "/kpay/return" ||
+    path === "/kpay/pwa/return"
+  ) {
     const unified = new URL(`https://${baseDomain}/summary${search}`);
     return Response.redirect(unified.toString(), 302);
   }

@@ -48,7 +48,7 @@ function isVendorStorefrontSuspenseContext(pathname: string, hostname: string): 
   if (isVendorProductRoutePath(p)) return true;
   if (isMarketplaceVendorStorefrontPath(p)) return true;
   if (p === "/saved" || p.startsWith("/profile")) return true;
-  if (["/checkout", "/summary", "/kpay/return", "/order-confirmation"].includes(p)) {
+  if (["/checkout", "/summary", "/kpay/return", "/kpay/pwa/return", "/order-confirmation"].includes(p)) {
     return true;
   }
 

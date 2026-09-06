@@ -1847,9 +1847,9 @@ export function Orders({
         {/* Orders Tab */}
         <TabsContent value="orders">
           <PwaOrphanedOrdersRecovery
+            anchorOrderNumbers={displayOrders.slice(0, 8).map((order) => order.orderNumber)}
             searchQuery={debouncedSearch}
             onRecovered={handlePwaOrderRecovered}
-            compact
           />
           {/* Toolbar */}
           <Card className="mb-4">

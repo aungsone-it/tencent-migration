@@ -228,6 +228,11 @@ export const appRouteObjects: RouteObject[] = [
             element: <KPayReturnPage />,
           },
           {
+            // KBZ / merchant portal often registers the backend-shaped path.
+            path: "kpay/pwa/return",
+            element: <KPayReturnPage />,
+          },
+          {
             path: "checkout/success",
             element: <VendorHostOnlyStorefront />,
           },
@@ -407,6 +412,10 @@ export const appRouteObjects: RouteObject[] = [
           },
           {
             path: "vendor/:storeName/kpay/return",
+            element: <KPayReturnPage />,
+          },
+          {
+            path: "vendor/:storeName/kpay/pwa/return",
             element: <KPayReturnPage />,
           },
           {

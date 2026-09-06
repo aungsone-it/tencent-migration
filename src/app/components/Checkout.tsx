@@ -14,6 +14,7 @@ import {
   CheckCircle,
   Shield,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "./ui/button";
@@ -46,6 +47,12 @@ import {
   KPAY_PWA_PENDING_STORAGE_KEY,
 } from "../utils/kpayClient";
 import { fetchNextOrderNumber, formatOrderNumberDisplay, resolveCreatedOrderNumber } from "../utils/orderNumber";
+import {
+  isImmediatePlacementMethod,
+  isPwaPlacementMethod,
+  normalizeCheckoutPaymentMethod,
+  resolveCheckoutSummaryPlacement,
+} from "../utils/checkoutSummaryPlacement";
 import { slimOrderCreatePayload } from "../utils/orderCreatePayload";
 import { resolveVendorSubdomainStoreSlug } from "../utils/vendorSubdomainHooks";
 import { useResolvedVendorHostSlug } from "../utils/vendorHostResolution";
@@ -210,6 +217,14 @@ type KPayPwaPendingContext = {
     notes?: string;
     vendor?: string;
     vendorId?: string;
+    shippingFee?: number;
+    shippingCost?: number;
+    shipping?: number;
+    checkoutFreeShipping?: boolean;
+    deliveryPartnerId?: string | null;
+    deliveryPartnerName?: string | null;
+    deliveryService?: string | null;
+    estimatedDelivery?: string | null;
     shippingInfo?: {
       fullName: string;
       email: string;
@@ -386,39 +401,47 @@ function resolveInitialSummaryForRoute(
 ): {
   snapshot: CheckoutSummarySnapshot | null;
   pendingOrderId: string;
+  fromPersistedSnapshot: boolean;
 } {
   const path = (pathname.split("?")[0] || "").replace(/\/+$/, "") || "/";
   if (!/\/summary$/.test(path)) {
-    return { snapshot: null, pendingOrderId: "" };
+    return { snapshot: null, pendingOrderId: "", fromPersistedSnapshot: false };
   }
 
   const pending = readKPayPwaPendingContext();
-  const pendingOrderId =
-    readSummaryOrderIdFromSearch(search) || String(pending?.merchantOrderId || "").trim();
-
   const pathSnapshot = readCheckoutSummarySnapshot(`checkout-summary:${path}`);
   const latestSnapshot = readCheckoutSummarySnapshot(CHECKOUT_LATEST_SUMMARY_KEY);
+  const pendingHasDraft = Boolean(
+    pending?.draftOrder &&
+      Array.isArray(pending.draftOrder.items) &&
+      pending.draftOrder.items.length > 0,
+  );
+  const decision = resolveCheckoutSummaryPlacement({
+    urlOrderId: readSummaryOrderIdFromSearch(search),
+    urlPrepayId: readKpayReturnPrepayId(search),
+    pendingMerchantOrderId: String(pending?.merchantOrderId || "").trim(),
+    pendingHasDraft,
+    pathSnapshot,
+    latestSnapshot,
+  });
 
-  if (pendingOrderId) {
-    const matching =
-      [pathSnapshot, latestSnapshot].find(
-        (s) => s && String(s.orderNumber).trim() === pendingOrderId,
-      ) ?? null;
-    if (matching) {
-      return { snapshot: matching, pendingOrderId };
-    }
-    if (pending?.draftOrder && Array.isArray(pending.draftOrder.items) && pending.draftOrder.items.length > 0) {
-      return {
-        snapshot: draftOrderToSummarySnapshot(pendingOrderId, pending.draftOrder),
-        pendingOrderId,
-      };
-    }
-    return { snapshot: null, pendingOrderId };
+  if (
+    !decision.snapshot &&
+    decision.pendingOrderId &&
+    pendingHasDraft &&
+    pending?.draftOrder
+  ) {
+    return {
+      snapshot: draftOrderToSummarySnapshot(decision.pendingOrderId, pending.draftOrder),
+      pendingOrderId: decision.pendingOrderId,
+      fromPersistedSnapshot: false,
+    };
   }
 
   return {
-    snapshot: pathSnapshot || latestSnapshot,
-    pendingOrderId: "",
+    snapshot: decision.snapshot,
+    pendingOrderId: decision.pendingOrderId,
+    fromPersistedSnapshot: decision.fromPersistedSnapshot,
   };
 }
 
@@ -452,24 +475,6 @@ function summaryPaymentMethodLabel(method: CheckoutPaymentMethod, t: (key: strin
   if (method === "KPay-PWA") return t("checkout.kpayMobile");
   if (method === "BankTransfer") return t("checkout.bankTransfer");
   return t("checkout.card");
-}
-
-function normalizeCheckoutPaymentMethod(raw: unknown): "COD" | "Card" | "KPay" | "KPay-PWA" | "BankTransfer" {
-  const txt = String(raw || "").trim().toLowerCase();
-  if (!txt) return "Card";
-  if (txt === "cod" || txt === "cash" || txt.includes("cash on delivery")) return "COD";
-  if (txt.includes("pwa") || txt.includes("mobile browser")) return "KPay-PWA";
-  if (
-    txt === "kpay" ||
-    txt === "kbzpay" ||
-    txt === "kbz pay" ||
-    txt.includes("kpay qr") ||
-    txt.includes("kbzpay qr") ||
-    txt.includes("kbz pay qr")
-  ) return "KPay";
-  if (txt.includes("bank")) return "BankTransfer";
-  if (txt.includes("credit") || txt.includes("debit") || txt.includes("card")) return "Card";
-  return "Card";
 }
 
 async function waitForKPayPaidSession(
@@ -515,6 +520,14 @@ function buildPwaFinalizeOrderPayload(
     total: Number(d.total || 0),
     subtotal: Number(d.subtotal || 0),
     discount: Number(d.discount || 0),
+    shippingFee: Number(d.shippingFee ?? d.shippingCost ?? d.shipping ?? 0) || 0,
+    shippingCost: Number(d.shippingCost ?? d.shippingFee ?? d.shipping ?? 0) || 0,
+    shipping: Number(d.shipping ?? d.shippingFee ?? d.shippingCost ?? 0) || 0,
+    checkoutFreeShipping: d.checkoutFreeShipping === true,
+    deliveryPartnerId: d.deliveryPartnerId ?? null,
+    deliveryPartnerName: d.deliveryPartnerName ?? null,
+    deliveryService: d.deliveryService ?? d.deliveryPartnerName ?? null,
+    estimatedDelivery: d.estimatedDelivery ?? null,
     date: new Date().toISOString(),
     vendor: d.vendor || storeName,
     vendorId: d.vendorId || vendorId || undefined,
@@ -564,7 +577,7 @@ async function createStorefrontOrderFromPwaDraft(params: {
   storeName: string;
   vendorId: string | undefined;
   effectiveUserId: string | null | undefined;
-}): Promise<{ ok: boolean; message?: string }> {
+}): Promise<{ ok: boolean; order?: Record<string, unknown>; message?: string }> {
   const payload = slimOrderCreatePayload(
     buildPwaFinalizeOrderPayload(
       params.orderId,
@@ -592,6 +605,7 @@ async function createStorefrontOrderFromPwaDraft(params: {
   const createResult = (await createResponse.json().catch(() => ({}))) as {
     error?: string;
     message?: string;
+    order?: Record<string, unknown>;
     stockIssues?: Array<{ productName?: string; issue?: string }>;
   };
   if (!createResponse.ok) {
@@ -610,7 +624,70 @@ async function createStorefrontOrderFromPwaDraft(params: {
     };
   }
   notifyAdminOrdersUpdated("pwa-checkout-order-created");
-  return { ok: true };
+  return {
+    ok: true,
+    order:
+      createResult.order && typeof createResult.order === "object"
+        ? createResult.order
+        : undefined,
+  };
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function synthesizeRegisteredOrderResponse(
+  orderId: string,
+  order: Record<string, unknown> | undefined,
+  fallbackDraft: NonNullable<KPayPwaPendingContext["draftOrder"]>,
+  storeName: string,
+  vendorId: string | undefined,
+  effectiveUserId: string | null | undefined,
+): Response {
+  const base =
+    order && typeof order === "object"
+      ? order
+      : (buildPwaFinalizeOrderPayload(
+          orderId,
+          fallbackDraft,
+          {
+            merchantOrderId: orderId,
+            status: "paid",
+            providerStatus: "paid",
+            payUrl: "",
+            qrContent: "",
+            qrImageUrl: "",
+          },
+          undefined,
+          storeName,
+          vendorId,
+          effectiveUserId,
+        ) as Record<string, unknown>);
+  return new Response(
+    JSON.stringify({
+      order: {
+        ...base,
+        orderNumber: String(base.orderNumber || orderId),
+        paymentStatus: base.paymentStatus || "paid",
+        paymentMethod: base.paymentMethod || "KBZPay (PWA)",
+      },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+async function retryFetchOrderByMerchantOrderId(
+  orderId: string,
+  attempts = 3,
+  delayMs = 800,
+): Promise<Response> {
+  let response = await fetchOrderByMerchantOrderId(orderId);
+  for (let i = 0; i < attempts && !response.ok; i++) {
+    await sleepMs(delayMs);
+    response = await fetchOrderByMerchantOrderId(orderId);
+  }
+  return response;
 }
 
 /** Ensure KBZ PWA checkout becomes a real storefront order (not just a KV draft). */
@@ -625,16 +702,55 @@ async function persistPwaOrderIfMissing(params: {
   const { orderId, pendingCtx, storeName, vendorId, effectiveUserId, finalizeInFlight } = params;
   if (!orderId || !pendingCtx?.draftOrder) return null;
 
+  const registeredResponse = (
+    created: boolean,
+    order?: Record<string, unknown>,
+  ): Response => {
+    if (!created) {
+      return new Response(null, { status: 404 });
+    }
+    return synthesizeRegisteredOrderResponse(
+      orderId,
+      order,
+      pendingCtx.draftOrder!,
+      storeName,
+      vendorId,
+      effectiveUserId,
+    );
+  };
+
   let response = await fetchOrderByMerchantOrderId(orderId);
   if (response.ok) return response;
 
+  let createdOrder: Record<string, unknown> | undefined;
+  let finalizeSucceeded = false;
+
   for (let attempt = 0; attempt < 4; attempt++) {
-    await finalizePwaCheckoutOrderApi({ projectId, publicAnonKey, merchantOrderId: orderId });
+    const fin = await finalizePwaCheckoutOrderApi({
+      projectId,
+      publicAnonKey,
+      merchantOrderId: orderId,
+    });
+    if (fin.ok) {
+      finalizeSucceeded = true;
+      if (fin.order && typeof fin.order === "object") {
+        createdOrder = fin.order;
+      }
+    } else if (fin.error === "not_pwa_payment") {
+      response = await fetchOrderByMerchantOrderId(orderId);
+      return response.ok ? response : null;
+    }
     response = await fetchOrderByMerchantOrderId(orderId);
     if (response.ok) return response;
     if (attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await sleepMs(1500);
     }
+  }
+
+  if (finalizeSucceeded) {
+    response = await retryFetchOrderByMerchantOrderId(orderId);
+    if (response.ok) return response;
+    return registeredResponse(true, createdOrder);
   }
 
   let session: KPaySession | null = null;
@@ -650,7 +766,7 @@ async function persistPwaOrderIfMissing(params: {
   if (session?.status === "paid" && !finalizeInFlight.has(orderId)) {
     finalizeInFlight.add(orderId);
     try {
-      await createStorefrontOrderFromPwaDraft({
+      const created = await createStorefrontOrderFromPwaDraft({
         orderId,
         d: pendingCtx.draftOrder,
         session,
@@ -659,6 +775,12 @@ async function persistPwaOrderIfMissing(params: {
         vendorId,
         effectiveUserId,
       });
+      if (created.ok) {
+        if (created.order) createdOrder = created.order;
+        response = await retryFetchOrderByMerchantOrderId(orderId);
+        if (response.ok) return response;
+        return registeredResponse(true, createdOrder);
+      }
     } finally {
       finalizeInFlight.delete(orderId);
     }
@@ -678,7 +800,7 @@ async function persistPwaOrderIfMissing(params: {
         qrContent: session?.qrContent || "",
         qrImageUrl: session?.qrImageUrl || "",
       };
-      await createStorefrontOrderFromPwaDraft({
+      const created = await createStorefrontOrderFromPwaDraft({
         orderId,
         d: pendingCtx.draftOrder,
         session: paidSession,
@@ -687,6 +809,12 @@ async function persistPwaOrderIfMissing(params: {
         vendorId,
         effectiveUserId,
       });
+      if (created.ok) {
+        if (created.order) createdOrder = created.order;
+        response = await retryFetchOrderByMerchantOrderId(orderId);
+        if (response.ok) return response;
+        return registeredResponse(true, createdOrder);
+      }
     } finally {
       finalizeInFlight.delete(orderId);
     }
@@ -768,7 +896,11 @@ export function Checkout({
 
   const initialSummaryRoute = useMemo(() => {
     if (typeof window === "undefined") {
-      return { snapshot: null as CheckoutSummarySnapshot | null, pendingOrderId: "" };
+      return {
+        snapshot: null as CheckoutSummarySnapshot | null,
+        pendingOrderId: "",
+        fromPersistedSnapshot: false,
+      };
     }
     const pending = readKPayPwaPendingContext();
     if (pending?.storefrontOrigin?.trim()) {
@@ -778,12 +910,14 @@ export function Checkout({
   }, []);
   const initialSummarySnapshot = initialSummaryRoute.snapshot;
 
-  const [step, setStep] = useState<"checkout" | "success">(
-    initialSummarySnapshot ? "success" : "checkout"
+  const [step, setStep] = useState<"checkout" | "success" | "unregistered">(
+    initialSummarySnapshot && initialSummaryRoute.fromPersistedSnapshot ? "success" : "checkout"
   );
   const [loading, setLoading] = useState(false);
   const [summaryResolving, setSummaryResolving] = useState(
-    () => /\/summary$/.test(location.pathname) && !initialSummarySnapshot,
+    () =>
+      /\/summary$/.test(location.pathname) &&
+      !(initialSummarySnapshot && initialSummaryRoute.fromPersistedSnapshot),
   );
   const pwaFinalizeInFlightRef = useRef<Set<string>>(new Set());
   const pwaOrderPersistedRef = useRef(false);
@@ -835,17 +969,35 @@ export function Checkout({
     () => /\/summary$/.test(location.pathname),
     [location.pathname]
   );
-  /** KBZ PWA return / finalize — not KBZ QR scan (order already placed on checkout). */
+  /** PWA return only. COD and QR already created the order on Place Order. */
   const isPwaSummarySession = useMemo(() => {
-    if (unifiedSummaryRoute) return true;
-    if (readKpayReturnPrepayId(location.search)) return true;
-    if (pwaPendingContext?.prepayId) return true;
-    if (initialSummarySnapshot?.paymentMethod === "KPay-PWA") return true;
-    if (pwaPendingContext?.draftOrder && pwaPendingContext?.merchantOrderId) return true;
+    const prepayId = readKpayReturnPrepayId(location.search);
+    // KBZ PWA return always carries prepay_id. That wins over a leftover COD/QR snapshot.
+    if (prepayId) return true;
+
+    const snapshotMethod = initialSummarySnapshot
+      ? normalizeCheckoutPaymentMethod(initialSummarySnapshot.paymentMethod)
+      : null;
+    if (isImmediatePlacementMethod(snapshotMethod)) return false;
+
+    if (pwaPendingContext?.prepayId) {
+      const pendingId = String(pwaPendingContext.merchantOrderId || "").trim();
+      if (!summaryQueryOrderId || !pendingId || summaryQueryOrderId === pendingId) {
+        return true;
+      }
+    }
+    if (isPwaPlacementMethod(snapshotMethod)) return true;
+    if (
+      unifiedSummaryRoute &&
+      (pwaPendingContext?.prepayId || pwaPendingContext?.draftOrder)
+    ) {
+      return true;
+    }
     return false;
   }, [
     unifiedSummaryRoute,
     location.search,
+    summaryQueryOrderId,
     pwaPendingContext?.prepayId,
     pwaPendingContext?.draftOrder,
     pwaPendingContext?.merchantOrderId,
@@ -1515,13 +1667,17 @@ export function Checkout({
       setConfirmedDeliveryPartnerName(String(snapshot.deliveryPartnerName || "").trim());
       setShippingInfo(snapshot.shippingInfo || shippingInfo);
       setPaymentMethod(normalizeCheckoutPaymentMethod(snapshot.paymentMethod));
+      if (isPwaSummarySession) {
+        setLoading(false);
+        return;
+      }
       setStep("success");
       setLoading(false);
     } catch {
       // ignore corrupted snapshot and fall back to normal checkout
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, summarySnapshotStorageKey, summaryQueryOrderId, pwaPendingContext]);
+  }, [location.pathname, summarySnapshotStorageKey, summaryQueryOrderId, pwaPendingContext, isPwaSummarySession]);
 
   useEffect(() => {
     pwaOrderPersistedRef.current = false;
@@ -1534,7 +1690,11 @@ export function Checkout({
 
     let cancelled = false;
 
-    const applyDraftPreview = (orderId: string, d: NonNullable<KPayPwaPendingContext["draftOrder"]>) => {
+    const applyDraftPreview = (
+      orderId: string,
+      d: NonNullable<KPayPwaPendingContext["draftOrder"]>,
+      registered: boolean,
+    ) => {
       const draftItems = (Array.isArray(d.items) ? d.items : []).map((it: any, idx: number) => ({
         id: String(it?.productId ?? it?.id ?? idx),
         sku: String(it?.name ?? it?.sku ?? "Item"),
@@ -1549,6 +1709,10 @@ export function Checkout({
       setConfirmedTotal(Number(d.total || 0) || 0);
       setConfirmedOrderNote(String(d.notes || ""));
       setConfirmedDiscount(Number(d.discount || 0) || 0);
+      setConfirmedShippingFee(Number(d.shippingFee ?? d.shippingCost ?? d.shipping ?? 0) || 0);
+      setConfirmedDeliveryPartnerName(
+        String(d.deliveryPartnerName ?? d.deliveryService ?? "").trim(),
+      );
       setConfirmedCoupon(
         typeof d.couponCode === "string" && d.couponCode.trim()
           ? { campaign: { code: d.couponCode } }
@@ -1565,7 +1729,7 @@ export function Checkout({
         country: String(ship.country ?? ""),
       });
       setPaymentMethod("KPay-PWA");
-      setStep("success");
+      setStep(registered ? "success" : "unregistered");
       setLoading(false);
       setSummaryResolving(false);
     };
@@ -1682,10 +1846,7 @@ export function Checkout({
             orderId &&
             pendingCtx?.draftOrder
           ) {
-            applyDraftPreview(orderId, pendingCtx.draftOrder);
-            toast.error(
-              "Payment received but the order could not be registered. Please contact support with your order number.",
-            );
+            applyDraftPreview(orderId, pendingCtx.draftOrder, false);
           }
           return;
         }
@@ -1695,8 +1856,7 @@ export function Checkout({
             orderId &&
             pendingCtx?.draftOrder
           ) {
-            applyDraftPreview(orderId, pendingCtx.draftOrder);
-            toast.error("Could not load the confirmed order. Showing checkout draft.");
+            applyDraftPreview(orderId, pendingCtx.draftOrder, false);
           }
           return;
         }
@@ -2005,6 +2165,7 @@ export function Checkout({
         notes: orderNote,
         vendor: vendorName || storeName,
         vendorId: vendorId || undefined,
+        checkoutFreeShipping: isFreeShippingCheckout,
         shippingInfo: { ...shippingInfo, sellerId: shippingInfo.zipCode.trim() },
         items: checkoutItems.map((item) => ({
           productId: item.productId || item.id,
@@ -2142,7 +2303,7 @@ export function Checkout({
     effectiveUser?.email,
   ]);
 
-  const showSummaryLoading = onSummaryRoute && step !== "success" && summaryResolving;
+  const showSummaryLoading = onSummaryRoute && step === "checkout" && summaryResolving;
 
   // After a QR is issued, payment completion is written to KV by the public `kpay-webhook`
   // (and optionally refreshed via `queryorder` in `getKPayStatus`). We still subscribe to
@@ -2354,6 +2515,7 @@ export function Checkout({
 
       if (paymentMethod === "KPay") {
         orderData.kpay = {
+          method: "qr",
           merchantOrderId: latestKpaySession?.merchantOrderId || orderNum,
           status: latestKpaySession?.status || "pending",
           providerStatus: latestKpaySession?.providerStatus || "",
@@ -2424,6 +2586,10 @@ export function Checkout({
 
       setOrderNumber(resolvedOrderNumber);
       placedOrderNumber = resolvedOrderNumber;
+      // COD / QR placed here. Drop any leftover PWA draft so /summary stays this order.
+      if (paymentMethod === "COD" || paymentMethod === "KPay") {
+        clearKPayPwaPendingStorage();
+      }
 
       // Non-blocking: save address and track coupon after order is placed.
       if (effectiveUser?.id) {
@@ -2574,20 +2740,37 @@ export function Checkout({
     );
   }
 
-  // Success Screen
-  if (step === "success") {
+  // Success / unregistered-payment Screen
+  if (step === "success" || step === "unregistered") {
+    const registrationFailed = step === "unregistered";
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
         <div className="w-full max-w-2xl">
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-            <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500">
-                <Check className="h-6 w-6 text-white" strokeWidth={2.5} />
+            {registrationFailed ? (
+              <div className="flex items-start gap-3 border-b border-amber-200 bg-amber-50 px-6 py-5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500">
+                  <AlertTriangle className="h-6 w-6 text-white" strokeWidth={2.5} />
+                </div>
+                <div>
+                  <span className="text-sm font-bold uppercase tracking-wide text-amber-800">
+                    Payment received — order not registered
+                  </span>
+                  <p className="mt-1 text-sm text-amber-900">
+                    Please contact support with your order number.
+                  </p>
+                </div>
               </div>
-              <span className="text-sm font-bold uppercase tracking-wide text-emerald-700">
-                Order Placed Successfully
-              </span>
-            </div>
+            ) : (
+              <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500">
+                  <Check className="h-6 w-6 text-white" strokeWidth={2.5} />
+                </div>
+                <span className="text-sm font-bold uppercase tracking-wide text-emerald-700">
+                  Order Placed Successfully
+                </span>
+              </div>
+            )}
 
             {/* Order number — neutral panel, typography-led */}
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/90 px-6 py-5">

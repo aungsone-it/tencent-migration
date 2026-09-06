@@ -1981,6 +1981,8 @@ export async function createKPayQr(c: Context) {
       merchantOrderId,
       amount,
       currency,
+      method: "qr",
+      tradeType: "PAY_BY_QRCODE",
       status,
       providerStatus,
       qrContent: qr.qrContent,

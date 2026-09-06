@@ -5,6 +5,9 @@
 import * as kv from "./kv_store.tsx";
 import { normalizeOrderShippingFields, applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
+import { canonicalizeOrderNumber } from "./order_number.ts";
+import { syncOrderReadModel } from "./read_model.ts";
+import { resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
 
 const DRAFT_KEY_PREFIX = "kpay_pwa_draft:";
 
@@ -188,6 +191,7 @@ function buildOrderBodyFromDraft(
   });
 
   const customerName = resolveRecoveryCustomerName(d.customerName, ship.fullName, d.email);
+  const shippingFee = Number(d.shippingFee ?? d.shippingCost ?? d.shipping ?? 0) || 0;
 
   return {
     orderNumber: merchantOrderId,
@@ -202,6 +206,15 @@ function buildOrderBodyFromDraft(
     total: Number(d.total || 0),
     subtotal: Number(d.subtotal || 0),
     discount: Number(d.discount || 0),
+    shippingFee,
+    shippingCost: Number(d.shippingCost ?? d.shippingFee ?? d.shipping ?? shippingFee) || 0,
+    shipping: Number(d.shipping ?? d.shippingFee ?? d.shippingCost ?? shippingFee) || 0,
+    checkoutFreeShipping: d.checkoutFreeShipping === true,
+    deliveryPartnerId: d.deliveryPartnerId ?? null,
+    deliveryPartnerName: d.deliveryPartnerName ?? null,
+    deliveryService: d.deliveryService ?? d.deliveryPartnerName ?? null,
+    estimatedDelivery: d.estimatedDelivery ?? null,
+    codFee: Number(d.codFee ?? 0) || 0,
     date: nowIso(),
     vendor: d.vendor || "",
     vendorId: d.vendorId || undefined,
@@ -228,6 +241,23 @@ function buildOrderBodyFromDraft(
   };
 }
 
+async function applyResolvedVendorToOrderBody(body: Record<string, unknown>): Promise<void> {
+  const candidate = text(body.vendorId) || text(body.vendor);
+  const resolved = candidate ? await resolveCanonicalVendorId(candidate) : "";
+  if (!resolved) return;
+  body.vendorId = resolved;
+  if (!Array.isArray(body.items)) return;
+  body.items = body.items.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    const row = { ...(item as Record<string, unknown>) };
+    const existing = text(row.vendorId) || text(row.vendor);
+    const itemId = existing.startsWith("vendor_") ? existing : resolved;
+    row.vendorId = itemId;
+    if (!text(row.vendor)) row.vendor = itemId;
+    return row;
+  });
+}
+
 async function createStorefrontOrderDirect(body: Record<string, unknown>): Promise<{
   ok: boolean;
   status: number;
@@ -235,9 +265,13 @@ async function createStorefrontOrderDirect(body: Record<string, unknown>): Promi
   error?: string;
   message?: string;
 }> {
-  const requestedOrderNumber =
+  const requestedOrderNumber = canonicalizeOrderNumber(
     text(body.orderNumber) ||
-    text((body.kpay as Record<string, unknown> | undefined)?.merchantOrderId);
+      text((body.kpay as Record<string, unknown> | undefined)?.merchantOrderId),
+  );
+  if (requestedOrderNumber) {
+    body.orderNumber = requestedOrderNumber;
+  }
 
   if (requestedOrderNumber) {
     const mappedId = await kv.get(`order_num:${requestedOrderNumber}`);
@@ -268,13 +302,18 @@ async function createStorefrontOrderDirect(body: Record<string, unknown>): Promi
       ? parseFloat(body.discount)
       : Number(body.discount)
     : 0;
+  const parsedShippingFee = Number(body.shippingFee ?? body.shippingCost ?? body.shipping ?? 0) || 0;
 
   const orderData = {
     ...applyNormalizedShippingToOrderBody(slimOrderCreateBody(body)),
+    orderNumber: requestedOrderNumber || text(body.orderNumber),
     id,
     total: parsedTotal,
     subtotal: parsedSubtotal,
     discount: parsedDiscount,
+    shippingFee: parsedShippingFee,
+    shippingCost: parsedShippingFee,
+    shipping: parsedShippingFee,
     createdAt: nowIso(),
     updatedAt: nowIso(),
     date: text(body.date) || new Date().toISOString().split("T")[0],
@@ -288,7 +327,33 @@ async function createStorefrontOrderDirect(body: Record<string, unknown>): Promi
     await kv.set(`order_num:${requestedOrderNumber}`, id);
   }
 
+  try {
+    await syncOrderReadModel(id, orderData);
+  } catch {
+    /* KV is source of truth; SQL sync is best-effort */
+  }
+
   return { ok: true, status: 201, order: orderData };
+}
+
+async function persistStorefrontOrder(body: Record<string, unknown>): Promise<{
+  ok: boolean;
+  status: number;
+  order?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const viaHttp = await postStorefrontOrder(body);
+    if (viaHttp.ok) return viaHttp;
+    console.warn(
+      "postStorefrontOrder failed, falling back to direct create:",
+      viaHttp.error || viaHttp.message || viaHttp.status,
+    );
+  } catch (error) {
+    console.warn("postStorefrontOrder threw, falling back to direct create:", error);
+  }
+  return createStorefrontOrderDirect(body);
 }
 
 async function postStorefrontOrder(body: Record<string, unknown>): Promise<{
@@ -348,13 +413,17 @@ export async function finalizePwaCheckoutOrder(
 }> {
   const id = text(merchantOrderId);
   if (!id) return { ok: false, error: "merchant_order_id_required" };
+  const canonicalId = canonicalizeOrderNumber(id) || id;
 
-  const mapped = await kv.get(`order_num:${id}`);
-  if (typeof mapped === "string" && mapped.trim()) {
-    const existing = (await kv.get(`order:${mapped.trim()}`)) as Record<string, unknown> | null;
-    if (existing) {
-      await deletePwaCheckoutDraft(id);
-      return { ok: true, created: false, duplicate: true, order: existing };
+  for (const lookup of [...new Set([id, canonicalId])]) {
+    const mapped = await kv.get(`order_num:${lookup}`);
+    if (typeof mapped === "string" && mapped.trim()) {
+      const existing = (await kv.get(`order:${mapped.trim()}`)) as Record<string, unknown> | null;
+      if (existing) {
+        await deletePwaCheckoutDraft(id);
+        if (lookup !== id) await deletePwaCheckoutDraft(lookup).catch(() => undefined);
+        return { ok: true, created: false, duplicate: true, order: existing };
+      }
     }
   }
 
@@ -364,6 +433,11 @@ export async function finalizePwaCheckoutOrder(
   }
 
   const txn = (await kv.get(`kpay_txn:${id}`)) as Record<string, unknown> | null;
+  const txnMethod = text(txn?.method).toLowerCase();
+  const txnTradeType = text(txn?.tradeType).toUpperCase();
+  if (txnMethod === "qr" || txnTradeType === "PAY_BY_QRCODE") {
+    return { ok: false, error: "not_pwa_payment", message: "qr" };
+  }
   const txnStatus = text(txn?.status).toLowerCase();
   if (txnStatus !== "paid") {
     return { ok: false, error: "payment_not_confirmed", message: txnStatus || "pending" };
@@ -384,10 +458,9 @@ export async function finalizePwaCheckoutOrder(
     };
   }
 
-  const persistOrder = options?.adminRecover
-    ? createStorefrontOrderDirect
-    : postStorefrontOrder;
-  const result = await persistOrder(body);
+  await applyResolvedVendorToOrderBody(body);
+
+  const result = await persistStorefrontOrder(body);
   if (!result.ok) {
     return {
       ok: false,

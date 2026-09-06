@@ -73,6 +73,7 @@ import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./
 import { applyNormalizedShippingToOrderBody, normalizeOrderShippingFields } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
 import { allocateNextOrderNumber, canonicalizeOrderNumber, noteOrderNumberUsed } from "./order_number.ts";
+import { compactVendorKey, resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
 import {
   mergeMetaCapiAccessTokenOnSave,
   queueMetaCapiPurchaseFromOrder,
@@ -6281,20 +6282,26 @@ async function resolveOrderStorage(orderIdParam: string): Promise<{
     return { record: direct, storageKey: `order:${trimmed}`, orderKvId: trimmed };
   }
 
-  const mappedRaw = await withTimeout(kv.get(`order_num:${trimmed}`), 5000).catch(() => null);
-  const mappedId = String(mappedRaw ?? "").trim();
-  if (mappedId) {
-    const mapped = await withTimeout(kv.get(`order:${mappedId}`), 5000).catch(() => null);
-    if (mapped && typeof mapped === "object") {
-      return { record: mapped, storageKey: `order:${mappedId}`, orderKvId: mappedId };
-    }
-  }
+  const lookupKeys = [trimmed];
+  const canonical = canonicalizeOrderNumber(trimmed);
+  if (canonical && canonical !== trimmed) lookupKeys.push(canonical);
 
-  const refKvId = `order_ref_${encodeURIComponent(trimmed)}`;
-  if (refKvId !== trimmed) {
-    const refOrder = await withTimeout(kv.get(`order:${refKvId}`), 5000).catch(() => null);
-    if (refOrder && typeof refOrder === "object") {
-      return { record: refOrder, storageKey: `order:${refKvId}`, orderKvId: refKvId };
+  for (const lookup of lookupKeys) {
+    const mappedRaw = await withTimeout(kv.get(`order_num:${lookup}`), 5000).catch(() => null);
+    const mappedId = String(mappedRaw ?? "").trim();
+    if (mappedId) {
+      const mapped = await withTimeout(kv.get(`order:${mappedId}`), 5000).catch(() => null);
+      if (mapped && typeof mapped === "object") {
+        return { record: mapped, storageKey: `order:${mappedId}`, orderKvId: mappedId };
+      }
+    }
+
+    const refKvId = `order_ref_${encodeURIComponent(lookup)}`;
+    if (refKvId !== lookup) {
+      const refOrder = await withTimeout(kv.get(`order:${refKvId}`), 5000).catch(() => null);
+      if (refOrder && typeof refOrder === "object") {
+        return { record: refOrder, storageKey: `order:${refKvId}`, orderKvId: refKvId };
+      }
     }
   }
 
@@ -6633,6 +6640,22 @@ app.post("/make-server-16010b6f/orders", async (c) => {
   try {
     console.log("📦 Creating new order...");
     const body = await c.req.json();
+    const vendorCandidate = String(body?.vendorId || body?.vendor || "").trim();
+    if (vendorCandidate) {
+      const resolvedVendorId = await resolveVendorIdFromSlugOrId(vendorCandidate);
+      if (resolvedVendorId) {
+        body.vendorId = resolvedVendorId;
+        if (Array.isArray(body.items)) {
+          body.items = body.items.map((item: any) => {
+            if (!item || typeof item !== "object") return item;
+            const existing = String(item.vendorId || item.vendor || "").trim();
+            const itemVendorId = existing.startsWith("vendor_") ? existing : resolvedVendorId;
+            return { ...item, vendorId: itemVendorId, vendor: item.vendor || itemVendorId };
+          });
+        }
+      }
+    }
+
     let requestedOrderNumber =
       String(body?.orderNumber || body?.kpay?.merchantOrderId || "").trim();
 
@@ -13462,19 +13485,7 @@ async function clearVendorPublicSlugCaches(vendorId: string) {
 
 /** Resolve internal vendor id from store slug or `vendor_*` id string. */
 async function resolveVendorIdFromSlugOrId(vendorIdOrSlug: string): Promise<string> {
-  const raw = String(vendorIdOrSlug || "").trim();
-  if (!raw) return "";
-  const slugRow = await withTimeout(kv.get(`vendor_slug_${raw}`), 3000).catch(() => null);
-  if (slugRow && typeof slugRow === "object") {
-    const vid = String((slugRow as { vendorId?: unknown }).vendorId || "").trim();
-    if (vid) return vid;
-  }
-  const direct = await withTimeout(kv.get(`vendor:${raw}`), 3000).catch(() => null);
-  if (direct && typeof direct === "object") {
-    const id = String((direct as { id?: unknown }).id || "").trim();
-    if (id) return id;
-  }
-  return raw;
+  return resolveCanonicalVendorId(vendorIdOrSlug);
 }
 
 // Get vendor storefront by slug (public access)
@@ -13998,6 +14009,17 @@ async function resolveVendorOrderIdentifierSet(param: string): Promise<Set<strin
   if (vendor?.name) ids.add(String(vendor.name));
   if (vendor?.businessName) ids.add(String(vendor.businessName));
 
+  for (const id of [...ids]) {
+    const compact = compactVendorKey(id);
+    if (compact) ids.add(compact);
+    const hyphen = String(id)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (hyphen) ids.add(hyphen);
+  }
+
   return ids;
 }
 
@@ -14087,10 +14109,13 @@ function vendorIdentifiersHas(vendorIds: Set<string>, candidate: unknown): boole
   if (candidate == null) return false;
   const c = String(candidate).trim();
   if (!c) return false;
+  const compactC = compactVendorKey(c);
   for (const id of vendorIds) {
     const s = String(id).trim();
     if (s === c) return true;
     if (s.toLowerCase() === c.toLowerCase()) return true;
+    const compactS = compactVendorKey(s);
+    if (compactS && compactC && compactS === compactC) return true;
   }
   return false;
 }

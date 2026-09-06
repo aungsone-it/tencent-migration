@@ -420,8 +420,7 @@ export async function finalizePwaCheckoutOrder(
     if (typeof mapped === "string" && mapped.trim()) {
       const existing = (await kv.get(`order:${mapped.trim()}`)) as Record<string, unknown> | null;
       if (existing) {
-        await deletePwaCheckoutDraft(id);
-        if (lookup !== id) await deletePwaCheckoutDraft(lookup).catch(() => undefined);
+        // Keep the draft so the KBZ return WebView can still render the summary.
         return { ok: true, created: false, duplicate: true, order: existing };
       }
     }
@@ -468,8 +467,6 @@ export async function finalizePwaCheckoutOrder(
       message: result.message,
     };
   }
-
-  await deletePwaCheckoutDraft(id);
 
   return {
     ok: true,

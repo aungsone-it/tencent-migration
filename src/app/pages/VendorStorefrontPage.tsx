@@ -292,17 +292,10 @@ export function VendorStorefrontPage() {
     [unifiedSummaryRoute, location.pathname, location.search],
   );
   const [draftStoreSlug, setDraftStoreSlug] = useState<string | null>(null);
-  const [draftSlugLoading, setDraftSlugLoading] = useState(
-    () => unifiedSummaryRoute && !syncKpayStoreSlug && Boolean(kpayReturnOrderId),
-  );
 
   useEffect(() => {
-    if (!unifiedSummaryRoute || syncKpayStoreSlug || !kpayReturnOrderId) {
-      setDraftSlugLoading(false);
-      return;
-    }
+    if (!unifiedSummaryRoute || syncKpayStoreSlug || !kpayReturnOrderId) return;
     let cancelled = false;
-    setDraftSlugLoading(true);
     void fetchPwaCheckoutDraft({
       projectId,
       publicAnonKey,
@@ -311,9 +304,6 @@ export function VendorStorefrontPage() {
       .then((draft) => {
         if (cancelled) return;
         setDraftStoreSlug(resolveStoreSlugFromPwaCheckoutDraft(draft));
-      })
-      .finally(() => {
-        if (!cancelled) setDraftSlugLoading(false);
       });
     return () => {
       cancelled = true;
@@ -517,11 +507,9 @@ export function VendorStorefrontPage() {
     return <StorefrontAwareRouteFallback />;
   }
 
-  if (unifiedSummaryRoute && draftSlugLoading) {
-    return <StorefrontAwareRouteFallback />;
-  }
-
-  if (unifiedSummaryRoute && !storeName) {
+  // Unified PWA return (`/summary?prepay_id&merch_order_id`) must render Checkout +
+  // the paid draft even when vendor slug lookup fails or the KBZ WebView has no store.
+  if (unifiedSummaryRoute) {
     return (
       <AuthProvider>
         <CartProvider>
@@ -531,12 +519,12 @@ export function VendorStorefrontPage() {
                 onBack={() => {
                   void navigateUnifiedSummaryContinueShopping(navigate, {
                     search: location.search,
-                    storeSlug: kpayUnifiedStoreSlug,
+                    storeSlug: kpayUnifiedStoreSlug || storeName,
                   });
                 }}
-                storeName={kpayUnifiedStoreSlug || ""}
-                vendorId={kpayUnifiedStoreSlug || ""}
-                vendorName={kpayUnifiedStoreSlug || ""}
+                storeName={kpayUnifiedStoreSlug || storeName || ""}
+                vendorId={kpayUnifiedStoreSlug || storeName || ""}
+                vendorName={kpayUnifiedStoreSlug || storeName || ""}
               />
             </div>
           </UnifiedKpaySummarySignInGate>

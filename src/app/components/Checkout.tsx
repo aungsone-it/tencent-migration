@@ -909,15 +909,27 @@ export function Checkout({
     return resolveInitialSummaryForRoute(window.location.pathname, window.location.search);
   }, []);
   const initialSummarySnapshot = initialSummaryRoute.snapshot;
+  const initialPwaDraftReady = Boolean(
+    initialSummarySnapshot?.items?.length &&
+      !initialSummaryRoute.fromPersistedSnapshot &&
+      normalizeCheckoutPaymentMethod(initialSummarySnapshot.paymentMethod) === "KPay-PWA",
+  );
 
   const [step, setStep] = useState<"checkout" | "success" | "unregistered">(
-    initialSummarySnapshot && initialSummaryRoute.fromPersistedSnapshot ? "success" : "checkout"
+    initialSummarySnapshot && initialSummaryRoute.fromPersistedSnapshot
+      ? "success"
+      : initialPwaDraftReady
+        ? "unregistered"
+        : "checkout"
   );
   const [loading, setLoading] = useState(false);
   const [summaryResolving, setSummaryResolving] = useState(
     () =>
       /\/summary$/.test(location.pathname) &&
-      !(initialSummarySnapshot && initialSummaryRoute.fromPersistedSnapshot),
+      !(
+        initialSummarySnapshot &&
+        (initialSummaryRoute.fromPersistedSnapshot || initialPwaDraftReady)
+      ),
   );
   const pwaFinalizeInFlightRef = useRef<Set<string>>(new Set());
   const pwaOrderPersistedRef = useRef(false);
@@ -1734,18 +1746,24 @@ export function Checkout({
       setSummaryResolving(false);
     };
 
+    const localOrderId =
+      summaryQueryOrderId ||
+      (typeof pwaPendingContext?.merchantOrderId === "string"
+        ? pwaPendingContext.merchantOrderId
+        : "");
+    // Paint the paid draft immediately — do not wait for persist / GET.
+    if (localOrderId && pwaPendingContext?.draftOrder) {
+      applyDraftPreview(localOrderId, pwaPendingContext.draftOrder, false);
+    }
+
     (async () => {
       let currentOrderId = "";
+      let pendingCtx = pwaPendingContext;
       try {
-        let orderId =
-          summaryQueryOrderId ||
-          (typeof pwaPendingContext?.merchantOrderId === "string"
-            ? pwaPendingContext.merchantOrderId
-            : "");
+        let orderId = localOrderId;
         currentOrderId = orderId;
 
-        let pendingCtx = pwaPendingContext;
-        if (orderId) {
+        if (orderId && !pendingCtx?.draftOrder) {
           setSummaryResolving(true);
         }
 
@@ -1772,6 +1790,13 @@ export function Checkout({
               storefrontOrigin: serverDraft.storefrontOrigin,
               draftOrder: serverDraft.draftOrder as KPayPwaPendingContext["draftOrder"],
             };
+            if (!cancelled) {
+              applyDraftPreview(
+                orderId,
+                serverDraft.draftOrder as KPayPwaPendingContext["draftOrder"],
+                false,
+              );
+            }
           } else if (serverDraft?.storefrontOrigin?.trim()) {
             pendingCtx = {
               ...pendingCtx,
@@ -1976,6 +2001,9 @@ export function Checkout({
         }
       } catch {
         console.error("PWA summary hydrate failed:", currentOrderId);
+        if (!cancelled && currentOrderId && pendingCtx?.draftOrder) {
+          applyDraftPreview(currentOrderId, pendingCtx.draftOrder, false);
+        }
       } finally {
         if (currentOrderId) {
           pwaFinalizeInFlightRef.current.delete(currentOrderId);

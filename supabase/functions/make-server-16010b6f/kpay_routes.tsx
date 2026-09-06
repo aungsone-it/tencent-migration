@@ -2418,6 +2418,24 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Origin for unified SPA summary after KBZ backend return (e.g. https://nexa-mm.com). */
+function resolveKpayFrontendReturnOrigin(): string {
+  const raw = text(Deno.env.get("KPAY_PWA_FRONTEND_RETURN_URL"));
+  if (raw) {
+    try {
+      const withProto = raw.includes("://") ? raw : `https://${raw}`;
+      return new URL(withProto).origin;
+    } catch {
+      return raw.replace(/\/summary\/?$/i, "").replace(/\/$/, "");
+    }
+  }
+  const apex =
+    text(Deno.env.get("VENDOR_SUBDOMAIN_BASE_DOMAIN")) ||
+    text(Deno.env.get("VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN")) ||
+    "nexa-mm.com";
+  return `https://${apex.replace(/^www\./i, "")}`;
+}
+
 /** Preserve KBZ echo params (callback_info, alternate key spellings) on the SPA redirect. */
 function mergeKpayReturnQueryParams(
   targetUrl: string,
@@ -2447,13 +2465,7 @@ export async function handleKPayPwaReturn(c: Context) {
     text(url.searchParams.get("merch_order_id")) || text(url.searchParams.get("merchOrderId"));
   const callbackInfo = text(url.searchParams.get("callback_info"));
 
-  const spaReturnBase = text(Deno.env.get("KPAY_PWA_FRONTEND_RETURN_URL"));
-  if (!spaReturnBase) {
-    return c.json({
-      error: "KPAY_PWA_FRONTEND_RETURN_URL is not configured",
-      received: { prepayId, merchantOrderId, callbackInfo },
-    }, 500);
-  }
+  const spaReturnBase = resolveKpayFrontendReturnOrigin();
 
   const draftRaw = merchantOrderId ? await getPwaCheckoutDraft(merchantOrderId) : null;
   const draft = enrichPwaDraftWithCallback(draftRaw, callbackInfo);

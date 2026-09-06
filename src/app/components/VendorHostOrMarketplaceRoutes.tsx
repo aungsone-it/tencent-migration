@@ -4,10 +4,13 @@ import { resolveVendorSubdomainStoreSlug, isOnVendorSubdomainHost } from "../uti
 import { useResolvedVendorHostSlug } from "../utils/vendorHostResolution";
 import {
   extractStoreSlugFromPathname,
+  hasVendorKpayReturnSignals,
   isHostRootCheckoutPath,
   isUnifiedKpaySummaryPath,
   readKpayPendingStoreContext,
+  readKpayReturnQueryOrderId,
   toMarketplaceVendorCheckoutPath,
+  UNIFIED_KPAY_SUMMARY_PATH,
 } from "../utils/vendorCheckoutPaths";
 import { StorefrontAwareRouteFallback } from "./RouteLoadingFallback";
 import { VendorStorefrontPage } from "../pages/vendorStorefrontPageLazy";
@@ -66,7 +69,17 @@ export function VendorHostOnlyStorefront() {
 
   if (loading && !marketplaceSlug) return <StorefrontAwareRouteFallback />;
 
-  const unifiedKpaySummary = isUnifiedKpaySummaryPath(location.pathname);
+  const path = (location.pathname.split("?")[0] || "").replace(/\/$/, "") || "/";
+  const kpaySummaryFallback =
+    path === UNIFIED_KPAY_SUMMARY_PATH &&
+    (hasVendorKpayReturnSignals({
+      pathname: location.pathname,
+      search: location.search,
+    }) ||
+      Boolean(readKpayPendingStoreContext()) ||
+      Boolean(readKpayReturnQueryOrderId(location.search)));
+  const unifiedKpaySummary =
+    isUnifiedKpaySummaryPath(location.pathname) || kpaySummaryFallback;
 
   const canRender =
     vendorHost ||

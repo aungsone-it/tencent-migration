@@ -10,18 +10,19 @@ import {
   type PwaCheckoutDraftResponse,
 } from "./kpayClient";
 import { getEffectiveVendorSubdomainBase } from "./vendorSubdomainBase";
-import { resolveActiveVendorSubdomainBase } from "./platformApexHost";
-import { resolveSubdomainHostLabelForStore } from "./subdomainSlugMap";
-import { buildVendorStoreHomePath, resolveVendorPathSlug } from "./vendorStorePaths";
-import { API_BASE_URL } from "../../utils/api-client";
-import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 import {
+  resolveActiveVendorSubdomainBase,
   resolvePrimaryPlatformApexHost,
   resolveVendorSubdomainApexFromHost,
   isBarePlatformApexHost,
   isLocalDevHostname as isLocalDevHost,
   isMarketplaceApexHost,
+  stripWwwHost,
 } from "./platformApexHost";
+import { resolveSubdomainHostLabelForStore } from "./subdomainSlugMap";
+import { buildVendorStoreHomePath, resolveVendorPathSlug } from "./vendorStorePaths";
+import { API_BASE_URL } from "../../utils/api-client";
+import { publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 export { isMarketplaceApexHost } from "./platformApexHost";
 
@@ -30,7 +31,12 @@ export function isUnifiedKpayReturnHost(hostname?: string): boolean {
   const host = (hostname ?? (typeof window !== "undefined" ? window.location.hostname : ""))
     .split(":")[0]
     .toLowerCase();
+  if (!host) return false;
   if (isMarketplaceApexHost(host)) return true;
+  // Always treat the vendor subdomain base apex as the unified KBZ return host
+  // (e.g. nexa-mm.com/summary), even when reserved-apex env vars were not baked into the build.
+  const base = stripWwwHost(resolveActiveVendorSubdomainBase(host));
+  if (base && stripWwwHost(host) === base) return true;
   if (isLocalDevHost(host)) {
     return !resolveVendorSubdomainHostContext(host).isVendorSubdomainHost;
   }
@@ -95,6 +101,36 @@ export function enrichKpayReturnSearch(search: string): string {
   }
   const q = qs.toString();
   return q ? `?${q}` : "";
+}
+
+/** Persist vendor storefront home from KBZ `callback_info` on unified `/summary`. */
+export function persistKpayOriginFromReturnSearch(search: string): void {
+  const qs = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const cb = parsePwaCallbackInfo(qs.get("callback_info"));
+  if (cb?.storefrontOrigin) {
+    persistKpaySummaryStorefrontOrigin(cb.storefrontOrigin);
+  }
+}
+
+/** Canonical origin for unified post-payment summary (e.g. https://nexa-mm.com). */
+export function resolveKpayUnifiedReturnOrigin(hostname?: string): string {
+  if (typeof window === "undefined") {
+    const apex = resolvePrimaryPlatformApexHost();
+    return apex ? `https://${apex}` : "https://localhost";
+  }
+  const host = (hostname ?? window.location.hostname).toLowerCase();
+  if (isLocalDevHostname(host)) {
+    if (isUnifiedKpayReturnHost(host)) return window.location.origin;
+    const port = window.location.port ? `:${window.location.port}` : "";
+    return `${window.location.protocol}//localhost${port}`;
+  }
+  if (isUnifiedKpayReturnHost(host)) return window.location.origin;
+  const apex =
+    resolveActiveVendorSubdomainBase(host) ||
+    resolveVendorSubdomainApexFromHost(host) ||
+    getEffectiveVendorSubdomainBase();
+  if (apex) return `https://${stripWwwHost(apex)}`;
+  return window.location.origin;
 }
 
 /** True when the current vendor host session should move to unified `/summary`. */
@@ -605,23 +641,7 @@ export function resolveUnifiedKpayPostPaymentSummaryPath(): string {
 
 /** Origin for the unified KBZ post-payment summary (current platform apex). */
 export function resolveUnifiedKpayReturnBaseUrl(): string {
-  if (typeof window === "undefined") {
-    const apex = resolvePrimaryPlatformApexHost();
-    return apex ? `https://${apex}` : "https://localhost";
-  }
-  const host = window.location.hostname.toLowerCase();
-  if (isLocalDevHostname(host)) {
-    if (isUnifiedKpayReturnHost(host)) return window.location.origin;
-    const port = window.location.port ? `:${window.location.port}` : "";
-    return `${window.location.protocol}//localhost${port}`;
-  }
-  if (isUnifiedKpayReturnHost(host)) return window.location.origin;
-  const apex =
-    resolveActiveVendorSubdomainBase(host) ||
-    resolveVendorSubdomainApexFromHost(host) ||
-    getEffectiveVendorSubdomainBase();
-  if (apex) return `https://${apex.replace(/^www\./, "")}`;
-  return window.location.origin;
+  return resolveKpayUnifiedReturnOrigin();
 }
 
 /** Summary route for the current host: `/summary` on vendor subdomain/custom domain; marketplace paths on apex. */

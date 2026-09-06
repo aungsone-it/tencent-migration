@@ -60,6 +60,7 @@ import {
   isUnifiedKpaySummaryPath,
   markStorefrontReturnNavigationShell,
   navigateUnifiedSummaryContinueShopping,
+  persistKpayOriginFromReturnSearch,
   persistKpaySummaryStorefrontOrigin,
   readKpayReturnPrepayId,
   readKpaySummaryStorefrontOrigin,
@@ -1048,6 +1049,11 @@ export function Checkout({
     () => /\/summary$/.test(location.pathname),
     [location.pathname]
   );
+
+  useEffect(() => {
+    if (!onSummaryRoute) return;
+    persistKpayOriginFromReturnSearch(location.search);
+  }, [onSummaryRoute, location.search]);
   /** PWA return only. COD and QR already created the order on Place Order. */
   const isPwaSummarySession = useMemo(() => {
     const prepayId = readKpayReturnPrepayId(location.search);

@@ -18,6 +18,7 @@ import {
   hasVendorKpayReturnSignals,
   isUnifiedKpaySummaryPath,
   navigateUnifiedSummaryContinueShopping,
+  persistKpayOriginFromReturnSearch,
   readKpayReturnPrepayId,
   readKpayReturnQueryOrderId,
   resolveKpayReturnStoreSlug,
@@ -254,6 +255,7 @@ export function VendorStorefrontPage() {
   useLayoutEffect(() => {
     if (isUnifiedKpaySummaryPath(location.pathname)) {
       clearKpayRedirectShell();
+      persistKpayOriginFromReturnSearch(location.search);
     }
     maybeRedirectKpayReturnToUnifiedSummary();
   }, [location.pathname, location.search]);

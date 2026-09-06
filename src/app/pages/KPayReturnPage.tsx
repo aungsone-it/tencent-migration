@@ -17,6 +17,7 @@ import {
   UNIFIED_KPAY_SUMMARY_PATH,
   enrichKpayReturnSearch,
   isKpayCustomerReturnPath,
+  persistKpayOriginFromReturnSearch,
 } from "../utils/vendorCheckoutPaths";
 import { notifyAdminOrdersUpdated } from "../utils/adminOrdersRealtime";
 import { readSubscriptionPwaPending } from "../utils/subscriptionPwa";
@@ -115,6 +116,7 @@ export function KPayReturnPage() {
     }
     redirectDoneRef.current = true;
 
+    persistKpayOriginFromReturnSearch(window.location.search || "");
     const path = (window.location.pathname.split("?")[0] || "").replace(/\/+$/, "") || "/";
     const search = enrichKpayReturnSearch(window.location.search || "");
     if (path === UNIFIED_KPAY_SUMMARY_PATH || isKpayCustomerReturnPath(path)) {

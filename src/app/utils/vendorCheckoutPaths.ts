@@ -17,6 +17,7 @@ import {
   isBarePlatformApexHost,
   isLocalDevHostname as isLocalDevHost,
   isMarketplaceApexHost,
+  normalizeHostname,
   stripWwwHost,
 } from "./platformApexHost";
 import { resolveSubdomainHostLabelForStore } from "./subdomainSlugMap";
@@ -112,25 +113,42 @@ export function persistKpayOriginFromReturnSearch(search: string): void {
   }
 }
 
-/** Canonical origin for unified post-payment summary (e.g. https://nexa-mm.com). */
-export function resolveKpayUnifiedReturnOrigin(hostname?: string): string {
-  if (typeof window === "undefined") {
-    const apex = resolvePrimaryPlatformApexHost();
-    return apex ? `https://${apex}` : "https://localhost";
-  }
-  const host = (hostname ?? window.location.hostname).toLowerCase();
+/** Public www origin for unified KBZ summary (bare apex may 405 on EdgeOne). */
+export function resolveKpaySummaryPublicOrigin(hostname?: string): string {
+  const host = normalizeHostname(
+    hostname ?? (typeof window !== "undefined" ? window.location.hostname : ""),
+  );
   if (isLocalDevHostname(host)) {
-    if (isUnifiedKpayReturnHost(host)) return window.location.origin;
-    const port = window.location.port ? `:${window.location.port}` : "";
-    return `${window.location.protocol}//localhost${port}`;
+    if (typeof window !== "undefined" && isUnifiedKpayReturnHost(host)) {
+      return window.location.origin;
+    }
+    const port =
+      typeof window !== "undefined" && window.location.port
+        ? `:${window.location.port}`
+        : "";
+    const protocol =
+      typeof window !== "undefined" ? window.location.protocol : "http:";
+    return `${protocol}//localhost${port}`;
   }
-  if (isUnifiedKpayReturnHost(host)) return window.location.origin;
-  const apex =
+  if (
+    typeof window !== "undefined" &&
+    isUnifiedKpayReturnHost(host) &&
+    host.startsWith("www.")
+  ) {
+    return window.location.origin;
+  }
+  const apex = stripWwwHost(
     resolveActiveVendorSubdomainBase(host) ||
-    resolveVendorSubdomainApexFromHost(host) ||
-    getEffectiveVendorSubdomainBase();
-  if (apex) return `https://${stripWwwHost(apex)}`;
-  return window.location.origin;
+      resolveVendorSubdomainApexFromHost(host) ||
+      getEffectiveVendorSubdomainBase() ||
+      "nexa-mm.com",
+  );
+  return apex ? `https://www.${apex}` : "https://www.nexa-mm.com";
+}
+
+/** Canonical origin for unified post-payment summary (e.g. https://www.nexa-mm.com). */
+export function resolveKpayUnifiedReturnOrigin(hostname?: string): string {
+  return resolveKpaySummaryPublicOrigin(hostname);
 }
 
 /** True when the current vendor host session should move to unified `/summary`. */

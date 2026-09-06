@@ -2424,16 +2424,19 @@ function resolveKpayFrontendReturnOrigin(): string {
   if (raw) {
     try {
       const withProto = raw.includes("://") ? raw : `https://${raw}`;
-      return new URL(withProto).origin;
+      const u = new URL(withProto);
+      const bareHost = u.hostname.replace(/^www\./i, "");
+      return bareHost ? `https://www.${bareHost}` : u.origin;
     } catch {
-      return raw.replace(/\/summary\/?$/i, "").replace(/\/$/, "");
+      const bare = raw.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/summary\/?$/i, "").replace(/\/$/, "");
+      return bare ? `https://www.${bare}` : raw.replace(/\/summary\/?$/i, "").replace(/\/$/, "");
     }
   }
   const apex =
     text(Deno.env.get("VENDOR_SUBDOMAIN_BASE_DOMAIN")) ||
     text(Deno.env.get("VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN")) ||
     "nexa-mm.com";
-  return `https://${apex.replace(/^www\./i, "")}`;
+  return `https://www.${apex.replace(/^www\./i, "")}`;
 }
 
 /** Preserve KBZ echo params (callback_info, alternate key spellings) on the SPA redirect. */

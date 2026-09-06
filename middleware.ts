@@ -279,7 +279,7 @@ export default function vercelMiddleware(request: Request): Response {
     path === "/kpay/return" ||
     path === "/kpay/pwa/return"
   ) {
-    const unified = new URL(`https://${baseDomain}/summary${search}`);
+    const unified = new URL(`https://www.${baseDomain}/summary${search}`);
     return Response.redirect(unified.toString(), 302);
   }
 

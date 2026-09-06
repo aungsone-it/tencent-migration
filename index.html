@@ -197,12 +197,12 @@
           if (isPlainLocal) {
             unifiedOrigin = location.protocol + "//localhost" + port;
           } else if (isBareApex) {
-            unifiedOrigin = location.protocol + "//" + host.split(":")[0] + port;
+            unifiedOrigin = location.protocol + "//www." + bareHost + port;
           } else {
             var parts = host.split(".").filter(Boolean);
             var derivedApex =
               parts.length >= 3 ? parts.slice(-2).join(".") : bareHost;
-            unifiedOrigin = "https://" + derivedApex;
+            unifiedOrigin = "https://www." + derivedApex;
           }
           var target = unifiedOrigin + "/summary" + search;
           if (location.href.split("#")[0] === target) return;

@@ -386,6 +386,27 @@ async function applyResolvedVendorToOrderBody(body: Record<string, unknown>): Pr
   });
 }
 
+async function merchantOrderIdLookupVariants(id: string): string[] {
+  const trimmed = text(id).toUpperCase();
+  if (!trimmed) return [];
+  const match = trimmed.match(/^(ORD|MOS|NOS)-(.+)$/);
+  if (!match) return [trimmed];
+  const code = match[2];
+  return [`ORD-${code}`, `MOS-${code}`, `NOS-${code}`];
+}
+
+async function loadStorefrontOrderByMerchantOrderId(
+  merchantOrderId: string,
+): Promise<Record<string, unknown> | null> {
+  for (const lookup of merchantOrderIdLookupVariants(text(merchantOrderId))) {
+    const mappedId = text(await kv.get(`order_num:${lookup}`));
+    if (!mappedId) continue;
+    const existing = (await kv.get(`order:${mappedId}`)) as Record<string, unknown> | null;
+    if (existing && typeof existing === "object") return existing;
+  }
+  return null;
+}
+
 async function createStorefrontOrderDirect(body: Record<string, unknown>): Promise<{
   ok: boolean;
   status: number;
@@ -471,13 +492,30 @@ async function persistStorefrontOrder(body: Record<string, unknown>): Promise<{
   error?: string;
   message?: string;
 }> {
+  const requestedOrderNumber = canonicalizeOrderNumber(
+    text(body.orderNumber) ||
+      text((body.kpay as Record<string, unknown> | undefined)?.merchantOrderId),
+  );
+
   try {
     const viaHttp = await postStorefrontOrder(body);
-    if (viaHttp.ok) return viaHttp;
-    console.warn(
-      "postStorefrontOrder failed, falling back to direct create:",
-      viaHttp.error || viaHttp.message || viaHttp.status,
-    );
+    if (viaHttp.ok) {
+      if (viaHttp.order) return viaHttp;
+      if (requestedOrderNumber) {
+        const existing = await loadStorefrontOrderByMerchantOrderId(requestedOrderNumber);
+        if (existing) {
+          return { ok: true, status: viaHttp.status, order: existing };
+        }
+      }
+      console.warn(
+        "postStorefrontOrder returned ok without order payload; falling back to direct create",
+      );
+    } else {
+      console.warn(
+        "postStorefrontOrder failed, falling back to direct create:",
+        viaHttp.error || viaHttp.message || viaHttp.status,
+      );
+    }
   } catch (error) {
     console.warn("postStorefrontOrder threw, falling back to direct create:", error);
   }
@@ -595,10 +633,22 @@ export async function finalizePwaCheckoutOrder(
     };
   }
 
+  let order = result.order;
+  if (!order) {
+    order = await loadStorefrontOrderByMerchantOrderId(id);
+  }
+  if (!order) {
+    return {
+      ok: false,
+      error: "order_not_registered",
+      message: "Payment was confirmed but the storefront order could not be verified",
+    };
+  }
+
   return {
     ok: true,
-    created: true,
+    created: result.status !== 200,
     duplicate: result.status === 200,
-    order: result.order,
+    order,
   };
 }

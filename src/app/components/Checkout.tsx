@@ -562,12 +562,40 @@ function buildPwaFinalizeOrderPayload(
   };
 }
 
+const orderLookupInflight = new Map<string, Promise<Response>>();
+
 function fetchOrderByMerchantOrderId(orderId: string): Promise<Response> {
-  return fetch(
-    `${cloudbaseApiBaseUrl}/orders/${encodeURIComponent(orderId)}`,
-    { headers: { ...getCloudBaseRequestHeaders(),
- ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}) } },
-  );
+  const id = String(orderId || "").trim();
+  if (!id) {
+    return Promise.resolve(new Response(null, { status: 400 }));
+  }
+  const inflight = orderLookupInflight.get(id);
+  if (inflight) return inflight;
+
+  const promise = fetch(
+    `${cloudbaseApiBaseUrl}/orders/${encodeURIComponent(id)}`,
+    {
+      headers: {
+        ...getCloudBaseRequestHeaders(),
+        ...(cloudbasePublishableKey
+          ? { Authorization: `Bearer ${cloudbasePublishableKey}` }
+          : {}),
+      },
+    },
+  ).finally(() => {
+    orderLookupInflight.delete(id);
+  });
+
+  orderLookupInflight.set(id, promise);
+  return promise;
+}
+
+function isQrPendingContext(
+  pending: (KPayPwaPendingContext & { storeName?: string }) | null | undefined,
+): boolean {
+  if (!pending) return false;
+  if (pending.kpayMethod === "qr") return true;
+  return Boolean(pending.merchantOrderId && pending.draftOrder && !pending.prepayId);
 }
 
 async function createStorefrontOrderFromPwaDraft(params: {
@@ -578,6 +606,8 @@ async function createStorefrontOrderFromPwaDraft(params: {
   storeName: string;
   vendorId: string | undefined;
   effectiveUserId: string | null | undefined;
+  paymentMethod?: string;
+  kpayMethod?: "qr" | "pwa";
 }): Promise<{ ok: boolean; order?: Record<string, unknown>; message?: string }> {
   const payload = slimOrderCreatePayload(
     buildPwaFinalizeOrderPayload(
@@ -590,6 +620,15 @@ async function createStorefrontOrderFromPwaDraft(params: {
       params.effectiveUserId,
     ),
   );
+  if (params.paymentMethod) {
+    payload.paymentMethod = params.paymentMethod;
+  }
+  if (payload.kpay && typeof payload.kpay === "object") {
+    payload.kpay = {
+      ...(payload.kpay as Record<string, unknown>),
+      method: params.kpayMethod || (params.prepayId ? "pwa" : "qr"),
+    };
+  }
   const createResponse = await fetch(
     `${cloudbaseApiBaseUrl}/orders`,
     {
@@ -684,11 +723,27 @@ async function retryFetchOrderByMerchantOrderId(
   delayMs = 800,
 ): Promise<Response> {
   let response = await fetchOrderByMerchantOrderId(orderId);
-  for (let i = 0; i < attempts && !response.ok; i++) {
+  if (response.ok) return response;
+  for (let i = 0; i < attempts; i++) {
     await sleepMs(delayMs);
     response = await fetchOrderByMerchantOrderId(orderId);
+    if (response.ok) return response;
   }
   return response;
+}
+
+async function pollOrderByMerchantOrderId(
+  orderId: string,
+  attempts = 5,
+  delayMs = 600,
+): Promise<Response | null> {
+  for (let i = 0; i < attempts; i++) {
+    const response = await fetchOrderByMerchantOrderId(orderId);
+    if (response.ok) return response;
+    if (response.status !== 404) return null;
+    if (i < attempts - 1) await sleepMs(delayMs);
+  }
+  return null;
 }
 
 /** Ensure KBZ PWA checkout becomes a real storefront order (not just a KV draft). */
@@ -702,6 +757,12 @@ async function persistPwaOrderIfMissing(params: {
 }): Promise<Response | null> {
   const { orderId, pendingCtx, storeName, vendorId, effectiveUserId, finalizeInFlight } = params;
   if (!orderId) return null;
+
+  // KBZ QR checkout registers via storefront POST /orders — not PWA finalize.
+  if (isQrPendingContext(pendingCtx)) {
+    const existing = await pollOrderByMerchantOrderId(orderId, 4, 500);
+    return existing;
+  }
 
   const registeredResponse = (
     created: boolean,
@@ -1043,6 +1104,16 @@ export function Checkout({
 
   useEffect(() => {
     if (!onSummaryRoute) return;
+    if (step === "success" || step === "unregistered") {
+      const originHint =
+        summaryStorefrontOrigin?.trim() ||
+        checkoutStorefrontHomeUrl ||
+        readKpaySummaryStorefrontOrigin();
+      if (originHint && !summaryStorefrontHomeUrl) {
+        setSummaryStorefrontHomeUrl(originHint);
+      }
+      return;
+    }
 
     const slug = storeName || vendorId || summaryOrderVendor || null;
     const originHint =
@@ -1070,8 +1141,10 @@ export function Checkout({
     };
   }, [
     onSummaryRoute,
+    step,
     summaryStorefrontOrigin,
     summaryOrderVendor,
+    summaryStorefrontHomeUrl,
     storeName,
     vendorId,
     vendorName,
@@ -1280,7 +1353,8 @@ export function Checkout({
   // through CloudBase realtime). Until then the "I've Completed Payment"
   // button stays disabled.
   const [kpayWebhookConfirmed, setKpayWebhookConfirmed] = useState(false);
-  const kpayAutoGenerateTriggeredRef = useRef(false);
+  const kpayQrGenSeqRef = useRef(0);
+  const kpayLockedAmountRef = useRef<number | null>(null);
   const qrPendingRestoreRef = useRef(false);
   const qrAutoCompleteRef = useRef<string | null>(null);
   const hasNativeKPayQr = Boolean(kpaySession?.qrImageUrl || kpaySession?.qrContent);
@@ -1317,7 +1391,7 @@ export function Checkout({
       incomplete
     ) {
       setPaymentMethod("None");
-      kpayAutoGenerateTriggeredRef.current = false;
+      kpayLockedAmountRef.current = null;
     }
   }, [shippingInfo, normalizedShippingPhone, paymentMethod, step]);
 
@@ -1342,6 +1416,7 @@ export function Checkout({
   useEffect(() => {
     const orderId = kpaySession?.merchantOrderId;
     if (!orderId || paymentMethod !== "KPay") return;
+    if (onSummaryRoute && (step === "success" || step === "unregistered")) return;
     const key = `kpay_txn:${orderId}`;
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -1359,6 +1434,9 @@ export function Checkout({
           merchantOrderId: orderId,
         });
         if (cancelled) return;
+        if (session.amount != null) {
+          kpayLockedAmountRef.current = session.amount;
+        }
         setKpaySession((prev) => (prev ? { ...prev, ...session } : session));
         if (session.status === "paid") {
           setKpayWebhookConfirmed(true);
@@ -1399,7 +1477,7 @@ export function Checkout({
       if (pollTimer) clearInterval(pollTimer);
       void supabase.removeChannel(channel);
     };
-  }, [kpaySession?.merchantOrderId, paymentMethod]);
+  }, [kpaySession?.merchantOrderId, paymentMethod, onSummaryRoute, step]);
 
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(
     () => readAppliedCouponFromStorage(),
@@ -1532,6 +1610,10 @@ export function Checkout({
     : items.length > 0
       ? items
       : miniSummaryItems;
+  /** Do not precreate KBZ QR from stale mini-summary cache before live cart loads. */
+  const checkoutCartReady = Boolean(
+    buyNowOverride?.items?.length || (Array.isArray(items) && items.length > 0),
+  );
   const isFreeShippingCheckout = checkoutQualifiesForFreeShipping(checkoutItems);
   const shippingMethodComplete = Boolean(
     hasSelectedRegion &&
@@ -1562,6 +1644,9 @@ export function Checkout({
   }, [appliedCoupon, payableSubtotal, checkoutItems]);
 
   const finalTotal = Math.max(payableSubtotal - discountAmount + shippingFee, 0);
+  const kpayLockedAmount = kpaySession?.amount ?? kpayLockedAmountRef.current ?? null;
+  const kpayAmountMatchesTotal =
+    kpayLockedAmount == null || Math.round(kpayLockedAmount) === Math.round(finalTotal);
 
   useEffect(() => {
     if (!appliedCoupon?.campaign) return;
@@ -1847,7 +1932,7 @@ export function Checkout({
             finalizeInFlight: pwaFinalizeInFlightRef.current,
           });
           if (!response) {
-            response = await fetchOrderByMerchantOrderId(orderId);
+            response = await pollOrderByMerchantOrderId(orderId, 3, 700);
           }
         } else if (effectiveUser?.id) {
           // KBZ app may return to /summary without carrying merch_order_id to SPA.
@@ -2299,10 +2384,14 @@ export function Checkout({
   };
 
   const handleGenerateKPayQr = async () => {
+    const genSeq = ++kpayQrGenSeqRef.current;
     try {
       const missingFields = getMissingRequiredFields();
       if (missingFields.length > 0) {
         toast.error(`Please fill all required fields first: ${missingFields.join(", ")}`);
+        return;
+      }
+      if (!checkoutCartReady) {
         return;
       }
       if (finalTotal <= 0) {
@@ -2334,7 +2423,10 @@ export function Checkout({
         storefrontOrigin,
         draftOrder,
       });
-      setKpaySession(session);
+      if (genSeq !== kpayQrGenSeqRef.current) return;
+      const lockedAmount = session.amount ?? finalTotal;
+      kpayLockedAmountRef.current = lockedAmount;
+      setKpaySession({ ...session, amount: lockedAmount });
       if (session.status === "failed") {
         toast.error(`KBZPay precreate failed: ${session.providerStatus || session.debug?.providerCode || "UNKNOWN"}`, {
           duration: 8000,
@@ -2346,7 +2438,7 @@ export function Checkout({
           KPAY_PWA_PENDING_STORAGE_KEY,
           JSON.stringify({
             merchantOrderId: session.merchantOrderId,
-            amount: finalTotal,
+            amount: lockedAmount,
             currency: "MMK",
             redirectedAt: new Date().toISOString(),
             originPath,
@@ -2364,34 +2456,61 @@ export function Checkout({
       toast.success("KBZPay QR generated");
       if (!session.qrImageUrl && !session.qrContent && !session.payUrl) {
         toast.info("Waiting for KBZPay QR from provider...");
-        await waitForKPayPayload(merchantOrderId);
+        await waitForKPayPayload(merchantOrderId, genSeq);
       }
     } catch (error: any) {
+      if (genSeq !== kpayQrGenSeqRef.current) return;
       toast.error(error?.message || "Failed to generate KBZPay QR");
     } finally {
-      setKpayLoading(false);
+      if (genSeq === kpayQrGenSeqRef.current) {
+        setKpayLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (paymentMethod !== "KPay") {
-      kpayAutoGenerateTriggeredRef.current = false;
+      kpayLockedAmountRef.current = null;
       return;
     }
-    if (kpayAutoGenerateTriggeredRef.current) return;
-    if (kpayLoading || kpayWebhookConfirmed || kpaySession?.status === "paid" || kpaySession?.merchantOrderId) return;
+    if (!checkoutCartReady || !shippingMethodComplete) return;
     if (finalTotal <= 0) return;
     if (getMissingRequiredFields().length > 0) return;
+    if (kpayWebhookConfirmed || kpaySession?.status === "paid") return;
+    if (kpayLoading) return;
 
-    kpayAutoGenerateTriggeredRef.current = true;
-    void handleGenerateKPayQr();
+    const lockedAmount = kpaySession?.amount ?? kpayLockedAmountRef.current;
+    const hasQr = Boolean(kpaySession?.qrImageUrl || kpaySession?.qrContent || kpaySession?.payUrl);
+    if (
+      hasQr &&
+      lockedAmount != null &&
+      Math.round(lockedAmount) === Math.round(finalTotal) &&
+      kpaySession?.merchantOrderId
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void handleGenerateKPayQr();
+    }, 350);
+    return () => window.clearTimeout(timer);
   }, [
     paymentMethod,
+    checkoutCartReady,
+    shippingMethodComplete,
     kpayLoading,
     kpayWebhookConfirmed,
     kpaySession?.status,
     kpaySession?.merchantOrderId,
+    kpaySession?.amount,
+    kpaySession?.qrContent,
+    kpaySession?.qrImageUrl,
+    kpaySession?.payUrl,
     finalTotal,
+    shippingFee,
+    discountAmount,
+    selectedDeliveryPartnerId,
+    checkoutItems.length,
     shippingInfo,
     orderNote,
     effectiveUser?.email,
@@ -2416,6 +2535,9 @@ export function Checkout({
           merchantOrderId,
         });
         setKpaySession(session);
+        if (session.amount != null) {
+          kpayLockedAmountRef.current = session.amount;
+        }
         if (session.status === "paid") {
           setKpayWebhookConfirmed(true);
         }
@@ -2436,16 +2558,35 @@ export function Checkout({
     void (async () => {
       try {
         let response = await fetchOrderByMerchantOrderId(orderId);
-        if (!response.ok) {
-          await persistPwaOrderIfMissing({
-            orderId,
-            pendingCtx: pending,
-            storeName,
-            vendorId,
-            effectiveUserId: effectiveUser?.id,
-            finalizeInFlight: pwaFinalizeInFlightRef.current,
-          });
-          response = await fetchOrderByMerchantOrderId(orderId);
+        if (!response.ok && pending?.draftOrder) {
+          let session: KPaySession | null = null;
+          try {
+            session = await fetchKPaySessionStatus({
+              projectId,
+              publicAnonKey,
+              merchantOrderId: orderId,
+            });
+          } catch {
+            session = null;
+          }
+          if (session?.status === "paid") {
+            const created = await createStorefrontOrderFromPwaDraft({
+              orderId,
+              d: pending.draftOrder,
+              session,
+              prepayId: pending.prepayId,
+              storeName,
+              vendorId,
+              effectiveUserId: effectiveUser?.id,
+              paymentMethod: "KBZPay",
+              kpayMethod: "qr",
+            });
+            if (created.ok) {
+              response =
+                (await pollOrderByMerchantOrderId(orderId, 4, 600)) ||
+                (await fetchOrderByMerchantOrderId(orderId));
+            }
+          }
         }
         if (!response.ok) return;
 
@@ -2532,15 +2673,20 @@ export function Checkout({
   // before the browser subscription is ready, (b) Realtime delivery can fail (RLS, pub,
   // plan limits), and (c) polling reads the same KV row the webhook updates.
 
-  const waitForKPayPayload = async (merchantOrderId: string) => {
+  const waitForKPayPayload = async (merchantOrderId: string, genSeq?: number) => {
     const maxAttempts = 24;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (genSeq != null && genSeq !== kpayQrGenSeqRef.current) return;
       try {
         const session = await fetchKPaySessionStatus({
           projectId,
           publicAnonKey,
           merchantOrderId,
         });
+        if (genSeq != null && genSeq !== kpayQrGenSeqRef.current) return;
+        if (session.amount != null) {
+          kpayLockedAmountRef.current = session.amount;
+        }
         setKpaySession((prev) => (prev ? { ...prev, ...session } : session));
         if (session.qrImageUrl || session.qrContent || session.payUrl) {
           if (attempt > 0) toast.success("KBZPay QR is ready");
@@ -2604,6 +2750,13 @@ export function Checkout({
     } else if (paymentMethod === "KPay") {
       if (!canSubmitKPayOrder) {
         toast.error("KBZPay QR payload is missing. Please regenerate QR first");
+        setLoading(false);
+        return;
+      }
+      if (!kpayAmountMatchesTotal) {
+        toast.error(
+          `KBZPay QR is for ${formatStorefrontPrice(kpayLockedAmount ?? 0)}, but order total is ${formatStorefrontPrice(finalTotal)}. Wait for QR refresh.`,
+        );
         setLoading(false);
         return;
       }
@@ -3583,8 +3736,16 @@ export function Checkout({
                         )}
                         <div className="flex justify-between border-b border-slate-200 py-1">
                           <span className="text-slate-600">{t("checkout.amountToPay")}</span>
-                          <span className="font-semibold text-emerald-700">{formatStorefrontPrice(finalTotal)}</span>
+                          <span className="font-semibold text-emerald-700">
+                            {formatStorefrontPrice(kpayLockedAmount ?? finalTotal)}
+                          </span>
                         </div>
+                        {!kpayAmountMatchesTotal && kpayLockedAmount != null && (
+                          <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                            QR amount ({formatStorefrontPrice(kpayLockedAmount)}) does not match order total (
+                            {formatStorefrontPrice(finalTotal)}). Updating QR…
+                          </p>
+                        )}
                         {kpaySession?.qrContent && !kpaySession?.qrImageUrl && (
                           <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
                             {kpayWebhookConfirmed || kpaySession?.status === "paid" ? (

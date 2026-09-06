@@ -6,6 +6,7 @@ import { Badge } from "./ui/badge";
 import {
   fetchOrphanedPwaDrafts,
   finalizePwaCheckoutOrderApi,
+  fetchPwaDraftStatusRow,
   hydrateOrphanedPwaDrafts,
   invalidateOrphanedPwaDraftsCache,
   keepPaidOrphanedPwaDrafts,
@@ -146,10 +147,19 @@ export function PwaOrphanedOrdersRecovery({
         toast.error(
           result.error === "payment_not_confirmed"
             ? "KBZPay has not confirmed this payment. It is not a recoverable draft."
+            : result.error === "order_not_registered"
+              ? "Recovery did not register the order. Please try again."
             : detail || "Could not create order from the paid KBZPay draft",
         );
         return;
       }
+
+      const status = await fetchPwaDraftStatusRow(merchantOrderId).catch(() => null);
+      if (status?.hasOrder === false) {
+        toast.error("Recovery did not register the order. Please try again.");
+        return;
+      }
+
       toast.success(`Order ${merchantOrderId} registered successfully`);
       invalidateOrphanedPwaDraftsCache();
       setDrafts((prev) => prev.filter((d) => d.merchantOrderId !== merchantOrderId));

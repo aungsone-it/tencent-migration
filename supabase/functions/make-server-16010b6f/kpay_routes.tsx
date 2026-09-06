@@ -2016,6 +2016,7 @@ export async function createKPayQr(c: Context) {
     return c.json({
       success: true,
       merchantOrderId,
+      amount: Number(amount),
       status,
       providerStatus,
       qrContent: qr.qrContent,
@@ -2699,6 +2700,7 @@ export async function getKPayStatus(c: Context) {
         merchantOrderId,
         status: existing.status || "pending",
         providerStatus: existing.providerStatus || "",
+        amount: existing.amount ?? null,
         qrContent: existing.qrContent || "",
         qrImageUrl: existing.qrImageUrl || "",
         payUrl: existing.payUrl || "",
@@ -2754,6 +2756,7 @@ export async function getKPayStatus(c: Context) {
         merchantOrderId,
         status: existing.status || "pending",
         providerStatus: existing.providerStatus || "",
+        amount: existing.amount ?? null,
         qrContent: existing.qrContent || "",
         qrImageUrl: existing.qrImageUrl || "",
         payUrl: existing.payUrl || "",

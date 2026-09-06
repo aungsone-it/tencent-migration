@@ -17,6 +17,8 @@ export type KPaySession = {
   merchantOrderId: string;
   status: "pending" | "paid" | "failed";
   providerStatus?: string;
+  /** MMK amount sent to KBZ precreate (authoritative for the QR). */
+  amount?: number;
   qrContent?: string;
   qrImageUrl?: string;
   payUrl?: string;
@@ -268,6 +270,11 @@ function normalizeSession(data: Record<string, any>, fallbackOrderId: string): K
     merchantOrderId: String(data.merchantOrderId || extracted.merchantOrderId || fallbackOrderId),
     status: deriveUiStatus(data.status, providerStatus),
     providerStatus,
+    amount: (() => {
+      const raw = data.amount ?? extracted.amount;
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    })(),
     qrContent,
     qrImageUrl,
     payUrl,
@@ -736,15 +743,67 @@ function parseFinalizeApiPayload(data: Record<string, unknown>): {
   error?: string;
   message?: string;
 } {
+  const order =
+    data.order && typeof data.order === "object"
+      ? (data.order as Record<string, unknown>)
+      : undefined;
   return {
     ok: Boolean(data.success),
     created: Boolean(data.created),
-    order:
-      data.order && typeof data.order === "object"
-        ? (data.order as Record<string, unknown>)
-        : undefined,
+    order,
     error: typeof data.error === "string" ? data.error : undefined,
     message: typeof data.message === "string" ? data.message : undefined,
+  };
+}
+
+async function fetchStorefrontOrderByMerchantOrderId(
+  merchantOrderId: string,
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    const response = await fetch(
+      `${API_ROOT}/orders/${encodeURIComponent(merchantOrderId)}`,
+      { headers: cloudbaseHeaders() },
+    );
+    if (!response.ok) return undefined;
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const order =
+      data.order && typeof data.order === "object"
+        ? (data.order as Record<string, unknown>)
+        : data;
+    if (!order || typeof order !== "object") return undefined;
+    const orderNumber = textish(order.orderNumber) || textish(order.id);
+    return orderNumber ? order : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function confirmPwaRecoveryRegistered(
+  merchantOrderId: string,
+  order?: Record<string, unknown>,
+): Promise<{
+  ok: boolean;
+  order?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}> {
+  if (order && typeof order === "object") {
+    return { ok: true, order };
+  }
+
+  const fetched = await fetchStorefrontOrderByMerchantOrderId(merchantOrderId);
+  if (fetched) return { ok: true, order: fetched };
+
+  const status = await fetchPwaDraftStatusRow(merchantOrderId).catch(() => null);
+  if (status?.hasOrder) {
+    const retry = await fetchStorefrontOrderByMerchantOrderId(merchantOrderId);
+    return { ok: true, order: retry };
+  }
+
+  return {
+    ok: false,
+    error: "order_not_registered",
+    message: "Recovery did not register a storefront order",
   };
 }
 
@@ -905,10 +964,17 @@ async function recoverPwaDraftViaDirectOrderCreate(
     if (order) {
       return { ok: true, created: true, order };
     }
+    const confirmed = await confirmPwaRecoveryRegistered(params.merchantOrderId);
+    if (confirmed.ok) {
+      return { ok: true, created: true, order: confirmed.order };
+    }
     return {
       ok: false,
       error: typeof res.error === "string" ? res.error : "create_failed",
-      message: typeof res.message === "string" ? res.message : undefined,
+      message:
+        typeof res.message === "string"
+          ? res.message
+          : confirmed.message || "Order create response did not include an order",
     };
   } catch (error) {
     return {
@@ -932,37 +998,54 @@ export async function finalizePwaCheckoutOrderApi(
 
   if (!adminRecover) {
     const { data } = await requestPwaFinalize(merchantOrderId, false);
-    return parseFinalizeApiPayload(data);
+    const parsed = parseFinalizeApiPayload(data);
+    if (!parsed.ok) return parsed;
+    const confirmed = await confirmPwaRecoveryRegistered(merchantOrderId, parsed.order);
+    if (!confirmed.ok) return confirmed;
+    return { ...parsed, order: confirmed.order ?? parsed.order };
   }
 
-  const { response, data } = await requestPwaFinalize(merchantOrderId, true);
+  const { data } = await requestPwaFinalize(merchantOrderId, true);
   const parsed = parseFinalizeApiPayload(data);
-  if (parsed.ok && parsed.order) return parsed;
+  if (parsed.ok) {
+    const confirmed = await confirmPwaRecoveryRegistered(merchantOrderId, parsed.order);
+    if (confirmed.ok) {
+      return { ok: true, created: parsed.created, order: confirmed.order ?? parsed.order };
+    }
+  } else if (parsed.error === "not_pwa_payment") {
+    return parsed;
+  }
 
-  const shouldFallback =
-    !parsed.ok && parsed.error !== "not_pwa_payment";
-
-  if (shouldFallback) {
-    const statusRes = await fetch(
-      `${API_ROOT}/kpay/pwa/draft-status/${encodeURIComponent(merchantOrderId)}`,
-      { headers: cloudbaseHeaders() },
-    );
-    const statusData = (await statusRes.json().catch(() => ({}))) as {
-      canRecover?: boolean;
-      txnStatus?: string | null;
-    };
-    if (!statusData.canRecover) {
+  const statusData = await fetchPwaDraftStatusRow(merchantOrderId).catch(() => null);
+  if (statusData?.hasOrder) {
+    const confirmed = await confirmPwaRecoveryRegistered(merchantOrderId, parsed.order);
+    if (confirmed.ok) {
+      return { ok: true, created: false, order: confirmed.order };
+    }
+  }
+  if (!statusData?.canRecover && !parsed.ok) {
+    if (statusData && statusData.txnStatus !== "paid") {
       return {
         ok: false,
         error: "payment_not_confirmed",
         message: statusData.txnStatus || "Payment not confirmed in KBZPay",
       };
     }
+  }
 
+  if (statusData?.canRecover || parsed.error === "order_not_registered" || parsed.ok) {
     const direct = await recoverPwaDraftViaDirectOrderCreate(params);
     if (direct.ok) {
       await requestPwaFinalize(merchantOrderId, true).catch(() => {});
-      return direct;
+      const confirmed = await confirmPwaRecoveryRegistered(merchantOrderId, direct.order);
+      if (confirmed.ok) {
+        return { ok: true, created: direct.created, order: confirmed.order ?? direct.order };
+      }
+      return {
+        ok: false,
+        error: "order_not_registered",
+        message: confirmed.message || "Order was created but could not be verified",
+      };
     }
     return {
       ok: false,
@@ -971,7 +1054,21 @@ export async function finalizePwaCheckoutOrderApi(
     };
   }
 
-  return parsed;
+  if (!parsed.ok && parsed.error !== "not_pwa_payment") {
+    return {
+      ok: false,
+      error: "payment_not_confirmed",
+      message: statusData?.txnStatus || parsed.message || "Payment not confirmed in KBZPay",
+    };
+  }
+
+  return parsed.ok
+    ? {
+        ok: false,
+        error: "order_not_registered",
+        message: "Recovery reported success but the order was not registered",
+      }
+    : parsed;
 }
 
 export type OrphanedPwaDraftRow = {
@@ -1237,7 +1334,21 @@ export async function keepPaidOrphanedPwaDrafts(
       });
     });
   }
-  return paid;
+
+  const verified: OrphanedPwaDraftRow[] = [];
+  for (let i = 0; i < paid.length; i += concurrency) {
+    const chunk = paid.slice(i, i + concurrency);
+    const synced = await Promise.all(
+      chunk.map((row) =>
+        fetchPwaDraftStatusRow(row.merchantOrderId).catch(() => null),
+      ),
+    );
+    synced.forEach((status, index) => {
+      if (status?.hasOrder) return;
+      verified.push(chunk[index]);
+    });
+  }
+  return verified;
 }
 
 export async function fetchOrphanedPwaDrafts(params?: {

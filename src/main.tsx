@@ -57,7 +57,10 @@ function installActorHeaderFetchBridge(): void {
         : input instanceof URL
           ? input.toString()
           : input.url;
-    if (!url.includes("/functions/v1/make-server-16010b6f")) {
+    if (
+      !url.includes("/functions/v1/make-server-16010b6f") &&
+      !url.includes("/make-server-16010b6f")
+    ) {
       return originalFetch(input, init);
     }
 

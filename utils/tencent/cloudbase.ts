@@ -22,6 +22,25 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+const CLOUDBASE_FN_SEGMENT = "make-server-16010b6f";
+
+/** Ensure client requests hit deployed Hono routes (…/make-server-16010b6f/…), not bare /make-server/. */
+function normalizeCloudbaseApiBaseUrl(raw: string): string {
+  let base = stripTrailingSlash(String(raw || "").trim());
+  if (!base) return `/api/${CLOUDBASE_FN_SEGMENT}`;
+
+  if (/\/make-server$/i.test(base) && !base.endsWith(CLOUDBASE_FN_SEGMENT)) {
+    base = `${base}-16010b6f`;
+  }
+
+  base = base.replace(
+    new RegExp(`/${CLOUDBASE_FN_SEGMENT}/${CLOUDBASE_FN_SEGMENT}`, "g"),
+    `/${CLOUDBASE_FN_SEGMENT}`,
+  );
+
+  return base;
+}
+
 export const cloudbaseEnvId = envValue("VITE_CLOUDBASE_ENV_ID", "VITE_TCB_ENV_ID");
 export const cloudbaseRegion = envValue("VITE_CLOUDBASE_REGION", "VITE_TCB_REGION") || "ap-singapore";
 export const cloudbasePublishableKey = envValue(
@@ -36,9 +55,9 @@ export const cloudbasePublishableKey = envValue(
  * same-origin fallback is useful when CloudBase Hosting rewrites /api/* to an
  * HTTP Cloud Function.
  */
-export const cloudbaseApiBaseUrl = stripTrailingSlash(
+export const cloudbaseApiBaseUrl = normalizeCloudbaseApiBaseUrl(
   envValue("VITE_CLOUDBASE_API_BASE_URL", "VITE_TENCENT_API_BASE_URL") ||
-    "/api/make-server-16010b6f",
+    `/api/${CLOUDBASE_FN_SEGMENT}`,
 );
 
 export const cloudbaseWebhookBaseUrl = stripTrailingSlash(

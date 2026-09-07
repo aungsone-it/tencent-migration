@@ -259,6 +259,17 @@ export default function vercelMiddleware(request: Request): Response {
     return next();
   }
 
+  // Bare platform apex (nexa-mm.com) may 405 on EdgeOne — promote KBZ PWA returns to www.
+  if (
+    host === baseDomain &&
+    (path === "/kpay/return" ||
+      path === "/kpay/pwa/return" ||
+      shouldEdgeRedirectVendorKpayToUnifiedSummary(path, search))
+  ) {
+    const unified = new URL(`https://www.${baseDomain}/summary${search}`);
+    return Response.redirect(unified.toString(), 302);
+  }
+
   if (host === baseDomain || host === `www.${baseDomain}`) {
     return next();
   }

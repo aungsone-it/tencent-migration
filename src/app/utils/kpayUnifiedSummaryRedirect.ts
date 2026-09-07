@@ -2,8 +2,12 @@ import {
   UNIFIED_KPAY_SUMMARY_PATH,
   buildUnifiedKpaySummaryRedirectUrl,
   enrichKpayReturnSearch,
+  isBareUnifiedKpayApexHost,
   isKpayCustomerReturnPath,
   isUnifiedKpayReturnHost,
+  readKpayReturnPrepayId,
+  readKpayReturnQueryOrderId,
+  resolveKpaySummaryPublicOrigin,
 } from "./vendorCheckoutPaths";
 
 function normalizePathname(pathname: string): string {
@@ -40,6 +44,48 @@ function enrichUnifiedSummarySearchInPlace(): void {
   window.history.replaceState(null, "", `${UNIFIED_KPAY_SUMMARY_PATH}${enriched}`);
 }
 
+/**
+ * EdgeOne may 405 on bare apex (`nexa-mm.com/summary`). KBZ often lands there when the
+ * merchant portal registers the apex URL without `www.` — hard-redirect to www apex.
+ *
+ * @returns true when navigation to www started (do not mount React yet).
+ */
+function promoteBareUnifiedApexKpayToWww(): boolean {
+  if (typeof window === "undefined") return false;
+  if (!isBareUnifiedKpayApexHost()) return false;
+
+  const path = normalizePathname(window.location.pathname);
+  const search = window.location.search || "";
+  const hasKpayQuery =
+    Boolean(readKpayReturnQueryOrderId(search)) ||
+    Boolean(readKpayReturnPrepayId(search)) ||
+    /(?:^|[?&])callback_info=/i.test(search);
+
+  let pendingKpay = false;
+  try {
+    pendingKpay = Boolean(localStorage.getItem("kpay_pwa_pending_order"));
+  } catch {
+    /* ignore */
+  }
+
+  const isKpayLanding =
+    path === UNIFIED_KPAY_SUMMARY_PATH ||
+    isKpayCustomerReturnPath(path) ||
+    (path === "/" && (hasKpayQuery || pendingKpay)) ||
+    (path === UNIFIED_KPAY_SUMMARY_PATH && pendingKpay);
+
+  if (!isKpayLanding) return false;
+
+  const enriched = enrichKpayReturnSearch(search);
+  const target = `${resolveKpaySummaryPublicOrigin()}${UNIFIED_KPAY_SUMMARY_PATH}${enriched}`;
+  const here = window.location.href.split("#")[0];
+  if (here === target) return false;
+
+  markKpayRedirectShell();
+  window.location.replace(target);
+  return true;
+}
+
 /** `/kpay/return` or `/kpay/pwa/return` on unified apex → `/summary`. */
 function promoteKpayReturnPathInPlace(): void {
   if (!isUnifiedKpayReturnHost()) return;
@@ -58,6 +104,8 @@ function promoteKpayReturnPathInPlace(): void {
  */
 export function maybeRedirectKpayReturnToUnifiedSummary(): boolean {
   if (typeof window === "undefined") return false;
+
+  if (promoteBareUnifiedApexKpayToWww()) return true;
 
   promoteKpayReturnPathInPlace();
   enrichUnifiedSummarySearchInPlace();

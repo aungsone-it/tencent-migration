@@ -139,10 +139,12 @@ function collapseAliases(raw) {
 function suggestTcbUrls() {
   loadEnvFile();
   const envId = process.env.CLOUDBASE_ENV_ID || process.env.VITE_CLOUDBASE_ENV_ID || "YOUR_ENV_ID";
-  const apex = process.env.VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN || "walwal.online";
+  const apex = stripWwwHost(
+    String(import.meta.env.VITE_VENDOR_SUBDOMAIN_BASE_DOMAIN || "").trim() || "nexa-mm.com",
+  );
   return {
     notify: `https://${envId}.api.tcloudbasegateway.com/v1/functions/kpay-webhook`,
-    summary: `https://${apex}/summary`,
+    summary: `https://www.${apex}/summary`,
   };
 }
 

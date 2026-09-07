@@ -113,6 +113,15 @@ export function persistKpayOriginFromReturnSearch(search: string): void {
   }
 }
 
+/** True on platform apex without `www.` (e.g. `nexa-mm.com` — may 405 on EdgeOne for SPA routes). */
+export function isBareUnifiedKpayApexHost(hostname?: string): boolean {
+  const host = normalizeHostname(
+    hostname ?? (typeof window !== "undefined" ? window.location.hostname : ""),
+  );
+  if (!host || isLocalDevHostname(host) || host.startsWith("www.")) return false;
+  return isUnifiedKpayReturnHost(host);
+}
+
 /** Public www origin for unified KBZ summary (bare apex may 405 on EdgeOne). */
 export function resolveKpaySummaryPublicOrigin(hostname?: string): string {
   const host = normalizeHostname(

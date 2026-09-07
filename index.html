@@ -87,6 +87,50 @@
             pendingKpay = Boolean(localStorage.getItem("kpay_pwa_pending_order"));
           } catch (e) {}
 
+          var isBareUnifiedWithoutWww = isBareApex && host === bareHost;
+          var isKpayUnifiedPath =
+            path === "/summary" ||
+            path === "/kpay/return" ||
+            path === "/kpay/pwa/return" ||
+            (path === "/" && (hasKpayQuery || pendingKpay));
+
+          // Bare apex (nexa-mm.com) may 405 on EdgeOne — KBZ PWA return must use www.
+          if (isBareUnifiedWithoutWww && isKpayUnifiedPath) {
+            document.documentElement.className += " kpay-unified-redirect";
+            if (!hasKpayQuery && pendingKpay) {
+              try {
+                var rawBare = localStorage.getItem("kpay_pwa_pending_order");
+                if (rawBare) {
+                  var pendingBare = JSON.parse(rawBare);
+                  var qsBare = new URLSearchParams(search.replace(/^\?/, ""));
+                  if (
+                    pendingBare.merchantOrderId &&
+                    !qsBare.get("merch_order_id") &&
+                    !qsBare.get("merchOrderId")
+                  ) {
+                    qsBare.set("merch_order_id", pendingBare.merchantOrderId);
+                  }
+                  if (
+                    pendingBare.prepayId &&
+                    !qsBare.get("prepay_id") &&
+                    !qsBare.get("prepayId")
+                  ) {
+                    qsBare.set("prepay_id", pendingBare.prepayId);
+                  }
+                  var mergedBare = qsBare.toString();
+                  search = mergedBare ? "?" + mergedBare : "";
+                }
+              } catch (e) {}
+            }
+            var barePort = location.port ? ":" + location.port : "";
+            var wwwOrigin = location.protocol + "//www." + bareHost + barePort;
+            var bareTarget = wwwOrigin + "/summary" + search;
+            if (location.href.split("#")[0] !== bareTarget) {
+              location.replace(bareTarget);
+              return;
+            }
+          }
+
           if (isUnifiedApex && (path === "/summary" || path === "/kpay/return" || path === "/kpay/pwa/return")) {
             try {
               document.documentElement.classList.remove("kpay-unified-redirect");

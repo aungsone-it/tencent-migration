@@ -1228,10 +1228,19 @@ export function getKPayResolvedEndpointUrls() {
   const businessPayResolved = useVpsJson
     ? businessPayRelay || resolveVpsBusinessPayUrl(base) || businessPayFromBase
     : businessPayDirect || businessPayFromBase;
+  const pwaSpaOrigin = resolveKpayFrontendReturnOrigin();
+  const apiPublic =
+    text(resolveEnv("CLOUDBASE_API_PUBLIC_BASE_URL")) ||
+    text(resolveEnv("CLOUDBASE_API_BASE_URL")) ||
+    "";
+  const apiBase = apiPublic.replace(/\/+$/, "");
   return {
     proxyBase: base,
     qrCreate: join(cfg.createPath),
     orderQuery: join(cfg.queryPath),
+    pwaBackendReturn: apiBase ? `${apiBase}/kpay/pwa/return` : "(not set)",
+    pwaFrontendReturnSummary: `${pwaSpaOrigin}/summary`,
+    pwaFrontendReturnEnvRaw: text(Deno.env.get("KPAY_PWA_FRONTEND_RETURN_URL")) || "(not set)",
     businessPay: businessPayResolved,
     businessPayGateway,
     businessPayRelay: businessPayRelay || undefined,

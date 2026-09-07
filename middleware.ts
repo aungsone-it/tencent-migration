@@ -98,6 +98,39 @@ function publicHostnameFromRequest(request: Request): string {
   return host.split(",")[0].trim().split(":")[0].toLowerCase();
 }
 
+function hasKpayReturnQuery(search: string): boolean {
+  return /(?:^|[?&])(?:merch_order_id|merchOrderId|prepay_id|prepayId|callback_info)=/i.test(
+    search,
+  );
+}
+
+/** Bare platform apex only (`nexa-mm.com`, not `gogo.nexa-mm.com` or `www.`). */
+function shouldPromoteBareApexKpayToWww(
+  host: string,
+  path: string,
+  search: string,
+  baseDomain: string,
+): boolean {
+  const h = normalizeHost(host);
+  const bare = baseDomain.replace(/^www\./i, "").toLowerCase();
+  if (!bare || h !== bare) return false;
+
+  const p = (path.split("?")[0] || "").replace(/\/+$/, "") || "/";
+  if (p === "/kpay/return" || p === "/kpay/pwa/return") return true;
+  if (p === "/summary") return true;
+  if (p === "/" && hasKpayReturnQuery(search)) return true;
+  return false;
+}
+
+function resolvePlatformBaseDomain(host: string): string {
+  const fromHost = deriveNaiveVendorApexFromHost(host);
+  if (fromHost) return fromHost;
+  if (isBarePlatformApexHost(host)) {
+    return host.startsWith("www.") ? host.slice(4) : host;
+  }
+  return readRuntimeEnv("VENDOR_SUBDOMAIN_BASE_DOMAIN").toLowerCase().replace(/^www\./i, "");
+}
+
 /**
  * Tencent EdgeOne Makers also detects root `middleware.ts`, but its middleware
  * receives a context object instead of Vercel's Request. This test deployment
@@ -139,6 +172,21 @@ export async function middleware(context: EdgeOneMiddlewareContext): Promise<Res
       } catch {
         return new Response("", { status: 502 });
       }
+    }
+
+    const hostname = publicHostnameFromRequest(request);
+    const baseDomain = resolvePlatformBaseDomain(hostname);
+    if (
+      shouldPromoteBareApexKpayToWww(
+        hostname,
+        url.pathname,
+        url.search,
+        baseDomain,
+      )
+    ) {
+      const apex = baseDomain.replace(/^www\./i, "");
+      const dest = new URL(`https://www.${apex}/summary${url.search}`);
+      return Response.redirect(dest.toString(), 302);
     }
   }
 

@@ -11,6 +11,36 @@ export function formatSerialOrderNumber(serial: number, prefix = ORDER_NUMBER_PR
   return `${prefix}-${body}`;
 }
 
+/** Numeric serial from NOS-/MOS-/ORD- order numbers (stacked prefixes allowed). */
+export function parseOrderSerial(value: unknown): number {
+  const trimmed = String(value || "").trim().replace(/^#/, "");
+  const match = trimmed.match(/(?:NOS|MOS|ORD)-(\d+)$/i);
+  if (!match) return 0;
+  const n = parseInt(match[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export type OrderSerialSortDirection = "newest" | "oldest";
+
+/** Sort by NOS serial, then timestamp, then id. Newest = highest serial first. */
+export function compareOrdersBySerial(
+  a: { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
+  b: { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
+  direction: OrderSerialSortDirection = "newest",
+): number {
+  const serialA = parseOrderSerial(a.orderNumber);
+  const serialB = parseOrderSerial(b.orderNumber);
+  if (serialA !== serialB) {
+    return direction === "oldest" ? serialA - serialB : serialB - serialA;
+  }
+  const dateA = new Date(String(a.createdAt || a.date || 0)).getTime() || 0;
+  const dateB = new Date(String(b.createdAt || b.date || 0)).getTime() || 0;
+  if (dateA !== dateB) {
+    return direction === "oldest" ? dateA - dateB : dateB - dateA;
+  }
+  return String(a.id || "").localeCompare(String(b.id || ""));
+}
+
 /** Allocate the next serial order number from the server (NOS-00001, NOS-00002, …). */
 export async function fetchNextOrderNumber(timeoutMs = 8000): Promise<string> {
   const controller = new AbortController();

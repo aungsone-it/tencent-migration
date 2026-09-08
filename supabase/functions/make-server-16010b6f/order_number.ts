@@ -11,12 +11,30 @@ export function formatSerialOrderNumber(serial: number, prefix = ORDER_NUMBER_PR
   return `${prefix}-${body}`;
 }
 
-function parseSerialFromOrderNumber(value: unknown): number {
-  const trimmed = String(value || "").trim();
-  const match = trimmed.match(/^(?:NOS|MOS|ORD)-(\d+)$/i);
+export function parseSerialFromOrderNumber(value: unknown): number {
+  const trimmed = String(value || "").trim().replace(/^#/, "");
+  const match = trimmed.match(/(?:NOS|MOS|ORD)-(\d+)$/i);
   if (!match) return 0;
   const n = parseInt(match[1], 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function compareOrdersBySerial(
+  a: { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
+  b: { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
+  direction: "newest" | "oldest" = "newest",
+): number {
+  const serialA = parseSerialFromOrderNumber(a.orderNumber);
+  const serialB = parseSerialFromOrderNumber(b.orderNumber);
+  if (serialA !== serialB) {
+    return direction === "oldest" ? serialA - serialB : serialB - serialA;
+  }
+  const dateA = new Date(String(a.createdAt || a.date || 0)).getTime() || 0;
+  const dateB = new Date(String(b.createdAt || b.date || 0)).getTime() || 0;
+  if (dateA !== dateB) {
+    return direction === "oldest" ? dateA - dateB : dateB - dateA;
+  }
+  return String(a.id || "").localeCompare(String(b.id || ""));
 }
 
 async function scanMaxExistingSerial(): Promise<number> {
@@ -95,4 +113,32 @@ export async function allocateNextOrderNumber(): Promise<string> {
   }
 
   throw new Error("Could not allocate order number");
+}
+
+/** Prefer the serial reservation time so COD / QR / PWA share allocation order. */
+export async function resolveAllocatedOrderCreatedAt(
+  orderNumber: unknown,
+  fallback?: unknown,
+): Promise<string> {
+  const fallbackIso = String(fallback || "").trim();
+  const num = canonicalizeOrderNumber(orderNumber);
+  if (num) {
+    try {
+      const reservation = await kv.get(`${ORDER_SERIAL_RESERVATION_PREFIX}${num}`);
+      const reservedAt = String(
+        reservation && typeof reservation === "object"
+          ? (reservation as { reservedAt?: unknown }).reservedAt
+          : "",
+      ).trim();
+      const reservedMs = reservedAt ? new Date(reservedAt).getTime() : NaN;
+      if (!Number.isNaN(reservedMs)) {
+        const fallbackMs = fallbackIso ? new Date(fallbackIso).getTime() : NaN;
+        if (Number.isNaN(fallbackMs) || reservedMs <= fallbackMs) return reservedAt;
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+  if (fallbackIso && !Number.isNaN(new Date(fallbackIso).getTime())) return fallbackIso;
+  return new Date().toISOString();
 }

@@ -46,7 +46,7 @@ import {
   startKPayPwa,
   KPAY_PWA_PENDING_STORAGE_KEY,
 } from "../utils/kpayClient";
-import { fetchNextOrderNumber, formatOrderNumberDisplay, resolveCreatedOrderNumber } from "../utils/orderNumber";
+import { fetchNextOrderNumber, formatOrderNumberDisplay, parseOrderSerial, resolveCreatedOrderNumber } from "../utils/orderNumber";
 import {
   isImmediatePlacementMethod,
   isPwaPlacementMethod,
@@ -2405,7 +2405,16 @@ export function Checkout({
         return;
       }
       setKpayLoading(true);
-      const merchantOrderId = await buildMerchantOrderId();
+      const pendingQr = readKPayPwaPendingContext();
+      const existingMerchantOrderId = String(
+        kpaySession?.merchantOrderId ||
+          (pendingQr?.kpayMethod === "qr" ? pendingQr.merchantOrderId : "") ||
+          "",
+      ).trim();
+      const merchantOrderId =
+        parseOrderSerial(existingMerchantOrderId) > 0
+          ? existingMerchantOrderId
+          : await buildMerchantOrderId();
       const originPath =
         typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       const storefrontOrigin =

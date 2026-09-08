@@ -5,7 +5,7 @@
 import * as kv from "./kv_store.tsx";
 import { normalizeOrderShippingFields, applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
-import { canonicalizeOrderNumber } from "./order_number.ts";
+import { canonicalizeOrderNumber, resolveAllocatedOrderCreatedAt } from "./order_number.ts";
 import { syncOrderReadModel } from "./read_model.ts";
 import { resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
 
@@ -463,7 +463,10 @@ async function createStorefrontOrderDirect(body: Record<string, unknown>): Promi
     shippingFee: parsedShippingFee,
     shippingCost: parsedShippingFee,
     shipping: parsedShippingFee,
-    createdAt: nowIso(),
+    createdAt: await resolveAllocatedOrderCreatedAt(
+      requestedOrderNumber || text(body.orderNumber),
+      text(body.createdAt),
+    ),
     updatedAt: nowIso(),
     date: text(body.date) || new Date().toISOString().split("T")[0],
     paymentStatus: text(body.paymentStatus) || "unpaid",

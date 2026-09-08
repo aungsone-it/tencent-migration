@@ -22,6 +22,7 @@ import { SmartCache } from '../../utils/cache';
 import { devLog } from './devLog';
 import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
+import { compareOrdersBySerial } from "./orderNumber";
 import { notifyAdminOrdersUpdated, isSuperAdminFinancesSessionStale } from "./adminOrdersRealtime";
 import {
   aggregateVendorPayoutsFromTransactions,
@@ -2943,15 +2944,6 @@ function recoveredOrderCacheKey(order: Record<string, unknown>): string {
     .toLowerCase();
 }
 
-function isRecoveredOrderPending(order: Record<string, unknown>): boolean {
-  const s = String(order.status || "pending")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/_/g, "-");
-  return s === "pending" || s === "pending-payment";
-}
-
 function prependUniqueOrderRow(list: unknown[], order: Record<string, unknown>): {
   orders: unknown[];
   inserted: boolean;
@@ -2965,7 +2957,17 @@ function prependUniqueOrderRow(list: unknown[], order: Record<string, unknown>):
   return { orders: [order, ...filtered], inserted: !had };
 }
 
-/** KBZPay draft recover — prepend row to session caches without invalidating the orders grid. */
+function sortCachedOrderRows(list: unknown[], direction: "newest" | "oldest"): unknown[] {
+  return [...list].sort((a, b) =>
+    compareOrdersBySerial(
+      (a || {}) as { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
+      (b || {}) as { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
+      direction,
+    )
+  );
+}
+
+/** KBZPay draft recover — keep full cache in serial order; pages reload from the API. */
 export function insertRecoveredOrderIntoAdminCaches(order: Record<string, unknown>): void {
   const key = recoveredOrderCacheKey(order);
   if (!key) return;
@@ -2973,43 +2975,15 @@ export function insertRecoveredOrderIntoAdminCaches(order: Record<string, unknow
   const full = moduleCache.peek<{ orders?: unknown[] }>(CACHE_KEYS.ADMIN_ORDERS);
   if (full?.orders && Array.isArray(full.orders)) {
     const { orders } = prependUniqueOrderRow(full.orders, order);
-    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, { ...full, orders });
+    moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, {
+      ...full,
+      orders: sortCachedOrderRows(orders, "newest"),
+    });
   } else {
     moduleCache.prime(CACHE_KEYS.ADMIN_ORDERS, { orders: [order] });
   }
 
-  const pendingBump = isRecoveredOrderPending(order) ? 1 : 0;
-
-  for (const cacheKey of moduleCache.getStats().keys) {
-    if (!cacheKey.startsWith(ADMIN_ORDERS_PAGE_CACHE_PREFIX)) continue;
-    const pagePayload = moduleCache.peek<AdminOrdersPagePayload>(cacheKey);
-    if (!pagePayload?.orders || !Array.isArray(pagePayload.orders)) continue;
-
-    const { orders: nextOrders, inserted } = prependUniqueOrderRow(pagePayload.orders, order);
-    const breakdown = pagePayload.aggregates?.statusBreakdown;
-    moduleCache.prime(cacheKey, {
-      ...pagePayload,
-      orders: nextOrders,
-      total: inserted ? pagePayload.total + 1 : pagePayload.total,
-      aggregates: pagePayload.aggregates
-        ? {
-            ...pagePayload.aggregates,
-            filteredCount: inserted
-              ? pagePayload.aggregates.filteredCount + 1
-              : pagePayload.aggregates.filteredCount,
-            statusBreakdown: breakdown
-              ? {
-                  ...breakdown,
-                  pending:
-                    inserted && pendingBump
-                      ? (breakdown.pending ?? 0) + 1
-                      : (breakdown.pending ?? 0),
-                }
-              : breakdown,
-          }
-        : pagePayload.aggregates,
-    });
-  }
+  moduleCache.invalidatePrefix(ADMIN_ORDERS_PAGE_CACHE_PREFIX);
 
   SmartCache.delete("badge_counts");
   const pending = syncPendingOrdersBadgeFromAdminCache();

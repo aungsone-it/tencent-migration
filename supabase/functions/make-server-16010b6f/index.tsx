@@ -72,7 +72,13 @@ import {
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import { applyNormalizedShippingToOrderBody, normalizeOrderShippingFields } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
-import { allocateNextOrderNumber, canonicalizeOrderNumber, noteOrderNumberUsed } from "./order_number.ts";
+import {
+  allocateNextOrderNumber,
+  canonicalizeOrderNumber,
+  compareOrdersBySerial,
+  noteOrderNumberUsed,
+  resolveAllocatedOrderCreatedAt,
+} from "./order_number.ts";
 import { compactVendorKey, resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
 import {
   mergeMetaCapiAccessTokenOnSave,
@@ -5534,11 +5540,8 @@ function filterSortOrdersAdmin(minimalOrders: any[], opts: NonNullable<ReturnTyp
     }
     return true;
   });
-  rows.sort((a: any, b: any) => {
-    const dateA = new Date(a.createdAt || a.date || 0).getTime();
-    const dateB = new Date(b.createdAt || b.date || 0).getTime();
-    return opts.sort === "oldest" ? dateA - dateB : dateB - dateA;
-  });
+  const direction = opts.sort === "oldest" ? "oldest" : "newest";
+  rows.sort((a: any, b: any) => compareOrdersBySerial(a, b, direction));
   return rows;
 }
 
@@ -5742,41 +5745,128 @@ async function augmentReadModelPageWithRecentKvOrders(
   };
 }
 
-async function jsonAdminOrdersPageFromReadModel(
-  opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>
-): Promise<Record<string, unknown> | null> {
-  try {
+async function loadAppOrderRowsForAdminList(): Promise<any[] | null> {
+  const rows: any[] = [];
+  const pageSize = 1000;
+  for (let from = 0; from < 50000; from += pageSize) {
+    const { data, error } = await supabase
+      .from("app_orders")
+      .select(
+        "id, order_number, vendor_name, status, payment_status, shipping_status, payment_method, total, raw, source_created_at, source_updated_at, synced_at, customer_name, email, phone",
+      )
+      .range(from, from + pageSize - 1);
+    if (error) {
+      console.warn("[orders] app_orders serial scan failed:", error.message);
+      return null;
+    }
+    const chunk = Array.isArray(data) ? data : [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+  return rows;
+}
+
+function mapAppOrderRowToAdminList(row: any) {
+  const raw = row?.raw && typeof row.raw === "object" && !Array.isArray(row.raw) ? row.raw : {};
+  return mapOrderToAdminListRow({
+    ...raw,
+    id: row.id || raw.id,
+    orderNumber: row.order_number || raw.orderNumber,
+    customer: raw.customer || raw.customerName || row.customer_name,
+    email: raw.email || row.email,
+    phone: raw.phone || row.phone,
+    vendor: row.vendor_name || raw.vendor || "SECURE Store",
+    status: row.status || raw.status,
+    paymentStatus: row.payment_status || raw.paymentStatus,
+    shippingStatus: row.shipping_status || raw.shippingStatus,
+    paymentMethod: row.payment_method || raw.paymentMethod,
+    total: row.total ?? raw.total,
+    createdAt: raw.createdAt || row.source_created_at,
+    updatedAt: raw.updatedAt || row.source_updated_at,
+    date: raw.date || raw.createdAt || row.source_created_at,
+  });
+}
+
+async function fetchAllRpcAdminOrderRows(
+  opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>,
+): Promise<{ orders: any[]; aggregates?: unknown; readModelRows: number } | null> {
+  const pageSize = 100;
+  const orders: any[] = [];
+  let aggregates: unknown;
+  let readModelRows = 0;
+  let total = 0;
+  for (let page = 1; page <= 50; page += 1) {
     const { data, error } = await supabase.rpc("rpc_admin_orders_page", {
-      p_page: opts.page,
-      p_page_size: opts.pageSize,
+      p_page: page,
+      p_page_size: pageSize,
       p_q: opts.q || null,
       p_status: opts.status || "all",
       p_payment: opts.payment || "all",
       p_vendor: opts.vendor || "all",
       p_date_from: opts.dateFrom || null,
       p_date_to: opts.dateTo || null,
-      p_sort: opts.sort || "newest",
+      p_sort: "newest",
     });
     if (error) {
-      console.warn("[orders] read-model page unavailable:", error.message);
-      return null;
+      if (page === 1) {
+        console.warn("[orders] read-model page unavailable:", error.message);
+        return null;
+      }
+      break;
     }
-    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      if (page === 1) return null;
+      break;
+    }
     const body = data as Record<string, unknown>;
-    const readModelRows = Number(body.readModelRows ?? 0);
-    if (readModelRows <= 0) {
-      // Migration may be applied before backfill. Do not show a false-empty admin list.
-      return null;
+    readModelRows = Number(body.readModelRows ?? 0);
+    total = Number(body.total ?? 0);
+    if (body.aggregates && typeof body.aggregates === "object") aggregates = body.aggregates;
+    const chunk = Array.isArray(body.orders) ? body.orders : [];
+    orders.push(...chunk);
+    if (!body.hasMore || chunk.length === 0 || orders.length >= total) break;
+  }
+  return { orders, aggregates, readModelRows };
+}
+
+async function jsonAdminOrdersPageFromReadModel(
+  opts: NonNullable<ReturnType<typeof parseAdminOrdersPageQuery>>
+): Promise<Record<string, unknown> | null> {
+  try {
+    const tableRows = await loadAppOrderRowsForAdminList();
+    if (tableRows && tableRows.length > 0) {
+      const mapped = dedupeOrdersByCanonical(tableRows.map(mapAppOrderRowToAdminList));
+      const filtered = filterSortOrdersAdmin(mapped, opts);
+      const aggregates = buildAdminOrdersAggregates(filtered);
+      const slice = filtered.slice((opts.page - 1) * opts.pageSize, opts.page * opts.pageSize);
+      const pageBody = {
+        orders: slice,
+        total: filtered.length,
+        page: opts.page,
+        pageSize: opts.pageSize,
+        hasMore: opts.page * opts.pageSize < filtered.length,
+        aggregates,
+        readModel: true,
+        readModelRows: tableRows.length,
+      };
+      return await reconcileReadModelOrdersPage(pageBody);
     }
+
+    const fetched = await fetchAllRpcAdminOrderRows(opts);
+    if (!fetched || fetched.readModelRows <= 0) return null;
+    const mapped = fetched.orders.map((row) => mapOrderToAdminListRow(row));
+    const filtered = filterSortOrdersAdmin(mapped, opts);
+    const slice = filtered.slice((opts.page - 1) * opts.pageSize, opts.page * opts.pageSize);
     const pageBody = {
-      orders: (Array.isArray(body.orders) ? body.orders : []).map((row) =>
-        mapOrderToAdminListRow(row)
-      ),
-      total: Number(body.total ?? 0),
-      page: Number(body.page ?? opts.page),
-      pageSize: Number(body.pageSize ?? opts.pageSize),
-      hasMore: Boolean(body.hasMore),
-      aggregates: body.aggregates && typeof body.aggregates === "object" ? body.aggregates : undefined,
+      orders: slice,
+      total: filtered.length,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      hasMore: opts.page * opts.pageSize < filtered.length,
+      aggregates:
+        fetched.aggregates && typeof fetched.aggregates === "object"
+          ? fetched.aggregates
+          : buildAdminOrdersAggregates(filtered),
       readModel: true,
     };
     return await reconcileReadModelOrdersPage(pageBody);
@@ -5916,7 +6006,7 @@ app.get("/make-server-16010b6f/orders", async (c) => {
       const bustCache = String(c.req.query("_") || "").trim().length > 0;
       let readModelBody = await jsonAdminOrdersPageFromReadModel(pageOpts);
       if (readModelBody) {
-        if (bustCache) {
+        if (bustCache || pageOpts.page === 1) {
           readModelBody = await augmentReadModelPageWithRecentKvOrders(readModelBody, pageOpts);
         }
         return c.json(readModelBody);
@@ -6863,7 +6953,7 @@ app.post("/make-server-16010b6f/orders", async (c) => {
       total: parsedTotal,
       subtotal: parsedSubtotal,
       discount: parsedDiscount,
-      createdAt: new Date().toISOString(),
+      createdAt: await resolveAllocatedOrderCreatedAt(requestedOrderNumber, body.createdAt),
       updatedAt: new Date().toISOString(),
       date: body.date || new Date().toISOString().split('T')[0],
       paymentStatus: body.paymentStatus || 'unpaid',
@@ -14039,8 +14129,8 @@ async function jsonVendorOrdersPageFromReadModel(opts: {
     if (vendorIds.length === 0) return null;
     const { data, error } = await supabase.rpc("rpc_vendor_orders_page", {
       p_vendor_ids: vendorIds,
-      p_page: opts.page,
-      p_page_size: opts.pageSize,
+      p_page: 1,
+      p_page_size: 100,
       p_q: opts.q || null,
       p_status: opts.status || "all",
       p_payment: opts.payment || "all",
@@ -14053,19 +14143,44 @@ async function jsonVendorOrdersPageFromReadModel(opts: {
       return null;
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-    const body = data as Record<string, unknown>;
-    const readModelRows = Number(body.readModelRows ?? 0);
+    const first = data as Record<string, unknown>;
+    const readModelRows = Number(first.readModelRows ?? 0);
     if (readModelRows <= 0) {
       // Migration may be applied before backfill. Do not show a false-empty vendor order list.
       return null;
     }
+    const allOrders: any[] = Array.isArray(first.orders) ? [...first.orders] : [];
+    const totalFiltered = Number(first.total ?? allOrders.length);
+    let hasMorePages = Boolean(first.hasMore);
+    let page = 2;
+    while (hasMorePages && allOrders.length < totalFiltered && page <= 50) {
+      const more = await supabase.rpc("rpc_vendor_orders_page", {
+        p_vendor_ids: vendorIds,
+        p_page: page,
+        p_page_size: 100,
+        p_q: opts.q || null,
+        p_status: opts.status || "all",
+        p_payment: opts.payment || "all",
+        p_from: opts.from || null,
+        p_to: opts.to || null,
+        p_sort: opts.sort || "newest",
+      });
+      if (more.error || !more.data || typeof more.data !== "object" || Array.isArray(more.data)) break;
+      const body = more.data as Record<string, unknown>;
+      const chunk = Array.isArray(body.orders) ? body.orders : [];
+      allOrders.push(...chunk);
+      hasMorePages = Boolean(body.hasMore) && chunk.length > 0;
+      page += 1;
+    }
+    const sorted = [...allOrders].sort((a, b) => compareOrdersBySerial(a, b, opts.sort));
+    const slice = sorted.slice((opts.page - 1) * opts.pageSize, opts.page * opts.pageSize);
     return {
-      orders: Array.isArray(body.orders) ? body.orders : [],
-      total: Number(body.total ?? 0),
-      page: Number(body.page ?? opts.page),
-      pageSize: Number(body.pageSize ?? opts.pageSize),
-      hasMore: Boolean(body.hasMore),
-      summary: body.summary && typeof body.summary === "object" ? body.summary : undefined,
+      orders: slice,
+      total: totalFiltered,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      hasMore: opts.page * opts.pageSize < totalFiltered,
+      summary: first.summary && typeof first.summary === "object" ? first.summary : undefined,
       readModel: true,
     };
   } catch (error) {
@@ -14347,11 +14462,9 @@ app.get("/make-server-16010b6f/vendor/orders/:vendorId", async (c) => {
       return matchesSearch && matchesStatus && matchesPayment && matchesFrom && matchesTo;
     });
 
-    filteredOrders.sort((a: any, b: any) => {
-      const aMs = new Date(a.createdAt || a.date || 0).getTime();
-      const bMs = new Date(b.createdAt || b.date || 0).getTime();
-      return sortQ === "oldest" ? aMs - bMs : bMs - aMs;
-    });
+    filteredOrders.sort((a: any, b: any) =>
+      compareOrdersBySerial(a, b, sortQ === "oldest" ? "oldest" : "newest")
+    );
 
     const total = filteredOrders.length;
     const slice = filteredOrders.slice((page - 1) * pageSize, page * pageSize);

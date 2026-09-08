@@ -69,7 +69,7 @@ import {
 import { useAdminOrdersResyncOnVisible } from "../hooks/useAdminOrdersResyncOnVisible";
 import { PwaOrphanedOrdersRecovery } from "./PwaOrphanedOrdersRecovery";
 import { useAdminPortalDebouncedSearch } from "../utils/adminProductSearch";
-import { formatOrderNumberDisplay } from "../utils/orderNumber";
+import { compareOrdersBySerial, formatOrderNumberDisplay } from "../utils/orderNumber";
 import {
   refreshAdminInventoryAfterOrderStatusPut,
   syncAdminInventoryCacheAfterOrderStatusChange,
@@ -714,7 +714,9 @@ export function Orders({
     []
   );
   const [orders, setOrders] = useState<OrderItem[]>(() =>
-    applyPendingStatusDrafts(mapApiOrdersToOrderItems(initialOrdersPayload?.orders || []))
+    applyPendingStatusDrafts(mapApiOrdersToOrderItems(initialOrdersPayload?.orders || [])).sort(
+      (a, b) => compareOrdersBySerial(a, b, "newest")
+    )
   );
   const debouncedSearch = useAdminPortalDebouncedSearch(searchQuery);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -883,7 +885,7 @@ export function Orders({
 
       const nextOrders = applyPendingStatusDrafts(
         dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems(payload.orders || []))
-      );
+      ).sort((a, b) => compareOrdersBySerial(a, b, query.sort));
       const nextTotal = payload.total;
       const nextHasMore = !!payload.hasMore;
       const nextAggregates = payload.aggregates;
@@ -936,62 +938,13 @@ export function Orders({
 
   const handlePwaOrderRecovered = useCallback(
     (recovered?: Record<string, unknown>) => {
-      if (!recovered || typeof recovered !== "object") {
-        onOrderUpdate?.();
-        return;
+      if (recovered && typeof recovered === "object") {
+        insertRecoveredOrderIntoAdminCaches(recovered);
       }
-
-      insertRecoveredOrderIntoAdminCaches(recovered);
-      const mapped = dedupeOrderItemsByOrderNumber(mapApiOrdersToOrderItems([recovered]));
-      if (mapped.length === 0) {
-        onOrderUpdate?.();
-        return;
-      }
-
-      const row = mapped[0];
-      const rowKey = (row.orderNumber || row.id).trim().toLowerCase();
-      const shouldPrependVisible = ordersPage === 1 && sortOrder === "newest";
-      const pendingBump = row.status === "pending" ? 1 : 0;
-
-      setOrders((prev) => {
-        const exists = prev.some(
-          (o) => (o.orderNumber || o.id).trim().toLowerCase() === rowKey
-        );
-        if (exists) {
-          return prev.map((o) =>
-            (o.orderNumber || o.id).trim().toLowerCase() === rowKey ? { ...o, ...row } : o
-          );
-        }
-        if (!shouldPrependVisible) return prev;
-        return [row, ...prev];
-      });
-
-      const alreadyVisible = orders.some(
-        (o) => (o.orderNumber || o.id).trim().toLowerCase() === rowKey
-      );
-      if (!alreadyVisible && shouldPrependVisible) {
-        setOrdersTotal((total) => total + 1);
-        if (pendingBump > 0) {
-          setOrdersAggregates((agg) =>
-            agg
-              ? {
-                  ...agg,
-                  filteredCount: (agg.filteredCount ?? 0) + 1,
-                  statusBreakdown: {
-                    pending: (agg.statusBreakdown?.pending ?? 0) + 1,
-                    processing: agg.statusBreakdown?.processing ?? 0,
-                    fulfilled: agg.statusBreakdown?.fulfilled ?? 0,
-                    cancelled: agg.statusBreakdown?.cancelled ?? 0,
-                  },
-                }
-              : agg
-          );
-        }
-      }
-
+      void loadOrdersRef.current(true);
       onOrderUpdate?.();
     },
-    [onOrderUpdate, orders, ordersPage, sortOrder]
+    [onOrderUpdate]
   );
 
   useEffect(() => {
@@ -1080,8 +1033,11 @@ export function Orders({
 
   /** Server already filters by debounced search — dedupe again so duplicate KV rows never render twice. */
   const displayOrders = useMemo(
-    () => applyPendingStatusDrafts(dedupeOrderItemsByOrderNumber(orders)),
-    [orders]
+    () =>
+      applyPendingStatusDrafts(dedupeOrderItemsByOrderNumber(orders)).sort((a, b) =>
+        compareOrdersBySerial(a, b, sortOrder)
+      ),
+    [orders, sortOrder]
   );
 
   const filteredTotalRevenue =

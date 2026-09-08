@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareOrdersBySerial,
   extractOrderCode,
   formatInvoiceBarcodeValue,
   formatOrderNumberDisplay,
@@ -8,6 +9,7 @@ import {
   normalizeOrderNumberSearch,
   ORDER_NUMBER_PREFIX,
   orderNumberSearchTokens,
+  parseOrderSerial,
 } from "./orderNumber";
 
 describe("orderNumber", () => {
@@ -44,6 +46,29 @@ describe("orderNumber", () => {
   it("extracts serial or legacy order code", () => {
     expect(extractOrderCode("NOS-00001")).toBe("00001");
     expect(extractOrderCode("MOS-MRFDNEWI")).toBe("MRFDNEWI");
+  });
+
+  it("parses numeric serials from prefixed order numbers", () => {
+    expect(parseOrderSerial("NOS-00188")).toBe(188);
+    expect(parseOrderSerial("MOS-NOS-00118")).toBe(118);
+    expect(parseOrderSerial("ORD-00001")).toBe(1);
+    expect(parseOrderSerial("MOS-MRFDNEWI")).toBe(0);
+  });
+
+  it("slots a recovered draft into serial order instead of the top", () => {
+    const listed = [
+      { orderNumber: "NOS-00100" },
+      { orderNumber: "NOS-00099" },
+      { orderNumber: "NOS-00097" },
+    ];
+    const recovered = { orderNumber: "NOS-00098" };
+    const next = [...listed, recovered].sort((a, b) => compareOrdersBySerial(a, b, "newest"));
+    expect(next.map((row) => row.orderNumber)).toEqual([
+      "NOS-00100",
+      "NOS-00099",
+      "NOS-00098",
+      "NOS-00097",
+    ]);
   });
 
   it("builds search tokens for serial numbers", () => {

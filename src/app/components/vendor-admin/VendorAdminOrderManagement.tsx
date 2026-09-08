@@ -31,7 +31,7 @@ import {
 } from "../ui/dialog";
 import { AdminDateRangeFilterPopover, formatAdminDateRangeLabel } from "../AdminDateRangeFilterPopover";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { formatOrderNumberDisplay } from "../../utils/orderNumber";
+import { compareOrdersBySerial, formatOrderNumberDisplay } from "../../utils/orderNumber";
 import { Label } from "../ui/label";
 import { Separator } from "../ui/separator";
 import { format, startOfDay, endOfDay } from "date-fns";
@@ -473,7 +473,9 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
         forceRefresh
       );
       console.log(`📊 Received ${data.orders.length} paged orders from API`);
-      const transformedOrders = mapVendorMgmtApiOrders(data.orders);
+      const transformedOrders = mapVendorMgmtApiOrders(data.orders).sort((a, b) =>
+        compareOrdersBySerial(a, b, sortOrder)
+      );
       console.log(`✅ Transformed ${transformedOrders.length} paged orders`);
       setRawVendorOrders(data.orders);
       setOrders(transformedOrders);

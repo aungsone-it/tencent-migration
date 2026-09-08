@@ -1560,6 +1560,24 @@ ON CONFLICT (id) DO UPDATE SET
   synced_at = now();
 
 -- ========================================
+-- 20260908140000_orders_list_serial_sort.sql
+-- ========================================
+CREATE OR REPLACE FUNCTION public.app_order_serial(p_order_number text)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT CASE
+    WHEN upper(btrim(coalesce(p_order_number, ''))) ~ '(NOS|MOS|ORD)-[0-9]+$'
+    THEN substring(upper(btrim(p_order_number)) from '[0-9]+$')::bigint
+    ELSE 0
+  END;
+$$;
+
+COMMENT ON FUNCTION public.app_order_serial(text) IS 'Numeric serial from NOS-/MOS-/ORD- order numbers for listing sort.';
+
+-- ========================================
 -- 20260616073000_admin_orders_read_model_rpc.sql
 -- ========================================
 -- SQL-backed admin orders page from app_orders.
@@ -1611,6 +1629,7 @@ BEGIN
         coalesce(nullif(vendor_name, ''), 'SECURE Store') AS vendor_label,
         synced_at,
         coalesce(source_created_at, source_updated_at, synced_at) AS order_ts,
+        public.app_order_serial(coalesce(order_number, raw->>'orderNumber')) AS order_serial,
         coalesce(total, 0) AS total_num,
         coalesce(status, 'pending') AS status_value,
         coalesce(payment_status, 'pending') AS payment_status_value
@@ -1670,7 +1689,7 @@ BEGIN
     sorted AS (
       SELECT *
       FROM filtered
-      ORDER BY order_ts %s NULLS LAST, id %s
+      ORDER BY order_serial %s NULLS LAST, order_ts %s NULLS LAST, id %s
       LIMIT %s OFFSET %s
     ),
     page_rows AS (
@@ -1715,7 +1734,7 @@ BEGIN
             'createdAt', coalesce(raw->>'createdAt', synced_at::text),
             'updatedAt', coalesce(raw->>'updatedAt', synced_at::text)
           )
-          ORDER BY order_ts %s NULLS LAST, id %s
+          ORDER BY order_serial %s NULLS LAST, order_ts %s NULLS LAST, id %s
         ),
         '[]'::jsonb
       ) AS orders
@@ -1747,7 +1766,7 @@ BEGIN
         'vendorRevenue', (SELECT rows FROM vendor_revenue)
       )
     )
-  $sql$, sort_dir, sort_dir, page_size, off, sort_dir, sort_dir, page_num, page_size, off, page_size)
+  $sql$, sort_dir, sort_dir, sort_dir, page_size, off, sort_dir, sort_dir, sort_dir, page_num, page_size, off, page_size)
   USING status_filter, payment_filter, vendor_filter, from_ts, to_ts, qpat
   INTO result;
 
@@ -1823,6 +1842,7 @@ BEGIN
       SELECT
         o.*,
         coalesce(o.source_created_at, o.source_updated_at, o.synced_at) AS order_ts,
+        public.app_order_serial(coalesce(o.order_number, o.raw->>'orderNumber')) AS order_serial,
         coalesce(o.status, 'pending') AS status_value,
         coalesce(o.payment_status, 'pending') AS payment_status_value
       FROM public.app_orders o
@@ -1906,7 +1926,7 @@ BEGIN
     sorted AS (
       SELECT *
       FROM shaped
-      ORDER BY order_ts %s NULLS LAST, id %s
+      ORDER BY order_serial %s NULLS LAST, order_ts %s NULLS LAST, id %s
       LIMIT %s OFFSET %s
     ),
     page_rows AS (
@@ -1937,7 +1957,7 @@ BEGIN
             'deliveryServiceLogo', coalesce(raw->>'deliveryServiceLogo', ''),
             'inventoryDeducted', public.app_read_model_bool(raw->>'inventoryDeducted')
           )
-          ORDER BY order_ts %s NULLS LAST, id %s
+          ORDER BY order_serial %s NULLS LAST, order_ts %s NULLS LAST, id %s
         ),
         '[]'::jsonb
       ) AS orders
@@ -1958,7 +1978,7 @@ BEGIN
         'cancelled', (SELECT cancelled_count FROM counts)
       )
     )
-  $sql$, sort_dir, sort_dir, page_size, off, sort_dir, sort_dir, page_num, page_size, off, page_size)
+  $sql$, sort_dir, sort_dir, sort_dir, page_size, off, sort_dir, sort_dir, sort_dir, page_num, page_size, off, page_size)
   USING vendor_ids, status_filter, payment_filter, from_ts, to_ts, qpat
   INTO result;
 

@@ -30,7 +30,11 @@ import {
 } from "../ui/dialog";
 import { AdminDateRangeFilterPopover, formatAdminDateRangeLabel } from "../AdminDateRangeFilterPopover";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { formatOrderNumberDisplay, orderNumberMatchesQuery } from "../../utils/orderNumber";
+import {
+  compareOrdersBySerial,
+  formatOrderNumberDisplay,
+  orderNumberMatchesQuery,
+} from "../../utils/orderNumber";
 import { Label } from "../ui/label";
 import { Separator } from "../ui/separator";
 import { format, startOfDay, endOfDay } from "date-fns";
@@ -358,12 +362,7 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
     const matchesDateTo = !to || orderDate <= to;
     
     return matchesSearch && matchesStatusFilter && matchesPaymentFilter && matchesDateFrom && matchesDateTo;
-  }).sort((a, b) => {
-    // Use createdAt timestamp for accurate sorting, fallback to date string
-    const dateA = new Date(a.createdAt || a.date);
-    const dateB = new Date(b.createdAt || b.date);
-    return sortOrder === "newest" ? dateB.getTime() - dateA.getTime() : dateA.getTime() - dateB.getTime();
-  });
+  }).sort((a, b) => compareOrdersBySerial(a, b, sortOrder));
 
   // Calculate filtered totals - 🔥 Exclude cancelled orders from revenue
   const filteredTotalRevenue = filteredOrders
@@ -1032,8 +1031,8 @@ export function VendorAdminOrders({ vendorId }: VendorAdminOrdersProps) {
                     <SelectValue placeholder="Sort by" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="newest">🆕 Newest First</SelectItem>
-                    <SelectItem value="oldest">📅 Oldest First</SelectItem>
+                    <SelectItem value="newest">🆕 Highest ID first</SelectItem>
+                    <SelectItem value="oldest">📅 Lowest ID first</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>

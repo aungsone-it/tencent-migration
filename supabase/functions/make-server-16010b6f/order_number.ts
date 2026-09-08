@@ -3,6 +3,44 @@ import * as kv from "./kv_store.tsx";
 export const ORDER_NUMBER_PREFIX = "NOS";
 export const ORDER_SERIAL_COUNTER_KEY = "order_serial_counter";
 const ORDER_SERIAL_RESERVATION_PREFIX = "order_serial_reservation:";
+export const ORDER_SERIAL_REJECTED_PREFIX = "order_serial_rejected:";
+
+/** Only reuse serials abandoned on/after this instant — leaves pre-existing listing gaps untouched. */
+export const ORDER_SERIAL_REUSE_CUTOFF_MS = Date.parse("2026-09-08T00:00:00.000+06:30");
+
+function parseIsoMs(value: unknown): number {
+  const ms = Date.parse(String(value || ""));
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+async function abandonmentTimestampMs(orderNumber: string): Promise<number> {
+  const reservation = await kv.get(`${ORDER_SERIAL_RESERVATION_PREFIX}${orderNumber}`);
+  if (reservation && typeof reservation === "object") {
+    const reservedMs = parseIsoMs((reservation as { reservedAt?: unknown }).reservedAt);
+    if (!Number.isNaN(reservedMs)) return reservedMs;
+  }
+
+  const txn = (await kv.get(`kpay_txn:${orderNumber}`)) as Record<string, unknown> | null;
+  if (txn && typeof txn === "object") {
+    const txnMs = Math.max(parseIsoMs(txn.updatedAt), parseIsoMs(txn.createdAt));
+    if (!Number.isNaN(txnMs)) return txnMs;
+  }
+
+  const draft = await kv.get(`kpay_pwa_draft:${orderNumber}`);
+  if (draft && typeof draft === "object") {
+    const draftMs = parseIsoMs((draft as { savedAt?: unknown }).savedAt);
+    if (!Number.isNaN(draftMs)) return draftMs;
+  }
+
+  return NaN;
+}
+
+/** True when abandonment happened on/after the reuse cutoff (legacy burned serials stay frozen). */
+async function isEligibleForReuseSinceCutoff(orderNumber: string): Promise<boolean> {
+  const abandonedMs = await abandonmentTimestampMs(orderNumber);
+  if (Number.isNaN(abandonedMs)) return false;
+  return abandonedMs >= ORDER_SERIAL_REUSE_CUTOFF_MS;
+}
 
 /** Format serial as NOS-00001, NOS-00002, NOS-100000, etc. */
 export function formatSerialOrderNumber(serial: number, prefix = ORDER_NUMBER_PREFIX): string {
@@ -81,6 +119,88 @@ export function canonicalizeOrderNumber(orderNumber: unknown): string {
   return raw;
 }
 
+function kpayTxnIsPaid(txn: Record<string, unknown> | null | undefined): boolean {
+  if (!txn || typeof txn !== "object") return false;
+  const status = String(txn.status || "").trim().toLowerCase();
+  return status === "paid" || status === "refunded";
+}
+
+/** Admin rejected this serial — permanent gap in the listing. */
+export async function isOrderNumberAdminRejected(orderNumber: unknown): Promise<boolean> {
+  const num = canonicalizeOrderNumber(orderNumber);
+  if (!num) return false;
+  return Boolean(await kv.get(`${ORDER_SERIAL_REJECTED_PREFIX}${num}`));
+}
+
+/** True when the serial can be assigned again (unpaid abandon, failed checkout, etc.). */
+export async function isOrderNumberReusable(orderNumber: unknown): Promise<boolean> {
+  const num = canonicalizeOrderNumber(orderNumber);
+  if (!num) return false;
+  if (await isOrderNumberAdminRejected(num)) return false;
+
+  const mapped = await kv.get(`order_num:${num}`);
+  if (mapped) return false;
+
+  const txn = (await kv.get(`kpay_txn:${num}`)) as Record<string, unknown> | null;
+  if (kpayTxnIsPaid(txn)) return false;
+
+  if (!(await isEligibleForReuseSinceCutoff(num))) return false;
+
+  return true;
+}
+
+/** Lowest unused serial (fills gaps). Paid drafts stay blocked until recover/reject. */
+async function findLowestReusableOrderNumber(): Promise<string | null> {
+  const counter = await ensureOrderSerialCounterInitialized();
+  for (let serial = 1; serial <= counter; serial++) {
+    const orderNumber = formatSerialOrderNumber(serial);
+    if (await isOrderNumberReusable(orderNumber)) {
+      return orderNumber;
+    }
+  }
+  return null;
+}
+
+async function reserveOrderNumber(orderNumber: string, reused = false): Promise<void> {
+  await kv.set(`${ORDER_SERIAL_RESERVATION_PREFIX}${orderNumber}`, {
+    reservedAt: new Date().toISOString(),
+    ...(reused ? { reused: true } : {}),
+  });
+}
+
+/** Drop stale KBZ session keys before reusing an abandoned serial. */
+async function prepareOrderNumberForReuse(orderNumber: string): Promise<void> {
+  await kv.del(`kpay_txn:${orderNumber}`);
+  await kv.del(`kpay_pwa_draft:${orderNumber}`);
+  await reserveOrderNumber(orderNumber, true);
+}
+
+/** Admin rejects a paid KBZ draft — only intentional way to leave a gap in the serial list. */
+export async function rejectOrderDraft(orderNumber: unknown): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const num = canonicalizeOrderNumber(orderNumber);
+  if (!num) {
+    return { ok: false, error: "invalid_order_number", message: "Invalid order number" };
+  }
+
+  if (await kv.get(`order_num:${num}`)) {
+    return { ok: false, error: "order_already_exists", message: "Order already registered" };
+  }
+
+  const txn = (await kv.get(`kpay_txn:${num}`)) as Record<string, unknown> | null;
+  if (!txn && !(await kv.get(`kpay_pwa_draft:${num}`))) {
+    return { ok: false, error: "draft_not_found", message: "No KBZPay draft found for this order number" };
+  }
+
+  await kv.set(`${ORDER_SERIAL_REJECTED_PREFIX}${num}`, {
+    rejectedAt: new Date().toISOString(),
+  });
+  await kv.del(`${ORDER_SERIAL_RESERVATION_PREFIX}${num}`);
+  await kv.del(`kpay_txn:${num}`);
+  await kv.del(`kpay_pwa_draft:${num}`);
+
+  return { ok: true };
+}
+
 /** Advance the global counter when an explicit order number is used (e.g. KBZ precreate). */
 export async function noteOrderNumberUsed(orderNumber: unknown): Promise<void> {
   const serial = parseSerialFromOrderNumber(orderNumber);
@@ -91,9 +211,21 @@ export async function noteOrderNumberUsed(orderNumber: unknown): Promise<void> {
   }
 }
 
-/** Allocate the next serial order number (NOS-00001, NOS-00002, …). */
+export async function consumeOrderNumberReservation(orderNumber: unknown): Promise<void> {
+  const num = canonicalizeOrderNumber(orderNumber);
+  if (!num) return;
+  await kv.del(`${ORDER_SERIAL_RESERVATION_PREFIX}${num}`).catch(() => undefined);
+}
+
+/** Allocate the next serial order number (NOS-00001, NOS-00002, …). Reuses today's abandoned unpaid serials only. */
 export async function allocateNextOrderNumber(): Promise<string> {
   await ensureOrderSerialCounterInitialized();
+
+  const reused = await findLowestReusableOrderNumber();
+  if (reused) {
+    await prepareOrderNumberForReuse(reused);
+    return reused;
+  }
 
   for (let attempt = 0; attempt < 25; attempt++) {
     const current = Number(await kv.get(ORDER_SERIAL_COUNTER_KEY)) || 0;

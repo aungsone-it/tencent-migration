@@ -6,6 +6,7 @@ import { Badge } from "./ui/badge";
 import {
   fetchOrphanedPwaDrafts,
   finalizePwaCheckoutOrderApi,
+  rejectPwaDraftOrderApi,
   fetchPwaDraftStatusRow,
   hydrateOrphanedPwaDrafts,
   invalidateOrphanedPwaDraftsCache,
@@ -51,6 +52,7 @@ export function PwaOrphanedOrdersRecovery({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [recoveringId, setRecoveringId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
   const hasLoadedOnceRef = useRef(false);
 
@@ -172,6 +174,37 @@ export function PwaOrphanedOrdersRecovery({
     }
   };
 
+  const handleReject = async (merchantOrderId: string) => {
+    const label = formatOrderNumberDisplay(merchantOrderId);
+    if (
+      !window.confirm(
+        `Reject draft ${label}? This order number will be skipped permanently and will not appear in the order list.`,
+      )
+    ) {
+      return;
+    }
+    setRejectingId(merchantOrderId);
+    try {
+      const result = await rejectPwaDraftOrderApi({
+        projectId,
+        publicAnonKey,
+        merchantOrderId,
+      });
+      if (!result.ok) {
+        toast.error(result.message || "Could not reject draft order");
+        return;
+      }
+      toast.success(`Draft ${label} rejected — order number skipped`);
+      invalidateOrphanedPwaDraftsCache();
+      setDrafts((prev) => prev.filter((d) => d.merchantOrderId !== merchantOrderId));
+      void loadDrafts({ silent: true });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Reject failed");
+    } finally {
+      setRejectingId(null);
+    }
+  };
+
   const title = vendorId ? "Paid KBZPay drafts (your store)" : "Paid KBZPay drafts (QR + PWA)";
   const hasDrafts = drafts.length > 0;
   const loading = !checked && !loadError;
@@ -193,7 +226,7 @@ export function PwaOrphanedOrdersRecovery({
                 : loading
                   ? "Loading paid KBZPay checkouts (QR or PWA) that never became an order…"
                 : hasDrafts
-                  ? `${drafts.length} paid KBZPay checkout${drafts.length === 1 ? "" : "s"} never became an order. Recover registers ${drafts.length === 1 ? "it" : "them"}.`
+                  ? `${drafts.length} paid KBZPay checkout${drafts.length === 1 ? "" : "s"} never became an order. Recover adds it to the list, or Reject skips that order number permanently.`
                   : "No paid KBZPay checkouts waiting to be registered."}
             </p>
           </div>
@@ -282,24 +315,47 @@ export function PwaOrphanedOrdersRecovery({
                       </Badge>
                     </td>
                     <td className="py-2 text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="bg-amber-800 hover:bg-amber-900 text-white disabled:opacity-50"
-                        disabled={recoveringId === draft.merchantOrderId || draft.canRecover === false}
-                        title={
-                          draft.canRecover === false
-                            ? "Checkout cart snapshot is incomplete — cannot safely recover this order"
-                            : undefined
-                        }
-                        onClick={() => void handleRecover(draft.merchantOrderId)}
-                      >
-                        {recoveringId === draft.merchantOrderId ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          "Recover order"
-                        )}
-                      </Button>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-amber-300 bg-white text-amber-950 hover:bg-amber-100"
+                          disabled={
+                            rejectingId === draft.merchantOrderId ||
+                            recoveringId === draft.merchantOrderId
+                          }
+                          onClick={() => void handleReject(draft.merchantOrderId)}
+                        >
+                          {rejectingId === draft.merchantOrderId ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "Reject draft"
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="bg-amber-800 hover:bg-amber-900 text-white disabled:opacity-50"
+                          disabled={
+                            recoveringId === draft.merchantOrderId ||
+                            rejectingId === draft.merchantOrderId ||
+                            draft.canRecover === false
+                          }
+                          title={
+                            draft.canRecover === false
+                              ? "Checkout cart snapshot is incomplete — cannot safely recover this order"
+                              : undefined
+                          }
+                          onClick={() => void handleRecover(draft.merchantOrderId)}
+                        >
+                          {recoveringId === draft.merchantOrderId ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "Recover order"
+                          )}
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -1050,6 +1050,32 @@ export async function finalizePwaCheckoutOrderApi(
     : parsed;
 }
 
+export async function rejectPwaDraftOrderApi(
+  params: KPayBaseParams & { merchantOrderId: string },
+): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const { projectId: _projectId, publicAnonKey: _publicAnonKey, merchantOrderId } = params;
+  const response = await fetch(
+    `${API_ROOT}/kpay/pwa/reject-draft/${encodeURIComponent(merchantOrderId)}`,
+    {
+      method: "POST",
+      headers: cloudbaseHeaders(),
+    },
+  );
+  const data = (await response.json().catch(() => ({}))) as {
+    success?: boolean;
+    error?: string;
+    message?: string;
+  };
+  if (!response.ok || !data.success) {
+    return {
+      ok: false,
+      error: data.error || "reject_failed",
+      message: data.message || data.error || "Could not reject draft order",
+    };
+  }
+  return { ok: true };
+}
+
 export type OrphanedPwaDraftRow = {
   merchantOrderId: string;
   savedAt: string;

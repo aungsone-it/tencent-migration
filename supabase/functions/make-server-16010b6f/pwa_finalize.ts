@@ -5,7 +5,7 @@
 import * as kv from "./kv_store.tsx";
 import { normalizeOrderShippingFields, applyNormalizedShippingToOrderBody } from "./order_shipping.ts";
 import { slimOrderCreateBody } from "./order_create_slim.ts";
-import { canonicalizeOrderNumber, resolveAllocatedOrderCreatedAt } from "./order_number.ts";
+import { canonicalizeOrderNumber, consumeOrderNumberReservation, resolveAllocatedOrderCreatedAt } from "./order_number.ts";
 import { syncOrderReadModel } from "./read_model.ts";
 import { resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
 
@@ -477,6 +477,7 @@ async function createStorefrontOrderDirect(body: Record<string, unknown>): Promi
   await kv.set(`order:${id}`, orderData);
   if (requestedOrderNumber) {
     await kv.set(`order_num:${requestedOrderNumber}`, id);
+    await consumeOrderNumberReservation(requestedOrderNumber);
   }
 
   try {

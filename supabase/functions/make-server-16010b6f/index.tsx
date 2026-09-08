@@ -24,6 +24,7 @@ import {
   getPwaCheckoutDraftRoute,
   postPwaFinalizeRoute,
   postPwaAdminRecoverRoute,
+  postPwaRejectDraftRoute,
   getOrphanedPwaDraftsRoute,
   getPwaDraftStatusRoute,
   postPwaReconcileRoute,
@@ -76,7 +77,9 @@ import {
   allocateNextOrderNumber,
   canonicalizeOrderNumber,
   compareOrdersBySerial,
+  consumeOrderNumberReservation,
   noteOrderNumberUsed,
+  rejectOrderDraft,
   resolveAllocatedOrderCreatedAt,
 } from "./order_number.ts";
 import { compactVendorKey, resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
@@ -1415,6 +1418,7 @@ app.get("/make-server-16010b6f/kpay/pwa/return", handleKPayPwaReturn);
 app.get("/make-server-16010b6f/kpay/pwa/draft/:merchantOrderId", getPwaCheckoutDraftRoute);
 app.post("/make-server-16010b6f/kpay/pwa/finalize/:merchantOrderId", postPwaFinalizeRoute);
 app.post("/make-server-16010b6f/kpay/pwa/admin-recover/:merchantOrderId", postPwaAdminRecoverRoute);
+app.post("/make-server-16010b6f/kpay/pwa/reject-draft/:merchantOrderId", postPwaRejectDraftRoute);
 app.get("/make-server-16010b6f/kpay/pwa/orphaned-drafts", getOrphanedPwaDraftsRoute);
 app.get("/make-server-16010b6f/kpay/pwa/draft-status/:merchantOrderId", getPwaDraftStatusRoute);
 app.post("/make-server-16010b6f/kpay/pwa/reconcile", postPwaReconcileRoute);
@@ -6979,6 +6983,7 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     console.log(`✅ Order ${orderData.orderNumber} created successfully`);
 
     await noteOrderNumberUsed(orderData.orderNumber);
+    await consumeOrderNumberReservation(orderData.orderNumber);
 
     queueMetaCapiPurchaseFromOrder(orderData);
     

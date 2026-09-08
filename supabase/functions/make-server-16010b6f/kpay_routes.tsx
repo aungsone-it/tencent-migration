@@ -15,6 +15,7 @@ import {
 import { queueOrderReadModelSync, syncOrderReadModel } from "./read_model.ts";
 import { clearCache } from "./server_cache.ts";
 import { queueMetaCapiPurchaseFromOrder } from "./meta_capi.tsx";
+import { rejectOrderDraft } from "./order_number.ts";
 
 type AnyRecord = Record<string, unknown>;
 type PaymentStatus = "pending" | "paid" | "failed";
@@ -2696,6 +2697,24 @@ export async function postPwaAdminRecoverRoute(c: Context) {
   clearCache("orders_minimal");
 
   return c.json({ success: true, adminRecover: true, ...result });
+}
+
+/** Admin-only: reject a paid KBZ draft and permanently skip this order number. */
+export async function postPwaRejectDraftRoute(c: Context) {
+  const merchantOrderId = text(c.req.param("merchantOrderId"));
+  if (!merchantOrderId) return c.json({ error: "merchantOrderId is required" }, 400);
+
+  const result = await rejectOrderDraft(merchantOrderId);
+  if (!result.ok) {
+    const status =
+      result.error === "order_already_exists" ? 409 :
+      result.error === "draft_not_found" ? 404 :
+      400;
+    return c.json({ success: false, ...result }, status);
+  }
+
+  clearCache("orders_minimal");
+  return c.json({ success: true, merchantOrderId, rejected: true });
 }
 
 export async function getOrphanedPwaDraftsRoute(c: Context) {

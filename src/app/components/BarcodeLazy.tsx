@@ -10,9 +10,18 @@ interface BarcodeProps {
   fontSize?: number;
   margin?: number;
   displayValue?: boolean;
+  fontOptions?: string;
 }
 
-export function Barcode({ value, width = 2, height = 50, fontSize = 14, margin = 10, displayValue = true }: BarcodeProps) {
+export function Barcode({
+  value,
+  width = 2,
+  height = 50,
+  fontSize = 14,
+  margin = 10,
+  displayValue = true,
+  fontOptions = "",
+}: BarcodeProps) {
   return (
     <Suspense fallback={<div className="h-16 bg-gray-100 animate-pulse rounded"></div>}>
       <BarcodeLib 
@@ -22,6 +31,7 @@ export function Barcode({ value, width = 2, height = 50, fontSize = 14, margin =
         fontSize={fontSize}
         margin={margin}
         displayValue={displayValue}
+        fontOptions={fontOptions}
       />
     </Suspense>
   );

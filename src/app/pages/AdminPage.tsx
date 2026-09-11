@@ -458,6 +458,16 @@ export function AdminPage() {
       return;
     }
 
+    if (currentPage === ADMIN_PAGES.ORDERS) {
+      // Keep /admin/orders/:id (and /edit) on refresh — do not strip to the list
+      if (orderEditId || orderViewId) return;
+      const targetPath = "/admin/orders";
+      if (window.location.pathname !== targetPath) {
+        navigate(targetPath, { replace: false });
+      }
+      return;
+    }
+
     const section = pageToSection[currentPage];
     const targetPath = section ? `/admin/${section}` : "/admin";
 

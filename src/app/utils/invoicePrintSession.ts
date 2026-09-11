@@ -37,35 +37,38 @@ export const INVOICE_PRINT_STYLES = `
 
   /*
    * vw scales with paper width; max(mm, vw) sets a readable floor on 100×150 mm labels
-   * while keeping the US Letter proportions on larger paper.
+   * while keeping proportions on larger paper. Height is auto so long invoices can
+   * continue onto the next sheet instead of clipping the summary.
    */
   body.invoice-print-active .invoice-page {
     width: 100% !important;
-    min-height: 100vh !important;
-    height: 100vh !important;
+    min-height: 0 !important;
+    height: auto !important;
     margin: 0 !important;
     padding: max(3mm, 3.2vw) !important;
     box-sizing: border-box !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: flex-start !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
+    display: block !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
     page-break-after: always !important;
-    overflow: hidden !important;
+    break-after: page !important;
+    overflow: visible !important;
     background: white !important;
     color: #000 !important;
     font-size: max(3mm, 2.05vw) !important;
     line-height: 1.5 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   body.invoice-print-active .invoice-page:last-child {
     page-break-after: avoid !important;
+    break-after: auto !important;
   }
 
   body.invoice-print-active .invoice-header {
-    margin-bottom: 2.6vw !important;
-    padding-bottom: 2vw !important;
+    margin-bottom: 1vw !important;
+    padding-bottom: 0.6vw !important;
   }
 
   body.invoice-print-active .brand-name {
@@ -95,8 +98,8 @@ export const INVOICE_PRINT_STYLES = `
   }
 
   body.invoice-print-active .barcode-section svg text {
-    font-size: max(2.4mm, 1.75vw) !important;
-    font-weight: 400 !important;
+    font-size: max(3.2mm, 2.4vw) !important;
+    font-weight: 700 !important;
     fill: #000 !important;
   }
 
@@ -139,8 +142,9 @@ export const INVOICE_PRINT_STYLES = `
     padding-bottom: 2vw !important;
   }
 
+  /* Only tighten: product list → summary (subtotal / total) */
   body.invoice-print-active .items-table {
-    margin-bottom: 2.4vw !important;
+    margin-bottom: 0 !important;
   }
 
   body.invoice-print-active .items-table thead th {
@@ -152,6 +156,10 @@ export const INVOICE_PRINT_STYLES = `
   body.invoice-print-active .items-table tbody td {
     font-size: max(3.2mm, 2.35vw) !important;
     padding: 1.8vw 0.9vw !important;
+  }
+
+  body.invoice-print-active .items-table tbody tr:last-child td {
+    padding-bottom: 0.6vw !important;
   }
 
   body.invoice-print-active .col-sku {
@@ -174,9 +182,15 @@ export const INVOICE_PRINT_STYLES = `
     line-height: 1.45 !important;
   }
 
+  /* Keep totals + thank-you together; move as a block to the next sheet if needed */
+  body.invoice-print-active .invoice-summary {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   body.invoice-print-active .total-section {
-    margin: 2.2vw 0 !important;
-    padding-top: 2vw !important;
+    margin: 0.6vw 0 2.2vw !important;
+    padding-top: 0.8vw !important;
   }
 
   body.invoice-print-active .subtotal-row,
@@ -211,14 +225,13 @@ export const INVOICE_PRINT_STYLES = `
   }
 
   body.invoice-print-active .invoice-body {
-    flex: 0 1 auto !important;
+    display: block !important;
   }
 
   body.invoice-print-active .footer-section {
-    margin-top: auto !important;
-    padding-top: 2.5vw !important;
+    margin-top: 1.2vw !important;
+    padding-top: 1.2vw !important;
     padding-bottom: 1.2vw !important;
-    flex-shrink: 0 !important;
   }
 
   body.invoice-print-active .thank-you {
@@ -234,6 +247,11 @@ export const INVOICE_PRINT_STYLES = `
     display: table-header-group !important;
   }
 
+  body.invoice-print-active .items-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   body.invoice-print-active .invoice-header,
   body.invoice-print-active .shipping-section,
   body.invoice-print-active .items-table tbody td,
@@ -242,13 +260,31 @@ export const INVOICE_PRINT_STYLES = `
     border: none !important;
   }
 
+  /* Medium gray dotted rules — print-color-adjust keeps them on paper */
   body.invoice-print-active .items-table thead th {
-    border-bottom: 1px dotted #bbb !important;
+    border-bottom: 2px dotted #888 !important;
   }
 
   body.invoice-print-active .total-section {
-    border-top: 1px dotted #bbb !important;
+    border-top: 2px dotted #888 !important;
     border-bottom: none !important;
+  }
+
+  body.invoice-print-active .qty-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: max(5mm, 3.2vw) !important;
+    height: max(5mm, 3.2vw) !important;
+    padding: 0 0.4vw !important;
+    border-radius: 50% !important;
+    border: 1.5px solid #e11d48 !important;
+    background: rgba(225, 29, 72, 0.12) !important;
+    color: #000 !important;
+    box-sizing: border-box !important;
+    line-height: 1 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 
@@ -336,8 +372,8 @@ export const INVOICE_PRINT_STYLES = `
 }
 
 .barcode-section svg text {
-  font-size: 14px;
-  font-weight: 400;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .section-title {
@@ -377,7 +413,7 @@ export const INVOICE_PRINT_STYLES = `
 .items-table thead th {
   font-weight: 700;
   text-align: left;
-  border-bottom: 1px dotted #bbb;
+  border-bottom: 2px dotted #888;
   color: #000;
 }
 
@@ -391,6 +427,23 @@ export const INVOICE_PRINT_STYLES = `
 .col-product { width: 40%; text-align: left; }
 .col-sku { width: 25%; text-align: left; }
 .col-price { width: 25%; text-align: right; }
+
+.qty-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35em;
+  height: 1.35em;
+  padding: 0 0.15em;
+  border-radius: 50%;
+  border: 1.5px solid #e11d48;
+  background: rgba(225, 29, 72, 0.12);
+  color: #000;
+  box-sizing: border-box;
+  line-height: 1;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
 
 .no-items {
   text-align: center;
@@ -416,7 +469,7 @@ export const INVOICE_PRINT_STYLES = `
 }
 
 .total-section {
-  border-top: 1px dotted #bbb;
+  border-top: 2px dotted #888;
 }
 
 .subtotal-row,

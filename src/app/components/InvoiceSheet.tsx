@@ -122,7 +122,7 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
     order.paymentStatus ?? derivePaymentStatusFromOrder(order),
   );
 
-  const barcodeProps = { width: 1, height: 35, fontSize: 14, margin: 6 };
+  const barcodeProps = { width: 1, height: 35, fontSize: 18, margin: 6, fontOptions: "bold" };
 
   return (
     <div className="invoice-page">
@@ -139,6 +139,7 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
             height={barcodeProps.height}
             fontSize={barcodeProps.fontSize}
             margin={barcodeProps.margin}
+            fontOptions={barcodeProps.fontOptions}
             displayValue={true}
           />
         </div>
@@ -177,7 +178,9 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
           {lineItems.length > 0 ? (
             lineItems.map((item, idx) => (
               <tr key={idx}>
-                <td className="col-qty">{item.quantity || 1}</td>
+                <td className="col-qty">
+                  <span className="qty-badge">{item.quantity || 1}</span>
+                </td>
                 <td className="col-product">{item.name || item.title || "Product"}</td>
                 <td className="col-sku">{item.sku || item.id || "-"}</td>
                 <td className="col-price">{formatCurrency(parsePrice(item.price))}</td>
@@ -200,47 +203,49 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
         </div>
       )}
 
-      <div className="total-section">
-        {(subtotal > 0 || shippingFee > 0) && (
-          <div className="subtotal-row">
-            <span className="subtotal-label">Subtotal:</span>
-            <span className="subtotal-amount">{formatCurrency(subtotal)}</span>
-          </div>
-        )}
-        {shippingFee > 0 && (
-          <>
-            {deliveryCompany && (
-              <div className="delivery-company-row">
-                <span className="delivery-company-label">{deliveryCompany}</span>
-              </div>
-            )}
+      <div className="invoice-summary">
+        <div className="total-section">
+          {(subtotal > 0 || shippingFee > 0) && (
             <div className="subtotal-row">
-              <span className="subtotal-label">Shipping fee:</span>
-              <span className="subtotal-amount">{formatCurrency(shippingFee)}</span>
+              <span className="subtotal-label">Subtotal:</span>
+              <span className="subtotal-amount">{formatCurrency(subtotal)}</span>
             </div>
-          </>
-        )}
-        {hasDiscount && (
-          <>
-            <div className="discount-row">
-              <span className="discount-label">
-                Discount{order.couponCode ? ` (${order.couponCode})` : ""}:
-              </span>
-              <span className="discount-amount">
-                -{formatCurrency(actualDiscount)} ({discountPercentage}%)
-              </span>
-            </div>
-          </>
-        )}
-        <div className="total-row">
-          <span className="total-label">TOTAL</span>
-          <span className="total-amount">{formatCurrency(total)}</span>
+          )}
+          {shippingFee > 0 && (
+            <>
+              {deliveryCompany && (
+                <div className="delivery-company-row">
+                  <span className="delivery-company-label">{deliveryCompany}</span>
+                </div>
+              )}
+              <div className="subtotal-row">
+                <span className="subtotal-label">Shipping fee:</span>
+                <span className="subtotal-amount">{formatCurrency(shippingFee)}</span>
+              </div>
+            </>
+          )}
+          {hasDiscount && (
+            <>
+              <div className="discount-row">
+                <span className="discount-label">
+                  Discount{order.couponCode ? ` (${order.couponCode})` : ""}:
+                </span>
+                <span className="discount-amount">
+                  -{formatCurrency(actualDiscount)} ({discountPercentage}%)
+                </span>
+              </div>
+            </>
+          )}
+          <div className="total-row">
+            <span className="total-label">TOTAL</span>
+            <span className="total-amount">{formatCurrency(total)}</span>
+          </div>
+        </div>
+
+        <div className="footer-section">
+          <p className="thank-you">Thanks for Purchasing from {vendorName}!</p>
         </div>
       </div>
-      </div>
-
-      <div className="footer-section">
-        <p className="thank-you">Thanks for Purchasing from {vendorName}!</p>
       </div>
     </div>
   );

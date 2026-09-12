@@ -1244,7 +1244,20 @@ function isKycNameMismatchMessage(message: string): boolean {
 function extractPayeeNameFromKbzBody(body: AnyRecord): string {
   const nested = providerData(body);
   const wrapped = asRecord(body.Response);
+  const payeeInfo = asRecord(
+    nested.payee_info ||
+      nested.payeeInfo ||
+      wrapped.payee_info ||
+      wrapped.payeeInfo ||
+      body.payee_info ||
+      body.payeeInfo,
+  );
   const candidates = [
+    payeeInfo.name,
+    payeeInfo.payee_name,
+    payeeInfo.payeeName,
+    payeeInfo.kyc_name,
+    payeeInfo.kycName,
     nested.payee_name,
     nested.payeeName,
     nested.name,
@@ -1254,6 +1267,8 @@ function extractPayeeNameFromKbzBody(body: AnyRecord): string {
     nested.userName,
     nested.real_name,
     nested.realName,
+    nested.account_name,
+    nested.accountName,
     wrapped.payee_name,
     wrapped.payeeName,
     wrapped.name,
@@ -3320,6 +3335,8 @@ export type KPayBusinessPayeeValidateResult = {
 export async function validateKPayBusinessPayee(params: {
   payeePhone: string;
   payeeName?: string;
+  /** When true (default), phone-only lookup — never echo a submitted/stale name back. */
+  lookupOnly?: boolean;
 }): Promise<KPayBusinessPayeeValidateResult> {
   const cfg = kpayConfig();
   const validateUrl = resolveVpsBusinessPayValidateUrl(cfg.baseUrl);
@@ -3332,15 +3349,17 @@ export async function validateKPayBusinessPayee(params: {
     };
   }
 
+  const lookupOnly = params.lookupOnly !== false;
   const headers = buildRefundProviderHeaders(cfg);
   const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 12_000), 30_000);
+  const phoneKey = kbzBusinessPayIdentifierValue(params.payeePhone).replace(/\D/g, "").slice(-8);
   const payload = buildBusinessPayVpsPayload(cfg, {
-    merchantOrderId: `VVAL-${Date.now().toString(36).toUpperCase()}`,
+    merchantOrderId: `VVAL-${phoneKey}-${Date.now().toString(36).toUpperCase()}`,
     amountMmk: 1,
     payeePhone: params.payeePhone,
-    payeeName: params.payeeName,
+    payeeName: lookupOnly ? undefined : params.payeeName,
     title: "Payee validation",
-    note: "Vendor commission payee lookup",
+    note: `Vendor payee lookup ${kbzBusinessPayIdentifierValue(params.payeePhone)}`,
   });
 
   const response = await postJson(validateUrl, payload, timeoutMs, headers);
@@ -3348,12 +3367,36 @@ export async function validateKPayBusinessPayee(params: {
   const biz = kbzBizErrorFromBody(kbzPayload);
   const kbzMsg = text(biz.msg) || providerErrorMessage(response.body, "", validateUrl);
   const suggestedPayeeName = extractPayeeNameFromKbzBody(kbzPayload) || extractPayeeNameFromKbzBody(response.body);
-  const valid =
-    businessPayIndicatesSuccess(kbzPayload) ||
-    text(biz.result).toUpperCase() === "SUCCESS" ||
-    Boolean(suggestedPayeeName && params.payeeName && suggestedPayeeName.toLowerCase() === params.payeeName.toLowerCase());
+  const nameConfirmed =
+    Boolean(suggestedPayeeName) &&
+    Boolean(params.payeeName) &&
+    suggestedPayeeName.toLowerCase() === text(params.payeeName).toLowerCase();
+  const providerSuccess =
+    businessPayIndicatesSuccess(kbzPayload) || text(biz.result).toUpperCase() === "SUCCESS";
 
-  if (valid) {
+  if (lookupOnly) {
+    if (suggestedPayeeName) {
+      return {
+        ok: true,
+        valid: true,
+        suggestedPayeeName,
+        providerMessage: kbzMsg || "Payee name found",
+        endpointUsed: validateUrl,
+        rawResponse: response.body,
+      };
+    }
+    return {
+      ok: true,
+      valid: false,
+      providerMessage:
+        kbzMsg ||
+        "KBZPay did not return a KYC name for this phone. Enter the legal wallet name manually or try again later.",
+      endpointUsed: validateUrl,
+      rawResponse: response.body,
+    };
+  }
+
+  if (providerSuccess && (suggestedPayeeName || nameConfirmed)) {
     return {
       ok: true,
       valid: true,

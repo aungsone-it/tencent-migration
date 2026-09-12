@@ -222,6 +222,7 @@ export function VendorAdminFinances({
   const [kpayPayeeNameInput, setKpayPayeeNameInput] = useState("");
   const [validatingPayee, setValidatingPayee] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const lastLoadedKpayPhoneRef = useRef("");
   const walletRef = useRef<VendorCommissionWallet | null>(null);
   walletRef.current = wallet;
   const walletAuthBlockedRef = useRef(false);
@@ -268,7 +269,10 @@ export function VendorAdminFinances({
       const data = (await res.json()) as { wallet?: VendorCommissionWallet };
       const next = data.wallet ?? null;
       setWallet(next);
-      if (next?.kpayPhone) setKpayPhoneInput(next.kpayPhone);
+      if (next?.kpayPhone) {
+        setKpayPhoneInput(next.kpayPhone);
+        lastLoadedKpayPhoneRef.current = next.kpayPhone.trim();
+      }
       if (next?.kpayPayeeName) setKpayPayeeNameInput(next.kpayPayeeName);
     } catch (error) {
       console.error("Failed to load commission wallet:", error);
@@ -496,18 +500,25 @@ export function VendorAdminFinances({
     return transactions.slice(start, start + txPageSize);
   }, [transactions, txPage, txPageSize]);
 
+  useEffect(() => {
+    const phone = kpayPhoneInput.trim();
+    if (
+      lastLoadedKpayPhoneRef.current &&
+      phone &&
+      phone !== lastLoadedKpayPhoneRef.current
+    ) {
+      setKpayPayeeNameInput("");
+    }
+  }, [kpayPhoneInput]);
+
   const handleVerifyKpayPayee = async () => {
     const phone = kpayPhoneInput.trim();
-    const payeeName = kpayPayeeNameInput.trim();
     if (!phone) {
       toast.error("Enter your KBZPay phone number first");
       return;
     }
-    if (payeeName && /^\d+$/.test(payeeName)) {
-      toast.error("That looks like a User ID (758794), not a KYC name. Leave blank and tap Look up, or enter your legal wallet name.");
-      return;
-    }
 
+    setKpayPayeeNameInput("");
     setValidatingPayee(true);
     try {
       const sessionHeaders = {
@@ -527,12 +538,13 @@ export function VendorAdminFinances({
           },
           body: JSON.stringify({
             kpayPhone: phone,
-            ...(payeeName ? { kpayPayeeName: payeeName } : {}),
+            lookupOnly: true,
           }),
         },
       );
       const payload = (await res.json().catch(() => ({}))) as {
         success?: boolean;
+        kpayPhone?: string;
         kpayPayeeName?: string;
         validation?: { providerMessage?: string; suggestedPayeeName?: string };
         error?: string;
@@ -543,17 +555,13 @@ export function VendorAdminFinances({
         "";
       if (suggested) {
         setKpayPayeeNameInput(suggested);
-        toast.success(`KBZPay name on file: ${suggested}`);
-        return;
-      }
-      if (payload.success) {
-        toast.success("KBZPay account verified for this phone number");
+        toast.success(`KBZPay name for ${payload.kpayPhone || phone}: ${suggested}`);
         return;
       }
       toast.error(
         payload.validation?.providerMessage ||
           payload.error ||
-          "Could not look up the KYC name for this wallet. Ask KBZ for the registered name on this UAT phone.",
+          "KBZPay did not return a KYC name for this phone. Enter the legal wallet name manually.",
       );
     } catch {
       toast.error("Failed to validate KBZPay account");

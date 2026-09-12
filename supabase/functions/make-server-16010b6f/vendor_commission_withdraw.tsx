@@ -748,17 +748,20 @@ export async function validateVendorKpayPayee(c: Context) {
       return c.json({ error: "Enter a valid KBZPay phone number first." }, 400);
     }
 
-    const payeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
+    const lookupOnly = body.lookupOnly !== false;
+    const confirmName = text(body.kpayPayeeName ?? body.payeeName);
     const validation = await validateKPayBusinessPayee({
       payeePhone: kpayPhone,
-      payeeName: payeeName || undefined,
+      payeeName: lookupOnly ? undefined : confirmName || undefined,
+      lookupOnly,
     });
 
+    const lookedUpName = text(validation.suggestedPayeeName);
     return c.json({
-      success: validation.valid,
+      success: Boolean(lookedUpName) || validation.valid,
       validation,
       kpayPhone,
-      kpayPayeeName: validation.suggestedPayeeName || payeeName || "",
+      ...(lookedUpName ? { kpayPayeeName: lookedUpName } : {}),
     });
   } catch (error: unknown) {
     console.error("validateVendorKpayPayee error", error);

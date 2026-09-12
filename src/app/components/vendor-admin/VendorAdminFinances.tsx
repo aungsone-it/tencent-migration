@@ -140,6 +140,14 @@ function mmkAmountString(n: number): string {
   return `${Math.round(v).toLocaleString()} MMK`;
 }
 
+/** Treat 09… and +959… as the same KBZPay wallet. */
+function normalizedKpayPhoneKey(raw: string): string {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.startsWith("959")) return `0${digits.slice(2)}`;
+  if (digits.startsWith("95")) return `0${digits.slice(2)}`;
+  return digits;
+}
+
 /** KPI cards: large number + visually small MMK */
 function vendorFinancesStatMmk(n: number): ReactNode {
   const v = typeof n === "number" && Number.isFinite(n) ? n : 0;
@@ -554,7 +562,7 @@ export function VendorAdminFinances({
       if (payload.success && payload.verificationToken) {
         setVerifiedKpayPayee({
           token: payload.verificationToken,
-          phone: payload.kpayPhone?.trim() || phone,
+          phone: normalizedKpayPhoneKey(payload.kpayPhone?.trim() || phone),
           expiresAt: payload.verificationExpiresAt,
         });
         toast.success(
@@ -585,7 +593,7 @@ export function VendorAdminFinances({
     }
     const verified =
       verifiedKpayPayee &&
-      verifiedKpayPayee.phone === phone &&
+      verifiedKpayPayee.phone === normalizedKpayPhoneKey(phone) &&
       (!verifiedKpayPayee.expiresAt ||
         Date.parse(verifiedKpayPayee.expiresAt) > Date.now())
         ? verifiedKpayPayee
@@ -647,6 +655,8 @@ export function VendorAdminFinances({
           }),
         },
       );
+      // The backend consumes verification for one payout attempt, even when KBZ rejects it.
+      setVerifiedKpayPayee(null);
       const rawText = await withdrawRes.text().catch(() => "");
       let payload = {} as {
         success?: boolean;

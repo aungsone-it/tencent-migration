@@ -1246,106 +1246,44 @@ function isKycNameMismatchMessage(message: string): boolean {
   );
 }
 
-function looksLikePayeePersonName(label: string): boolean {
-  const value = text(label);
-  if (value.length < 2) return false;
-  if (/^\d+$/.test(value)) return false;
-  if (/^09\d+$/.test(value.replace(/\D/g, ""))) return false;
-  return true;
-}
-
-function payeeNameFromObject(obj: AnyRecord, allowGenericName: boolean): string {
-  for (const key of [
-    "payee_name",
-    "payeeName",
-    "kyc_name",
-    "kycName",
-    "account_name",
-    "accountName",
-    "real_name",
-    "realName",
-    "user_name",
-    "userName",
-    "customer_name",
-    "customerName",
-    "holder_name",
-    "holderName",
-  ]) {
-    const label = text(obj[key]);
-    if (looksLikePayeePersonName(label)) return label;
-  }
-  if (allowGenericName) {
-    const label = text(obj.name);
-    if (looksLikePayeePersonName(label)) return label;
-  }
-  return "";
-}
-
-function deepFindPayeeName(value: unknown, depth = 0, allowGenericName = false): string {
-  if (depth > 10 || value == null) return "";
+function deepFindPayeeStatusInfo(value: unknown, depth = 0): AnyRecord {
+  if (depth > 10 || value == null) return {};
   if (typeof value === "string") {
     const trimmed = text(value);
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
-        return deepFindPayeeName(JSON.parse(trimmed), depth + 1, allowGenericName);
+        return deepFindPayeeStatusInfo(JSON.parse(trimmed), depth + 1);
       } catch {
-        return "";
+        return {};
       }
     }
-    return "";
+    return {};
   }
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = deepFindPayeeName(item, depth + 1, allowGenericName);
-      if (found) return found;
+      const found = deepFindPayeeStatusInfo(item, depth + 1);
+      if (Object.keys(found).length > 0) return found;
     }
-    return "";
+    return {};
   }
-  if (typeof value !== "object") return "";
+  if (typeof value !== "object") return {};
 
   const obj = value as AnyRecord;
-  const direct = payeeNameFromObject(obj, allowGenericName);
-  if (direct) return direct;
-
-  for (const key of [
-    "payee_info",
-    "payeeInfo",
-    "payee",
-    "recipient",
-    "receiver",
-    "beneficiary",
-    "account",
-    "biz_content",
-    "bizContent",
-    "kbz",
-    "data",
-    "result",
-    "Response",
-    "response",
-  ]) {
-    const nameContainer = [
-      "payee_info",
-      "payeeInfo",
-      "payee",
-      "recipient",
-      "receiver",
-      "beneficiary",
-      "account",
-    ].includes(key);
-    const found = deepFindPayeeName(obj[key], depth + 1, nameContainer);
-    if (found) return found;
-  }
-  for (const child of Object.values(obj)) {
-    if (child && typeof child === "object") {
-      const found = deepFindPayeeName(child, depth + 1, false);
-      if (found) return found;
+  const rawDirect = obj.payee_status_info || obj.payeeStatusInfo;
+  let direct = asRecord(rawDirect);
+  if (Object.keys(direct).length === 0 && typeof rawDirect === "string") {
+    try {
+      direct = asRecord(JSON.parse(rawDirect));
+    } catch {
+      direct = {};
     }
   }
-  return "";
-}
-
-function extractPayeeNameFromKbzBody(body: AnyRecord): string {
-  return deepFindPayeeName(body);
+  if (Object.keys(direct).length > 0) return direct;
+  for (const child of Object.values(obj)) {
+    const found = deepFindPayeeStatusInfo(child, depth + 1);
+    if (Object.keys(found).length > 0) return found;
+  }
+  return {};
 }
 
 function myanmarLocal09Phone(raw: string): string {
@@ -1361,23 +1299,32 @@ function buildBusinessPayValidateLookupPayload(
   payeePhone: string,
 ): AnyRecord {
   const localPhone = myanmarLocal09Phone(payeePhone);
-  const intlPhone = kbzBusinessPayIdentifierValue(localPhone);
-  const phoneKey = intlPhone.replace(/\D/g, "").slice(-8);
+  const phoneKey = localPhone.replace(/\D/g, "").slice(-8);
   const merchantOrderId = `VVAL-${phoneKey}-${Date.now().toString(36).toUpperCase()}`;
-
-  const fullValidate = buildBusinessPayVpsPayload(cfg, {
-    merchantOrderId,
-    amountMmk: 1,
-    payeePhone: localPhone,
-    title: "Payee validation",
-    note: `Vendor payee lookup ${intlPhone}`,
-  });
+  const payeeInfo = {
+    identifier_value: localPhone,
+    identifier_type: "01",
+    identity_type: "1000",
+  };
 
   return {
-    ...fullValidate,
-    validate_only: true,
-    lookup: true,
-    mode: "validate",
+    method: "kbz.payment.businesspayvalidate",
+    merch_order_id: merchantOrderId,
+    merchantOrderId,
+    trade_type: "BUSINESS_PAY",
+    payee_info: payeeInfo,
+    payee_info_json: JSON.stringify(payeeInfo),
+    biz_content: {
+      appid: cfg.appId,
+      merch_code: cfg.merchCode,
+      merch_order_id: merchantOrderId,
+      trade_type: "BUSINESS_PAY",
+      payee_info: payeeInfo,
+    },
+    identifier_value: localPhone,
+    identifier_type: "01",
+    identity_type: "1000",
+    payee_phone: localPhone,
   };
 }
 
@@ -3423,18 +3370,14 @@ async function businessPayViaVpsProxy(params: {
 export type KPayBusinessPayeeValidateResult = {
   ok: boolean;
   valid: boolean;
-  suggestedPayeeName?: string;
   providerMessage?: string;
   endpointUsed?: string;
   rawResponse?: AnyRecord;
 };
 
-/** Look up / validate payee phone + optional name via VPS business_pay_validate.php. */
+/** Check whether a KBZPay wallet can receive Business Pay transfers. */
 export async function validateKPayBusinessPayee(params: {
   payeePhone: string;
-  payeeName?: string;
-  /** When true (default), phone-only lookup — never echo a submitted/stale name back. */
-  lookupOnly?: boolean;
 }): Promise<KPayBusinessPayeeValidateResult> {
   const cfg = kpayConfig();
   const validateUrl = resolveVpsBusinessPayValidateUrl(cfg.baseUrl);
@@ -3447,95 +3390,33 @@ export async function validateKPayBusinessPayee(params: {
     };
   }
 
-  const lookupOnly = params.lookupOnly !== false;
   const headers = buildRefundProviderHeaders(cfg);
   const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 12_000), 30_000);
-  const lookupPayloads = lookupOnly
-    ? [buildBusinessPayValidateLookupPayload(cfg, params.payeePhone)]
-    : [
-        buildBusinessPayVpsPayload(cfg, {
-          merchantOrderId: `VVAL-${Date.now().toString(36).toUpperCase()}`,
-          amountMmk: 1,
-          payeePhone: params.payeePhone,
-          payeeName: params.payeeName,
-          title: "Payee validation",
-          note: `Vendor payee validate ${kbzBusinessPayIdentifierValue(params.payeePhone)}`,
-        }),
-      ];
-
-  let lastResponse: AnyRecord = {};
-  let lastMessage = "";
-  let suggestedPayeeName = "";
-
-  for (const payload of lookupPayloads) {
-    const response = await postJson(validateUrl, payload, timeoutMs, headers);
-    lastResponse = response.body;
-    const kbzPayload = asRecord(response.body.kbz || response.body);
-    const biz = kbzBizErrorFromBody(kbzPayload);
-    lastMessage =
-      text(biz.msg) ||
-      text(response.body.message) ||
-      text(response.body.error) ||
-      providerErrorMessage(response.body, "", validateUrl);
-    suggestedPayeeName =
-      extractPayeeNameFromKbzBody(response.body) ||
-      extractPayeeNameFromKbzBody(kbzPayload);
-    if (suggestedPayeeName) break;
-  }
-
-  const nameConfirmed =
-    Boolean(suggestedPayeeName) &&
-    Boolean(params.payeeName) &&
-    suggestedPayeeName.toLowerCase() === text(params.payeeName).toLowerCase();
-  const kbzPayload = asRecord(lastResponse.kbz || lastResponse);
-  const providerSuccess =
-    businessPayIndicatesSuccess(kbzPayload) || text(kbzBizErrorFromBody(kbzPayload).result).toUpperCase() === "SUCCESS";
-
-  if (lookupOnly) {
-    if (suggestedPayeeName) {
-      return {
-        ok: true,
-        valid: true,
-        suggestedPayeeName,
-        providerMessage: lastMessage || "Payee name found",
-        endpointUsed: validateUrl,
-        rawResponse: lastResponse,
-      };
-    }
-    return {
-      ok: true,
-      valid: false,
-      providerMessage:
-        !lastMessage || /^(ok|success|successful)$/i.test(lastMessage)
-          ? "KBZPay verified the wallet but did not return its account holder name."
-          : lastMessage,
-      endpointUsed: validateUrl,
-      rawResponse: lastResponse,
-    };
-  }
-
-  if (providerSuccess && (suggestedPayeeName || nameConfirmed)) {
-    return {
-      ok: true,
-      valid: true,
-      suggestedPayeeName: suggestedPayeeName || text(params.payeeName) || undefined,
-      providerMessage: lastMessage || "Payee validated",
-      endpointUsed: validateUrl,
-      rawResponse: lastResponse,
-    };
-  }
+  const payload = buildBusinessPayValidateLookupPayload(cfg, params.payeePhone);
+  const response = await postJson(validateUrl, payload, timeoutMs, headers);
+  const payeeStatus = deepFindPayeeStatusInfo(response.body);
+  const statusCode = text(payeeStatus.code ?? payeeStatus.Code).toUpperCase();
+  const statusMessage = text(payeeStatus.msg ?? payeeStatus.message);
+  const kbzPayload = asRecord(response.body.kbz || response.body);
+  const biz = kbzBizErrorFromBody(kbzPayload);
+  const providerMessage =
+    statusMessage ||
+    text(biz.msg) ||
+    text(response.body.message) ||
+    text(response.body.error) ||
+    providerErrorMessage(response.body, "KBZPay wallet validation failed", validateUrl);
+  const valid = statusCode === "YES";
 
   return {
-    ok: true,
-    valid: false,
-    suggestedPayeeName: suggestedPayeeName || undefined,
+    ok: response.ok,
+    valid,
     providerMessage:
-      lastMessage ||
-      (suggestedPayeeName
-        ? `KBZPay expects: ${suggestedPayeeName}`
-        : "Could not validate payee name for this KBZPay wallet."),
+      providerMessage ||
+      (valid
+        ? "This KBZPay account supports receiving payments."
+        : "This KBZPay account does not support receiving payments."),
     endpointUsed: validateUrl,
-    rawResponse: lastResponse,
+    rawResponse: response.body,
   };
 }
 

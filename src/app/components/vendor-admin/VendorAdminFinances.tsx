@@ -111,8 +111,6 @@ interface VendorCommissionWallet {
   reservedBalance?: number;
   minWithdrawAmount: number;
   kpayPhone: string;
-  /** KBZPay wallet holder name (must match KYC). */
-  kpayPayeeName?: string;
   withdrawals: Array<{
     id: string;
     amount: number;
@@ -133,7 +131,6 @@ interface VendorCommissionWallet {
 type VerifiedKpayPayee = {
   token: string;
   phone: string;
-  name: string;
   expiresAt?: string;
 };
 
@@ -226,7 +223,6 @@ export function VendorAdminFinances({
   const [walletLoading, setWalletLoading] = useState(true);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [kpayPhoneInput, setKpayPhoneInput] = useState("");
-  const [kpayPayeeNameInput, setKpayPayeeNameInput] = useState("");
   const [verifiedKpayPayee, setVerifiedKpayPayee] = useState<VerifiedKpayPayee | null>(null);
   const [validatingPayee, setValidatingPayee] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
@@ -281,7 +277,6 @@ export function VendorAdminFinances({
         setKpayPhoneInput(next.kpayPhone);
         lastLoadedKpayPhoneRef.current = next.kpayPhone.trim();
       }
-      if (next?.kpayPayeeName) setKpayPayeeNameInput(next.kpayPayeeName);
     } catch (error) {
       console.error("Failed to load commission wallet:", error);
       if (error instanceof Error && /sign in again/i.test(error.message)) {
@@ -515,7 +510,6 @@ export function VendorAdminFinances({
       phone &&
       phone !== lastLoadedKpayPhoneRef.current
     ) {
-      setKpayPayeeNameInput("");
       setVerifiedKpayPayee(null);
     }
   }, [kpayPhoneInput]);
@@ -527,7 +521,6 @@ export function VendorAdminFinances({
       return;
     }
 
-    setKpayPayeeNameInput("");
     setVerifiedKpayPayee(null);
     setValidatingPayee(true);
     try {
@@ -547,34 +540,27 @@ export function VendorAdminFinances({
             "Content-Type": "application/json",
             ...sessionHeaders,
           },
-          body: JSON.stringify({
-            kpayPhone: phone,
-            lookupOnly: true,
-          }),
+          body: JSON.stringify({ kpayPhone: phone }),
         },
       );
       const payload = (await res.json().catch(() => ({}))) as {
         success?: boolean;
         kpayPhone?: string;
-        kpayPayeeName?: string;
         verificationToken?: string;
         verificationExpiresAt?: string;
-        validation?: { providerMessage?: string; suggestedPayeeName?: string };
+        validation?: { providerMessage?: string; valid?: boolean };
         error?: string;
       };
-      const suggested =
-        payload.kpayPayeeName?.trim() ||
-        payload.validation?.suggestedPayeeName?.trim() ||
-        "";
-      if (suggested && payload.verificationToken) {
-        setKpayPayeeNameInput(suggested);
+      if (payload.success && payload.verificationToken) {
         setVerifiedKpayPayee({
           token: payload.verificationToken,
           phone: payload.kpayPhone?.trim() || phone,
-          name: suggested,
           expiresAt: payload.verificationExpiresAt,
         });
-        toast.success(`KBZPay name for ${payload.kpayPhone || phone}: ${suggested}`);
+        toast.success(
+          payload.validation?.providerMessage ||
+            `KBZPay wallet ${payload.kpayPhone || phone} can receive payments`,
+        );
         return;
       }
       setVerifiedKpayPayee(null);
@@ -593,29 +579,19 @@ export function VendorAdminFinances({
 
   const handleWithdraw = async () => {
     const phone = kpayPhoneInput.trim();
-    const payeeName = kpayPayeeNameInput.trim();
     if (!phone) {
       toast.error("Enter your KBZPay phone number");
-      return;
-    }
-    if (/^\d+$/.test(payeeName)) {
-      toast.error("758794 is your KBZPay User ID, not your KYC name. Tap Look up KYC name or enter the legal name on your wallet.");
-      return;
-    }
-    if (payeeName.length > 0 && payeeName.length < 2) {
-      toast.error("KBZPay account holder name is too short");
       return;
     }
     const verified =
       verifiedKpayPayee &&
       verifiedKpayPayee.phone === phone &&
-      verifiedKpayPayee.name === payeeName &&
       (!verifiedKpayPayee.expiresAt ||
         Date.parse(verifiedKpayPayee.expiresAt) > Date.now())
         ? verifiedKpayPayee
         : null;
     if (!verified) {
-      toast.error("Look up and verify this KBZPay phone number before withdrawing");
+      toast.error("Verify this KBZPay wallet before withdrawing");
       return;
     }
     const available = displayAvailableBalance;
@@ -636,8 +612,7 @@ export function VendorAdminFinances({
       };
 
       const savedPhone = wallet?.kpayPhone?.trim() ?? "";
-      const savedPayeeName = wallet?.kpayPayeeName?.trim() ?? "";
-      if (!savedPhone || savedPhone !== phone || savedPayeeName !== payeeName) {
+      if (!savedPhone || savedPhone !== phone) {
         const saveRes = await fetch(
           `${API_BASE_URL}/vendor/kpay-account/${encodeURIComponent(vendorId)}`,
           {
@@ -646,10 +621,7 @@ export function VendorAdminFinances({
               "Content-Type": "application/json",
               ...sessionHeaders,
             },
-            body: JSON.stringify({
-              kpayPhone: phone,
-              ...(payeeName ? { kpayPayeeName: payeeName } : {}),
-            }),
+            body: JSON.stringify({ kpayPhone: phone }),
           },
         );
         if (!saveRes.ok) {
@@ -671,7 +643,6 @@ export function VendorAdminFinances({
           },
           body: JSON.stringify({
             kpayPhone: phone,
-            ...(payeeName ? { kpayPayeeName: payeeName } : {}),
             verificationToken: verified.token,
           }),
         },
@@ -995,7 +966,7 @@ export function VendorAdminFinances({
                   disabled={withdrawing}
                   onClick={() => {
                     if (wallet?.kpayPhone) setKpayPhoneInput(wallet.kpayPhone);
-                    if (wallet?.kpayPayeeName) setKpayPayeeNameInput(wallet.kpayPayeeName);
+                    setVerifiedKpayPayee(null);
                     setWithdrawOpen(true);
                   }}
                 >
@@ -1354,7 +1325,6 @@ export function VendorAdminFinances({
                 value={kpayPhoneInput}
                 onChange={(e) => {
                   setKpayPhoneInput(e.target.value);
-                  setKpayPayeeNameInput("");
                   setVerifiedKpayPayee(null);
                 }}
                 className="mt-1.5"
@@ -1364,44 +1334,34 @@ export function VendorAdminFinances({
                 Myanmar mobile number linked to the vendor&apos;s KBZPay wallet.
               </p>
             </div>
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="kpay-payee-name">KBZPay account holder name</Label>
+            <div className="rounded-lg border border-slate-200 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Wallet verification</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    KBZPay only confirms whether this account can receive Business Pay transfers.
+                  </p>
+                </div>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant={verifiedKpayPayee ? "outline" : "default"}
                   size="sm"
-                  className="h-7 text-xs shrink-0"
+                  className="shrink-0"
                   disabled={withdrawing || validatingPayee}
                   onClick={() => void handleVerifyKpayPayee()}
                 >
                   {validatingPayee ? (
                     <>
                       <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                      Looking up…
+                      Verifying…
                     </>
+                  ) : verifiedKpayPayee ? (
+                    "Verified"
                   ) : (
-                    "Look up KYC name"
+                    "Verify wallet"
                   )}
                 </Button>
               </div>
-              <Input
-                id="kpay-payee-name"
-                placeholder="Legal name on KBZPay wallet (not User ID 758794)"
-                value={kpayPayeeNameInput}
-                onChange={(e) => {
-                  setKpayPayeeNameInput(e.target.value);
-                  setVerifiedKpayPayee(null);
-                }}
-                className="mt-1.5"
-                disabled={withdrawing || validatingPayee}
-                autoComplete="name"
-              />
-              <p className="text-xs text-slate-500 mt-1.5">
-                Must match KBZPay KYC — not your store name (&quot;go go&quot;) and not the numeric
-                User ID on the My profile screen. Try Burmese script if English fails, or tap Look
-                up KYC name.
-              </p>
             </div>
           </div>
           <DialogFooter>

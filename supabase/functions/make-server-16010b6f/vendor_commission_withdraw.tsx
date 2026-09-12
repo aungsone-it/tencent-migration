@@ -32,6 +32,16 @@ const LOCK_STALE_MS = 2 * 60 * 60 * 1000;
 const RECONCILE_MIN_AGE_MS = 45 * 1000;
 /** After this age, unconfirmed processing/pending payouts are failed and balance is released. */
 const PROCESSING_STALE_MS = 48 * 60 * 60 * 1000;
+const KPAY_PAYEE_VERIFICATION_TTL_MS = 15 * 60 * 1000;
+
+type KpayPayeeVerification = {
+  token: string;
+  vendorId: string;
+  kpayPhone: string;
+  kpayPayeeName: string;
+  verifiedAt: string;
+  expiresAt: string;
+};
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -182,10 +192,11 @@ function orderAppertainsToVendor(
 function resolveVendorKpayPayeeName(vendor: AnyRecord | null, override?: unknown): string {
   const fromOverride = text(override);
   if (fromOverride.length >= 2) return fromOverride;
+  const currentPhone = normalizeMyanmarKpayPhone(vendor?.kpayPhone ?? vendor?.kpayAccount);
+  const namePhone = normalizeMyanmarKpayPhone(vendor?.kpayPayeePhone);
+  if (namePhone && currentPhone && namePhone !== currentPhone) return "";
   const saved = text(vendor?.kpayPayeeName);
   if (saved.length >= 2) return saved;
-  const contact = text(vendor?.contactName);
-  if (contact.length >= 2) return contact;
   return "";
 }
 
@@ -200,6 +211,45 @@ function normalizeMyanmarKpayPhone(raw: unknown): string | null {
   }
   if (!digits.startsWith("09") || digits.length < 8 || digits.length > 15) return null;
   return digits;
+}
+
+function kpayPayeeVerificationKey(vendorId: string): string {
+  return `vendor_kpay_payee_verification:${vendorId}`;
+}
+
+async function saveKpayPayeeVerification(
+  vendorId: string,
+  kpayPhone: string,
+  kpayPayeeName: string,
+): Promise<KpayPayeeVerification> {
+  const verifiedAt = nowIso();
+  const record: KpayPayeeVerification = {
+    token: crypto.randomUUID(),
+    vendorId,
+    kpayPhone,
+    kpayPayeeName,
+    verifiedAt,
+    expiresAt: new Date(Date.now() + KPAY_PAYEE_VERIFICATION_TTL_MS).toISOString(),
+  };
+  await kv.set(kpayPayeeVerificationKey(vendorId), record);
+  return record;
+}
+
+async function readValidKpayPayeeVerification(
+  vendorId: string,
+  token: unknown,
+  kpayPhone: string,
+  kpayPayeeName: string,
+): Promise<KpayPayeeVerification | null> {
+  const suppliedToken = text(token);
+  if (!suppliedToken) return null;
+  const record = (await kv.get(
+    kpayPayeeVerificationKey(vendorId),
+  )) as KpayPayeeVerification | null;
+  if (!record || record.token !== suppliedToken || record.vendorId !== vendorId) return null;
+  if (Date.parse(record.expiresAt) <= Date.now()) return null;
+  if (record.kpayPhone !== kpayPhone || record.kpayPayeeName !== kpayPayeeName) return null;
+  return record;
 }
 
 async function resolveVendorIdentifierSet(vendorId: string): Promise<Set<string>> {
@@ -731,6 +781,7 @@ export async function getVendorCommissionWallet(c: Context) {
 
 export async function validateVendorKpayPayee(c: Context) {
   try {
+    c.header("Cache-Control", "no-store, no-cache, must-revalidate");
     const vendorId = text(c.req.param("vendorId"));
     if (!vendorId) return c.json({ error: "vendorId is required" }, 400);
 
@@ -757,11 +808,20 @@ export async function validateVendorKpayPayee(c: Context) {
     });
 
     const lookedUpName = text(validation.suggestedPayeeName);
+    const verification = lookedUpName
+      ? await saveKpayPayeeVerification(vendorId, kpayPhone, lookedUpName)
+      : null;
     return c.json({
       success: Boolean(lookedUpName) || validation.valid,
       validation,
       kpayPhone,
       ...(lookedUpName ? { kpayPayeeName: lookedUpName } : {}),
+      ...(verification
+        ? {
+            verificationToken: verification.token,
+            verificationExpiresAt: verification.expiresAt,
+          }
+        : {}),
     });
   } catch (error: unknown) {
     console.error("validateVendorKpayPayee error", error);
@@ -789,13 +849,18 @@ export async function saveVendorKpayAccount(c: Context) {
     const vendor = (await kv.get(`vendor:${vendorId}`)) as AnyRecord | null;
     if (!vendor) return c.json({ error: "Vendor not found" }, 404);
 
-    const kpayPayeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
+    const previousPhone = normalizeMyanmarKpayPhone(vendor.kpayPhone ?? vendor.kpayAccount);
+    const suppliedPayeeName = text(body.kpayPayeeName ?? body.payeeName);
+    const kpayPayeeName =
+      suppliedPayeeName ||
+      (previousPhone === kpayPhone ? text(vendor.kpayPayeeName) : "");
 
     const updated = {
       ...vendor,
       kpayPhone,
       kpayAccount: kpayPhone,
-      ...(kpayPayeeName ? { kpayPayeeName } : {}),
+      kpayPayeeName,
+      kpayPayeePhone: kpayPayeeName ? kpayPhone : "",
       updatedAt: nowIso(),
     };
     await kv.set(`vendor:${vendorId}`, updated);
@@ -841,13 +906,27 @@ export async function postVendorCommissionWithdraw(c: Context) {
       return c.json({ error: "Save a KBZPay phone number before withdrawing" }, 400);
     }
 
-    let payeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
-    const validation = await validateKPayBusinessPayee({
-      payeePhone: kpayPhone,
-      payeeName: payeeName || undefined,
-    });
-    if (validation.suggestedPayeeName) {
-      payeeName = validation.suggestedPayeeName;
+    const payeeName = text(body.kpayPayeeName ?? body.payeeName);
+    if (!payeeName) {
+      return c.json(
+        { error: "Look up and verify the KBZPay account holder before withdrawing." },
+        400,
+      );
+    }
+    const payeeVerification = await readValidKpayPayeeVerification(
+      vendorId,
+      body.verificationToken,
+      kpayPhone,
+      payeeName,
+    );
+    if (!payeeVerification) {
+      return c.json(
+        {
+          error:
+            "KBZPay verification is missing, expired, or belongs to a different phone/name. Look up the KYC name again.",
+        },
+        400,
+      );
     }
 
     const requestedAmountHint =
@@ -869,6 +948,8 @@ export async function postVendorCommissionWithdraw(c: Context) {
         409,
       );
     }
+    // A successful lookup authorizes exactly one payout attempt for this phone/name pair.
+    await kv.del(kpayPayeeVerificationKey(vendorId)).catch(() => undefined);
 
     const wallet = await computeVendorWallet(vendorId);
     if (!wallet) {
@@ -931,6 +1012,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
         kpayPhone,
         kpayAccount: kpayPhone,
         kpayPayeeName: payeeName,
+        kpayPayeePhone: kpayPhone,
         updatedAt: nowIso(),
       });
     }

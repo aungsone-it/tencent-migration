@@ -130,6 +130,13 @@ interface VendorCommissionWallet {
   }>;
 }
 
+type VerifiedKpayPayee = {
+  token: string;
+  phone: string;
+  name: string;
+  expiresAt?: string;
+};
+
 /** Tooltips / table: compact single-line label */
 function mmkAmountString(n: number): string {
   const v = typeof n === "number" && Number.isFinite(n) ? n : 0;
@@ -220,6 +227,7 @@ export function VendorAdminFinances({
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [kpayPhoneInput, setKpayPhoneInput] = useState("");
   const [kpayPayeeNameInput, setKpayPayeeNameInput] = useState("");
+  const [verifiedKpayPayee, setVerifiedKpayPayee] = useState<VerifiedKpayPayee | null>(null);
   const [validatingPayee, setValidatingPayee] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const lastLoadedKpayPhoneRef = useRef("");
@@ -508,6 +516,7 @@ export function VendorAdminFinances({
       phone !== lastLoadedKpayPhoneRef.current
     ) {
       setKpayPayeeNameInput("");
+      setVerifiedKpayPayee(null);
     }
   }, [kpayPhoneInput]);
 
@@ -519,6 +528,7 @@ export function VendorAdminFinances({
     }
 
     setKpayPayeeNameInput("");
+    setVerifiedKpayPayee(null);
     setValidatingPayee(true);
     try {
       const sessionHeaders = {
@@ -532,6 +542,7 @@ export function VendorAdminFinances({
         `${API_BASE_URL}/vendor/kpay-validate/${encodeURIComponent(vendorId)}`,
         {
           method: "POST",
+          cache: "no-store",
           headers: {
             "Content-Type": "application/json",
             ...sessionHeaders,
@@ -546,6 +557,8 @@ export function VendorAdminFinances({
         success?: boolean;
         kpayPhone?: string;
         kpayPayeeName?: string;
+        verificationToken?: string;
+        verificationExpiresAt?: string;
         validation?: { providerMessage?: string; suggestedPayeeName?: string };
         error?: string;
       };
@@ -553,15 +566,23 @@ export function VendorAdminFinances({
         payload.kpayPayeeName?.trim() ||
         payload.validation?.suggestedPayeeName?.trim() ||
         "";
-      if (suggested) {
+      if (suggested && payload.verificationToken) {
         setKpayPayeeNameInput(suggested);
+        setVerifiedKpayPayee({
+          token: payload.verificationToken,
+          phone: payload.kpayPhone?.trim() || phone,
+          name: suggested,
+          expiresAt: payload.verificationExpiresAt,
+        });
         toast.success(`KBZPay name for ${payload.kpayPhone || phone}: ${suggested}`);
         return;
       }
+      setVerifiedKpayPayee(null);
+      const lookupPhone = payload.kpayPhone || phone;
       toast.error(
         payload.validation?.providerMessage ||
           payload.error ||
-          "KBZPay did not return a KYC name for this phone. Enter the legal wallet name manually.",
+          `KBZPay did not return a KYC name for ${lookupPhone}. Enter the legal wallet name manually.`,
       );
     } catch {
       toast.error("Failed to validate KBZPay account");
@@ -583,6 +604,18 @@ export function VendorAdminFinances({
     }
     if (payeeName.length > 0 && payeeName.length < 2) {
       toast.error("KBZPay account holder name is too short");
+      return;
+    }
+    const verified =
+      verifiedKpayPayee &&
+      verifiedKpayPayee.phone === phone &&
+      verifiedKpayPayee.name === payeeName &&
+      (!verifiedKpayPayee.expiresAt ||
+        Date.parse(verifiedKpayPayee.expiresAt) > Date.now())
+        ? verifiedKpayPayee
+        : null;
+    if (!verified) {
+      toast.error("Look up and verify this KBZPay phone number before withdrawing");
       return;
     }
     const available = displayAvailableBalance;
@@ -639,6 +672,7 @@ export function VendorAdminFinances({
           body: JSON.stringify({
             kpayPhone: phone,
             ...(payeeName ? { kpayPayeeName: payeeName } : {}),
+            verificationToken: verified.token,
           }),
         },
       );
@@ -701,6 +735,7 @@ export function VendorAdminFinances({
       } else {
         toast.success(payload.message || "Commission sent to your KBZPay wallet");
       }
+      setVerifiedKpayPayee(null);
       setWithdrawOpen(false);
       notifyAdminOrdersUpdated("vendor-withdrawal");
     } catch (error) {
@@ -1317,7 +1352,11 @@ export function VendorAdminFinances({
                 id="kpay-phone"
                 placeholder="09xxxxxxxxx"
                 value={kpayPhoneInput}
-                onChange={(e) => setKpayPhoneInput(e.target.value)}
+                onChange={(e) => {
+                  setKpayPhoneInput(e.target.value);
+                  setKpayPayeeNameInput("");
+                  setVerifiedKpayPayee(null);
+                }}
                 className="mt-1.5"
                 disabled={withdrawing}
               />
@@ -1350,7 +1389,10 @@ export function VendorAdminFinances({
                 id="kpay-payee-name"
                 placeholder="Legal name on KBZPay wallet (not User ID 758794)"
                 value={kpayPayeeNameInput}
-                onChange={(e) => setKpayPayeeNameInput(e.target.value)}
+                onChange={(e) => {
+                  setKpayPayeeNameInput(e.target.value);
+                  setVerifiedKpayPayee(null);
+                }}
                 className="mt-1.5"
                 disabled={withdrawing || validatingPayee}
                 autoComplete="name"
@@ -1375,6 +1417,7 @@ export function VendorAdminFinances({
               disabled={
                 withdrawing ||
                 validatingPayee ||
+                !verifiedKpayPayee ||
                 displayAvailableBalance < (wallet?.minWithdrawAmount ?? 1)
               }
             >

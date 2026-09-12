@@ -872,6 +872,14 @@ export function VendorAdminFinances({
                       Withdrawals use ready-to-ship, fulfilled, and delivered order earnings
                       (minimum{" "}
                       {(wallet?.minWithdrawAmount ?? 1).toLocaleString()} MMK).
+                      {(wallet?.orderEarned ?? 0) > 0 && (wallet?.reservedBalance ?? 0) > 0 && (
+                        <>
+                          {" "}
+                          {(wallet!.orderEarned!).toLocaleString()} MMK earned;{" "}
+                          {(wallet!.reservedBalance!).toLocaleString()} MMK reserved by pending
+                          or in-flight withdrawals.
+                        </>
+                      )}
                       {subscriptionEarnedDisplay > 0 && (
                         <>
                           {" "}

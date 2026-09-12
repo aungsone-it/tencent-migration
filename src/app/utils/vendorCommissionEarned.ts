@@ -79,7 +79,6 @@ export function isVendorOrderWithdrawable(order: any): boolean {
   const st = normalizeOrderStatusKey(String(order.status ?? ""));
   if (st === "cancelled" || st === "canceled") return false;
   if (!VENDOR_WITHDRAWABLE_STATUSES.has(st)) return false;
-  if (order.inventoryDeducted === false) return false;
   if (orderRefundBlocksWithdraw(order)) return false;
   return true;
 }

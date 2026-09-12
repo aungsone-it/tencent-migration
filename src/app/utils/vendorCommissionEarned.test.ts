@@ -71,6 +71,23 @@ describe("vendorCommissionEarned", () => {
     expect(vendorPayout).toBe(45);
   });
 
+  it("allows ready-to-ship withdraw when inventoryDeducted flag was not set", () => {
+    const order = {
+      status: "ready-to-ship",
+      paymentStatus: "paid",
+      paymentMethod: "kpay",
+      inventoryDeducted: false,
+      subtotal: 2,
+      discount: 0,
+      total: 2,
+      vendorId: "v1",
+      items: [{ productId: "p1", price: 2, quantity: 1, subtotal: 2, commissionRate: 50 }],
+    };
+
+    expect(isVendorOrderWithdrawable(order)).toBe(true);
+    expect(computeVendorPayoutEarned([order], products, vendorId, 0)).toBe(1);
+  });
+
   it("makes unpaid COD ready-to-ship withdrawable from order status alone", () => {
     const order = {
       status: "ready-to-ship",

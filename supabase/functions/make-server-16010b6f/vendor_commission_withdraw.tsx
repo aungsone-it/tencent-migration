@@ -12,6 +12,7 @@ import {
   defaultVendorCommissionPercent,
   resolveLineCommissionPercentFromCatalog,
 } from "./commission_rate.ts";
+import { compactVendorKey } from "./vendor_id_resolve.ts";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -99,7 +100,7 @@ function isOrderWithdrawable(order: AnyRecord): boolean {
   const st = normalizeOrderStatus(order.status);
   if (st === "cancelled" || st === "canceled") return false;
   if (!WITHDRAWABLE_STATUSES.has(st)) return false;
-  if (order.inventoryDeducted === false) return false;
+  // Ready-to-ship+ is the fulfillment commit; do not block when stock flag was skipped (catalog load failure).
   if (orderRefundBlocksWithdraw(order)) return false;
   return true;
 }
@@ -201,6 +202,28 @@ async function resolveVendorIdentifierSet(vendorId: string): Promise<Set<string>
     }
   }
 
+  const resolvedId = vendor?.id || [...ids].find((x) => String(x).startsWith("vendor_"));
+  if (resolvedId) {
+    ids.add(String(resolvedId));
+    const settings = (await kv.get(`vendor_settings:${resolvedId}`)) as AnyRecord | null;
+    if (settings?.storeSlug) ids.add(String(settings.storeSlug));
+  }
+
+  if (resolvedId) {
+    try {
+      const slugRows = await kv.getByPrefixWithKeys("vendor_slug_").catch(() => []);
+      for (const row of slugRows) {
+        const vid = (row.value as AnyRecord | null)?.vendorId;
+        if (vid != null && String(vid) === String(resolvedId)) {
+          const slug = String(row.key || "").replace(/^vendor_slug_/, "");
+          if (slug) ids.add(slug);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   if (vendor) {
     if (vendor.id) ids.add(String(vendor.id));
     if (vendor.email) ids.add(String(vendor.email).toLowerCase());
@@ -209,9 +232,19 @@ async function resolveVendorIdentifierSet(vendorId: string): Promise<Set<string>
       const label = String(name || "").trim();
       if (label) ids.add(label);
     }
-    const settings = (await kv.get(`vendor_settings:${vendor.id}`)) as AnyRecord | null;
-    if (settings?.storeSlug) ids.add(String(settings.storeSlug));
   }
+
+  for (const id of [...ids]) {
+    const compact = compactVendorKey(id);
+    if (compact) ids.add(compact);
+    const hyphen = String(id)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (hyphen) ids.add(hyphen);
+  }
+
   return ids;
 }
 
@@ -334,23 +367,36 @@ async function saveVendorWithdrawals(vendorId: string, rows: VendorWithdrawalRec
   await kv.set(`vendor_withdrawals:${vendorId}`, rows);
 }
 
+function withdrawalHasKbzConfirmation(row: VendorWithdrawalRecord): boolean {
+  if (text(row.kbz?.endpointUsed).toLowerCase() === "mock") {
+    return row.kbz?.countsAsWithdrawal === true;
+  }
+  const trade = text(row.kbz?.tradeStatus).toUpperCase();
+  if (["PAY_SUCCESS", "SUCCESS"].includes(trade)) return true;
+  return Boolean(text(row.kbz?.paymentOrderId) || text(row.kbz?.mmOrderId));
+}
+
+function withdrawalReservesBalance(row: VendorWithdrawalRecord): boolean {
+  if (row.status === "pending" || row.status === "processing") {
+    return (
+      text(row.kbz?.endpointUsed).toLowerCase() !== "mock" ||
+      row.kbz?.countsAsWithdrawal === true
+    );
+  }
+  if (row.status === "paid") {
+    return withdrawalHasKbzConfirmation(row);
+  }
+  return false;
+}
+
 function withdrawnTotal(rows: VendorWithdrawalRecord[]): number {
   return rows
-    .filter(
-      (r) =>
-        (r.status === "paid" || r.status === "processing" || r.status === "pending") &&
-        (text(r.kbz?.endpointUsed).toLowerCase() !== "mock" ||
-          r.kbz?.countsAsWithdrawal === true),
-    )
+    .filter(withdrawalReservesBalance)
     .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 }
 
 function paidWithdrawalCountsTowardBalance(row: VendorWithdrawalRecord): boolean {
-  return (
-    row.status === "paid" &&
-    (text(row.kbz?.endpointUsed).toLowerCase() !== "mock" ||
-      row.kbz?.countsAsWithdrawal === true)
-  );
+  return row.status === "paid" && withdrawalHasKbzConfirmation(row);
 }
 
 function withdrawableMmk(totalEarned: number, reserved: number): number {
@@ -519,6 +565,16 @@ async function reconcileProcessingWithdrawals(vendorId: string): Promise<void> {
   let changed = false;
 
   for (const row of rows) {
+    if (row.status === "paid" && !withdrawalHasKbzConfirmation(row)) {
+      row.status = "failed";
+      row.updatedAt = nowIso();
+      row.errorMessage =
+        "Payout was marked paid without KBZPay confirmation — balance restored. Withdraw again after fixing KPAY_BUSINESS_PAY_URL.";
+      changed = true;
+      await releaseWithdrawLock(vendorId, row.id);
+      continue;
+    }
+
     if (row.status !== "processing" && row.status !== "pending") continue;
     if (!row.merchOrderId) continue;
 

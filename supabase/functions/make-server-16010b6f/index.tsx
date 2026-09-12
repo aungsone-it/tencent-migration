@@ -8,7 +8,7 @@ import blogEngagementApp from "./blog_engagement_routes.tsx";
 import customerApp from "./customer_routes.tsx";
 import userApp from "./user_routes.tsx";
 import socialProfileApp from "./social_profile_routes.tsx";
-import logisticsApp from "./logistics_routes.tsx";
+import logisticsApp, { resolveDeliveryPartnerQuotedFee } from "./logistics_routes.tsx";
 import subscriptionApp from "./subscription_routes.tsx";
 import {
   paidSubscriptionPaymentDate,
@@ -6933,14 +6933,28 @@ app.post("/make-server-16010b6f/orders", async (c) => {
         }
 
         if (!allItemsFree) {
-          return c.json(
-            {
-              success: false,
-              error: "Invalid shipping fee",
-              message: "Shipping fee is required unless all items qualify for free shipping",
-            },
-            400
-          );
+          const partnerId = String(body.deliveryPartnerId || "").trim();
+          const shippingFields = normalizeOrderShippingFields(body);
+          const quotedFee =
+            partnerId &&
+            (await resolveDeliveryPartnerQuotedFee({
+              partnerId,
+              regionKey: shippingFields.state,
+              townshipKey: shippingFields.city,
+            }));
+          const partnerAllowsZero =
+            quotedFee != null && Number(quotedFee) === 0 && claimedShipping === 0;
+
+          if (!partnerAllowsZero) {
+            return c.json(
+              {
+                success: false,
+                error: "Invalid shipping fee",
+                message: "Shipping fee is required unless all items qualify for free shipping",
+              },
+              400
+            );
+          }
         }
       }
     }

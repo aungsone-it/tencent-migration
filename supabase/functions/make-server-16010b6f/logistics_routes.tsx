@@ -401,4 +401,56 @@ logisticsApp.delete("/logistics/partners/:id", async (c) => {
   }
 });
 
+function parseCostNumber(value: string): number | null {
+  const digits = String(value || "").replace(/[^\d.]/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : null;
+}
+
+function resolveEffectiveRegionRate(
+  rate: RegionShippingRate,
+  townshipKey?: string | null,
+): RegionShippingRate & { isTownshipException: boolean; townshipKey?: string } {
+  const township = String(townshipKey || "").trim();
+  if (township && rate.townshipExceptions) {
+    const match = Object.entries(rate.townshipExceptions).find(
+      ([key]) => key.toLowerCase() === township.toLowerCase(),
+    );
+    if (match) {
+      const [matchedKey, exception] = match;
+      return {
+        estimatedDays: rate.estimatedDays,
+        costMin: exception.costMin,
+        costMax: exception.costMax,
+        isTownshipException: true,
+        townshipKey: matchedKey,
+      };
+    }
+  }
+  return { ...rate, isTownshipException: false };
+}
+
+/** Minimum quoted shipping for a partner + region/township (0 is valid — e.g. office pickup). */
+export async function resolveDeliveryPartnerQuotedFee(args: {
+  partnerId: string;
+  regionKey: string;
+  townshipKey?: string;
+}): Promise<number | null> {
+  const partnerId = String(args.partnerId || "").trim();
+  const regionKey = String(args.regionKey || "").trim();
+  if (!partnerId || !regionKey) return null;
+
+  const partners = await listDeliveryPartners();
+  const partner = partners.find((p) => p.id === partnerId && p.status === "active");
+  if (!partner) return null;
+
+  const baseRate = partner.regionRates[regionKey];
+  if (!baseRate) return null;
+
+  const rate = resolveEffectiveRegionRate(baseRate, args.townshipKey);
+  const costMin = parseCostNumber(rate.costMin);
+  return costMin;
+}
+
 export default logisticsApp;

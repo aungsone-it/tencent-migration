@@ -228,16 +228,19 @@ export function VendorAdminFinances({
   rawProductsRef.current = rawProducts;
 
   const loadCommissionWallet = useCallback(async (options?: { silent?: boolean }) => {
-    if (walletAuthBlockedRef.current) return;
-    if (!readVendorSessionToken()) {
-      walletAuthBlockedRef.current = true;
-      setWalletLoading(false);
-      if (!walletAuthToastShownRef.current) {
-        walletAuthToastShownRef.current = true;
-        toast.error("Sign in again to load your commission wallet and withdraw.");
+    const hasToken = Boolean(readVendorSessionToken());
+    if (!hasToken) {
+      if (!walletAuthBlockedRef.current) {
+        walletAuthBlockedRef.current = true;
+        if (!walletAuthToastShownRef.current) {
+          walletAuthToastShownRef.current = true;
+          toast.error("Sign in again to load your commission wallet and withdraw.");
+        }
       }
+      setWalletLoading(false);
       return;
     }
+    walletAuthBlockedRef.current = false;
     const silent = options?.silent === true && walletRef.current != null;
     if (!silent) setWalletLoading(true);
     try {
@@ -303,9 +306,22 @@ export function VendorAdminFinances({
   }, [vendorId, contractPctCacheKey, slugKey]);
 
   useEffect(() => {
+    walletAuthBlockedRef.current = false;
+    walletAuthToastShownRef.current = false;
     void loadFinancialData(false);
     void loadCommissionWallet();
-  }, [loadFinancialData, loadCommissionWallet]);
+  }, [vendorId, loadFinancialData, loadCommissionWallet]);
+
+  useEffect(() => {
+    const onSessionToken = (e: StorageEvent) => {
+      if (e.key !== "vendorSessionToken" || !e.newValue) return;
+      walletAuthBlockedRef.current = false;
+      walletAuthToastShownRef.current = false;
+      void loadCommissionWallet();
+    };
+    window.addEventListener("storage", onSessionToken);
+    return () => window.removeEventListener("storage", onSessionToken);
+  }, [loadCommissionWallet]);
 
   useEffect(() => {
     const scheduler = createAdminOrdersRealtimeRefetchScheduler(() => {
@@ -425,8 +441,10 @@ export function VendorAdminFinances({
   );
 
   const displayAvailableBalance = useMemo(() => {
+    if (wallet?.availableBalance != null && Number.isFinite(wallet.availableBalance)) {
+      return Math.max(0, Math.floor(wallet.availableBalance));
+    }
     const reserved = wallet?.reservedBalance ?? 0;
-    // Prefer server wallet (authoritative for withdraw); fall back while wallet is loading.
     if (wallet?.orderEarned != null && Number.isFinite(wallet.orderEarned)) {
       return Math.max(0, Math.floor(wallet.orderEarned - reserved));
     }

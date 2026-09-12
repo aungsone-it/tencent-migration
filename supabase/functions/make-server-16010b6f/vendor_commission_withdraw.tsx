@@ -25,6 +25,8 @@ const WITHDRAWABLE_STATUSES = new Set([
 
 const LOCK_STALE_MS = 2 * 60 * 60 * 1000;
 const RECONCILE_MIN_AGE_MS = 45 * 1000;
+/** After this age, unconfirmed processing/pending payouts are failed and balance is released. */
+const PROCESSING_STALE_MS = 48 * 60 * 60 * 1000;
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -371,6 +373,26 @@ function lockIsStale(lock: WithdrawLockRecord | null): boolean {
   return Date.now() - ts >= LOCK_STALE_MS;
 }
 
+function withdrawalRowAgeMs(row: VendorWithdrawalRecord): number {
+  const ts = Date.parse(String(row.updatedAt || row.createdAt || ""));
+  return Number.isFinite(ts) ? Date.now() - ts : PROCESSING_STALE_MS;
+}
+
+function withdrawalIsStale(row: VendorWithdrawalRecord): boolean {
+  return withdrawalRowAgeMs(row) >= PROCESSING_STALE_MS;
+}
+
+async function failInflightWithdrawal(
+  vendorId: string,
+  row: VendorWithdrawalRecord,
+  errorMessage: string,
+): Promise<void> {
+  row.status = "failed";
+  row.updatedAt = nowIso();
+  row.errorMessage = errorMessage;
+  await releaseWithdrawLock(vendorId, row.id);
+}
+
 async function readWithdrawLock(vendorId: string): Promise<WithdrawLockRecord | null> {
   const lock = (await kv.get(lockKey(vendorId))) as WithdrawLockRecord | null;
   return lock && typeof lock === "object" ? lock : null;
@@ -388,7 +410,20 @@ async function acquireWithdrawLock(
     (existing.status === "pending" || existing.status === "processing")
   ) {
     const rows = await listVendorWithdrawals(vendorId);
-    const lockRow = rows.find((row) => row.id === existing.withdrawalId);
+    let lockRow = rows.find((row) => row.id === existing.withdrawalId);
+    if (
+      lockRow &&
+      (lockRow.status === "pending" || lockRow.status === "processing") &&
+      withdrawalIsStale(lockRow)
+    ) {
+      await failInflightWithdrawal(
+        vendorId,
+        lockRow,
+        "Payout timed out — KBZPay did not confirm. Balance released; you may withdraw again.",
+      );
+      await saveVendorWithdrawals(vendorId, rows);
+      lockRow = rows.find((row) => row.id === existing.withdrawalId);
+    }
     const stillInflight =
       lockRow &&
       (lockRow.status === "pending" || lockRow.status === "processing");
@@ -489,6 +524,16 @@ async function reconcileProcessingWithdrawals(vendorId: string): Promise<void> {
 
     const createdMs = Date.parse(String(row.createdAt || ""));
     if (Number.isFinite(createdMs) && Date.now() - createdMs < RECONCILE_MIN_AGE_MS) {
+      continue;
+    }
+
+    if (withdrawalIsStale(row)) {
+      await failInflightWithdrawal(
+        vendorId,
+        row,
+        "Payout timed out — KBZPay did not confirm. Balance released; you may withdraw again.",
+      );
+      changed = true;
       continue;
     }
 

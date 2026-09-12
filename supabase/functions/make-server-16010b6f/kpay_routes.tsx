@@ -3034,24 +3034,34 @@ function businessPayPayloadPair(params: {
 }
 
 function businessPayIndicatesSuccess(body: AnyRecord): boolean {
-  if (providerIndicatesSuccess(body)) {
-    const nested = providerData(body);
-    const wrapped = asRecord(body.Response);
-    const tradeStatus = text(
-      nested.trade_status ||
-        nested.tradeStatus ||
-        wrapped.trade_status ||
-        wrapped.tradeStatus,
-    ).toUpperCase();
-    if (!tradeStatus || tradeStatus === "PAY_SUCCESS") return true;
-    return ["PAY_SUCCESS", "SUCCESS"].includes(tradeStatus);
-  }
   const nested = providerData(body);
   const wrapped = asRecord(body.Response);
+  const tradeStatus = text(
+    nested.trade_status ||
+      nested.tradeStatus ||
+      wrapped.trade_status ||
+      wrapped.tradeStatus,
+  ).toUpperCase();
+  if (["PAY_SUCCESS", "SUCCESS"].includes(tradeStatus)) return true;
+
+  const paymentOrderId = text(
+    nested.payment_order_id ||
+      nested.paymentOrderId ||
+      wrapped.payment_order_id ||
+      wrapped.paymentOrderId,
+  );
+  const mmOrderId = text(
+    nested.mm_order_id || nested.mmOrderId || wrapped.mm_order_id || wrapped.mmOrderId,
+  );
+
+  if (providerIndicatesSuccess(body)) {
+    // Wrapper SUCCESS without trade_status is not enough — need KBZ payment ids or explicit trade status.
+    return Boolean(paymentOrderId || mmOrderId);
+  }
+
   const result = text(nested.result || wrapped.result).toUpperCase();
   if (result === "PENDING") return false;
-  const tradeStatus = text(nested.trade_status || wrapped.trade_status).toUpperCase();
-  return tradeStatus === "PAY_SUCCESS";
+  return false;
 }
 
 function businessPayIsPending(body: AnyRecord): boolean {
@@ -3268,18 +3278,6 @@ export async function invokeKPayBusinessPay(params: {
       merchantOrderId: params.merchantOrderId,
       providerMessage: "KBZPay credentials are not configured (KPAY_APPID / KPAY_MERCH_CODE / KPAY_SIGN_KEY).",
     };
-  }
-
-  const rawBusinessPayUrl = text(resolveExplicitBusinessPayUrl()).toLowerCase();
-  if (rawBusinessPayUrl.includes("validate")) {
-    const sibling = text(resolveExplicitBusinessPayUrl()).replace(
-      /business_pay_validate\.php/i,
-      "business_pay.php",
-    );
-    console.warn(
-      "[kpay] KPAY_BUSINESS_PAY_URL points to validate-only script; use business_pay.php instead:",
-      sibling,
-    );
   }
 
   const explicitUrl = resolveBusinessPayEndpointUrl(cfg.baseUrl);

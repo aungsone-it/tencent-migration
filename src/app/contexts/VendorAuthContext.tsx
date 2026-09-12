@@ -12,6 +12,7 @@ import {
 import {
   clearVendorSessionToken,
   getVendorSessionHeaders,
+  readVendorSessionToken,
   storeVendorSessionToken,
 } from '../utils/vendorSessionHeaders';
 import {
@@ -159,6 +160,16 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (!readVendorSessionToken()) {
+        console.warn(
+          '⚠️ [VendorAuth] Vendor profile found but payout session token missing — sign in again for withdrawals',
+        );
+        setVendor(null);
+        localStorage.removeItem('vendorAuth');
+        clearVendorAuthSessionCookie();
+        return;
+      }
+
       setVendor(restored);
       localStorage.setItem('vendorAuth', JSON.stringify(restored));
       if (fromCookie) {
@@ -282,6 +293,8 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
 
         if (typeof data.sessionToken === "string" && data.sessionToken.trim()) {
           storeVendorSessionToken(data.sessionToken);
+        } else {
+          clearVendorSessionToken();
         }
 
         setVendorAuthSessionCookie(vendorData, rememberMe);

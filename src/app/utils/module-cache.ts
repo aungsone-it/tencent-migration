@@ -1811,23 +1811,33 @@ export async function fetchVendorCategoriesAdminDetails(vendorId: string) {
   return filterVendorCreatedCategories(data.categories || [], vendorId);
 }
 
-// Fetch vendor orders (vendor admin)
+// Fetch vendor orders (vendor admin) — first page only; prefer fetchAllVendorOrders for finances.
 export async function fetchVendorOrders(vendorId: string, bustHttpCache = false) {
-  const url = new URL(
-    `${API_ROOT}/vendor/orders/${encodeURIComponent(vendorId)}`
+  const page = await fetchVendorOrdersPage(
+    vendorId,
+    { page: 1, pageSize: 100 },
+    bustHttpCache,
   );
-  if (bustHttpCache) url.searchParams.set("_", String(Date.now()));
-  const response = await fetch(url.toString(), {
-    headers: cloudbaseHeaders(),
-    cache: "no-store",
-  });
+  return page.orders;
+}
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch vendor orders: ${response.status}`);
+/** All vendor orders (paginated API). Required for commission / withdraw totals. */
+export async function fetchAllVendorOrders(vendorId: string, bustHttpCache = false) {
+  const pageSize = 100;
+  const orders: any[] = [];
+  let page = 1;
+  let hasMore = true;
+  while (hasMore && page <= 100) {
+    const chunk = await fetchVendorOrdersPage(
+      vendorId,
+      { page, pageSize },
+      bustHttpCache && page === 1,
+    );
+    orders.push(...chunk.orders);
+    hasMore = chunk.hasMore && chunk.orders.length > 0;
+    page += 1;
   }
-
-  const data = await response.json();
-  return data.orders || [];
+  return orders;
 }
 
 export interface VendorOrdersPageQuery {
@@ -3493,11 +3503,11 @@ export function invalidateAdminDashboardStatsCaches(): void {
   moduleCache.invalidatePrefix(DASH_STATS_PREFIX);
 }
 
-/** Vendor `/vendor/orders/:id` list — session cache per vendor */
+/** Vendor `/vendor/orders/:id` list — session cache per vendor (all pages). */
 export async function getCachedVendorOrders(vendorId: string, forceRefresh = false) {
   return moduleCache.get(
     CACHE_KEYS.vendorOrders(vendorId),
-    () => fetchVendorOrders(vendorId, forceRefresh),
+    () => fetchAllVendorOrders(vendorId, forceRefresh),
     forceRefresh
   );
 }

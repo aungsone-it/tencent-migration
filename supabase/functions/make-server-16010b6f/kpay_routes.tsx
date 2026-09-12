@@ -3140,17 +3140,36 @@ async function businessPayViaVpsProxy(params: {
   const mmOrderId = text(nested.mm_order_id || nested.mmOrderId || kbzPayload.mm_order_id || kbzPayload.mmOrderId);
   const tradeStatus = text(nested.trade_status || nested.tradeStatus || kbzPayload.trade_status || kbzPayload.tradeStatus);
   const biz = kbzBizErrorFromBody(kbzPayload);
+  const pending = businessPayIsPending(kbzPayload);
+  const kbzSuccess = businessPayIndicatesSuccess(kbzPayload);
+  const kbzResult = text(biz.result).toUpperCase();
+  const kbzMsg = text(biz.msg);
+  const kbzRejected =
+    kbzResult === "FAIL" ||
+    kbzResult === "FAILED" ||
+    (!kbzSuccess && !pending && kbzMsg.length > 0);
 
-  if (
-    response.body.ok === true ||
-    response.body.success === true ||
-    businessPayIndicatesSuccess(kbzPayload) ||
-    businessPayIsPending(kbzPayload)
-  ) {
-    const pending = businessPayIsPending(kbzPayload);
+  if (kbzRejected) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      endpointUsed: vpsUrl,
+      paymentOrderId,
+      mmOrderId,
+      tradeStatus,
+      providerCode: biz.code,
+      providerMessage: kbzMsg || providerErrorMessage(response.body, "KBZPay business pay was rejected", vpsUrl),
+      rawResponse: response.body,
+      networkError: response.networkError,
+    };
+  }
+
+  if (kbzSuccess || pending) {
     return {
       ok: true,
-      success: !pending && (response.body.ok === true || businessPayIndicatesSuccess(kbzPayload)),
+      success: kbzSuccess && !pending,
       pending,
       merchantOrderId: params.merchantOrderId,
       endpointUsed: vpsUrl,
@@ -3221,6 +3240,18 @@ export async function invokeKPayBusinessPay(params: {
       pending: false,
       merchantOrderId: params.merchantOrderId,
       providerMessage: "KBZPay credentials are not configured (KPAY_APPID / KPAY_MERCH_CODE / KPAY_SIGN_KEY).",
+    };
+  }
+
+  const rawBusinessPayUrl = text(resolveExplicitBusinessPayUrl()).toLowerCase();
+  if (rawBusinessPayUrl.includes("validate")) {
+    return {
+      ok: false,
+      success: false,
+      pending: false,
+      merchantOrderId: params.merchantOrderId,
+      providerMessage:
+        "KPAY_BUSINESS_PAY_URL points to a validate-only PHP script (business_pay_validate.php). Vendor withdrawal needs the payout relay (businesspay.php) that calls KBZ Enterprise Payment — not the same endpoint as customer checkout QR/PWA.",
     };
   }
 

@@ -151,10 +151,24 @@ function lineItemBelongsToVendor(
 }
 
 function orderBelongsToVendor(order: AnyRecord, vendorIds: Set<string>): boolean {
-  const top = [order.vendorId, order.vendor].filter(
+  const top = [order.vendorId, order.vendor, order.vendorName].filter(
     (x) => x != null && String(x).trim() !== "",
   );
   return top.some((x) => vendorIds.has(String(x).trim()));
+}
+
+/** Order counts toward this vendor only when tagged for them or at least one line matches. */
+function orderAppertainsToVendor(
+  order: AnyRecord,
+  vendorId: string,
+  vendorIds: Set<string>,
+  catalog: { ids: Set<string>; skus: Set<string> },
+): boolean {
+  if (orderBelongsToVendor(order, vendorIds)) return true;
+  const items = Array.isArray(order.items) ? order.items : [];
+  return items.some((item) =>
+    lineItemBelongsToVendor(item as AnyRecord, vendorId, vendorIds, catalog),
+  );
 }
 
 function normalizeMyanmarKpayPhone(raw: unknown): string | null {
@@ -176,7 +190,15 @@ async function resolveVendorIdentifierSet(vendorId: string): Promise<Set<string>
   if (!key) return ids;
   ids.add(key);
 
-  const vendor = (await kv.get(`vendor:${key}`)) as AnyRecord | null;
+  let vendor = (await kv.get(`vendor:${key}`)) as AnyRecord | null;
+  if (!vendor) {
+    const slugMap = (await kv.get(`vendor_slug_${key}`)) as AnyRecord | null;
+    if (slugMap?.vendorId) {
+      ids.add(String(slugMap.vendorId));
+      vendor = (await kv.get(`vendor:${slugMap.vendorId}`)) as AnyRecord | null;
+    }
+  }
+
   if (vendor) {
     if (vendor.id) ids.add(String(vendor.id));
     if (vendor.email) ids.add(String(vendor.email).toLowerCase());
@@ -185,6 +207,8 @@ async function resolveVendorIdentifierSet(vendorId: string): Promise<Set<string>
       const label = String(name || "").trim();
       if (label) ids.add(label);
     }
+    const settings = (await kv.get(`vendor_settings:${vendor.id}`)) as AnyRecord | null;
+    if (settings?.storeSlug) ids.add(String(settings.storeSlug));
   }
   return ids;
 }
@@ -225,6 +249,7 @@ function computeVendorAccruedPayout(
   for (const order of orders) {
     if (!order || typeof order !== "object") continue;
     if (!isOrderWithdrawable(order)) continue;
+    if (!orderAppertainsToVendor(order, vendorId, vendorIds, catalog)) continue;
 
     const items = Array.isArray(order.items) ? order.items : [];
     let matchedAnyLine = false;
@@ -242,12 +267,8 @@ function computeVendorAccruedPayout(
       payout += linePayout;
     }
 
-    // Single-vendor order with no line-level vendor tags — attribute matched lines only.
-    if (
-      !matchedAnyLine &&
-      items.length > 0 &&
-      (orderBelongsToVendor(order, vendorIds) || !order.vendorId && !order.vendor)
-    ) {
+    // Order tagged for this vendor but lines lack product ids — attribute whole order.
+    if (!matchedAnyLine && items.length > 0 && orderBelongsToVendor(order, vendorIds)) {
       for (const item of items) {
         const gross = orderLineGross(item as AnyRecord);
         const net = orderLineNetAfterDiscount(gross, order);

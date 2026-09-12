@@ -120,6 +120,11 @@ interface VendorCommissionWallet {
     createdAt: string;
     paidAt?: string;
     errorMessage?: string;
+    kbz?: {
+      endpointUsed?: string;
+      tradeStatus?: string;
+      providerMessage?: string;
+    };
   }>;
 }
 
@@ -412,7 +417,7 @@ export function VendorAdminFinances({
     dateFilter,
   ]);
 
-  /** Order-only withdrawable balance (excludes subscription). Matches backend when API is updated. */
+  /** Client-side withdrawable estimate from full order history (all pages). */
   const orderWithdrawableAllTime = useMemo(
     () =>
       computeVendorPayoutEarned(rawOrders, rawProducts, vendorId, vendorContractCommissionPct),
@@ -421,7 +426,10 @@ export function VendorAdminFinances({
 
   const displayAvailableBalance = useMemo(() => {
     const reserved = wallet?.reservedBalance ?? 0;
-    // Order product net only — never take API availableBalance (legacy wallets still include subscription).
+    // Prefer server wallet (authoritative for withdraw); fall back while wallet is loading.
+    if (wallet?.orderEarned != null && Number.isFinite(wallet.orderEarned)) {
+      return Math.max(0, Math.floor(wallet.orderEarned - reserved));
+    }
     return Math.max(0, Math.floor(orderWithdrawableAllTime - reserved));
   }, [wallet, orderWithdrawableAllTime]);
 
@@ -1040,17 +1048,29 @@ export function VendorAdminFinances({
                     {row.errorMessage ? (
                       <p className="text-xs text-red-600 mt-1">{row.errorMessage}</p>
                     ) : null}
+                    {row.status === "paid" &&
+                    String(row.kbz?.endpointUsed || "").toLowerCase() === "mock" ? (
+                      <p className="text-xs text-amber-700 mt-1">
+                        Simulated payout (KPAY_BUSINESS_PAY_MOCK) — no real KBZPay transfer.
+                      </p>
+                    ) : null}
                   </div>
                   <Badge
                     className={
-                      row.status === "paid"
+                      row.status === "paid" &&
+                      String(row.kbz?.endpointUsed || "").toLowerCase() === "mock"
+                        ? "bg-amber-100 text-amber-800 border-amber-200 shrink-0"
+                        : row.status === "paid"
                         ? "bg-green-100 text-green-700 border-green-200 shrink-0"
                         : row.status === "failed"
                           ? "bg-red-100 text-red-700 border-red-200 shrink-0"
                           : "bg-yellow-100 text-yellow-700 border-yellow-200 shrink-0"
                     }
                   >
-                    {row.status}
+                    {row.status === "paid" &&
+                    String(row.kbz?.endpointUsed || "").toLowerCase() === "mock"
+                      ? "simulated"
+                      : row.status}
                   </Badge>
                 </div>
               ))}

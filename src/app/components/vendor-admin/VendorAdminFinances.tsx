@@ -220,6 +220,7 @@ export function VendorAdminFinances({
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [kpayPhoneInput, setKpayPhoneInput] = useState("");
   const [kpayPayeeNameInput, setKpayPayeeNameInput] = useState("");
+  const [validatingPayee, setValidatingPayee] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const walletRef = useRef<VendorCommissionWallet | null>(null);
   walletRef.current = wallet;
@@ -495,6 +496,72 @@ export function VendorAdminFinances({
     return transactions.slice(start, start + txPageSize);
   }, [transactions, txPage, txPageSize]);
 
+  const handleVerifyKpayPayee = async () => {
+    const phone = kpayPhoneInput.trim();
+    const payeeName = kpayPayeeNameInput.trim();
+    if (!phone) {
+      toast.error("Enter your KBZPay phone number first");
+      return;
+    }
+    if (payeeName && /^\d+$/.test(payeeName)) {
+      toast.error("That looks like a User ID (758794), not a KYC name. Leave blank and tap Look up, or enter your legal wallet name.");
+      return;
+    }
+
+    setValidatingPayee(true);
+    try {
+      const sessionHeaders = {
+        ...getCloudBaseRequestHeaders(),
+        ...getVendorSessionHeaders(),
+        ...(cloudbasePublishableKey
+          ? { Authorization: `Bearer ${cloudbasePublishableKey}` }
+          : {}),
+      };
+      const res = await fetch(
+        `${API_BASE_URL}/vendor/kpay-validate/${encodeURIComponent(vendorId)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...sessionHeaders,
+          },
+          body: JSON.stringify({
+            kpayPhone: phone,
+            ...(payeeName ? { kpayPayeeName: payeeName } : {}),
+          }),
+        },
+      );
+      const payload = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        kpayPayeeName?: string;
+        validation?: { providerMessage?: string; suggestedPayeeName?: string };
+        error?: string;
+      };
+      const suggested =
+        payload.kpayPayeeName?.trim() ||
+        payload.validation?.suggestedPayeeName?.trim() ||
+        "";
+      if (suggested) {
+        setKpayPayeeNameInput(suggested);
+        toast.success(`KBZPay name on file: ${suggested}`);
+        return;
+      }
+      if (payload.success) {
+        toast.success("KBZPay account verified for this phone number");
+        return;
+      }
+      toast.error(
+        payload.validation?.providerMessage ||
+          payload.error ||
+          "Could not look up the KYC name for this wallet. Ask KBZ for the registered name on this UAT phone.",
+      );
+    } catch {
+      toast.error("Failed to validate KBZPay account");
+    } finally {
+      setValidatingPayee(false);
+    }
+  };
+
   const handleWithdraw = async () => {
     const phone = kpayPhoneInput.trim();
     const payeeName = kpayPayeeNameInput.trim();
@@ -502,8 +569,12 @@ export function VendorAdminFinances({
       toast.error("Enter your KBZPay phone number");
       return;
     }
-    if (payeeName.length < 2) {
-      toast.error("Enter your KBZPay account holder name (must match KBZPay KYC)");
+    if (/^\d+$/.test(payeeName)) {
+      toast.error("758794 is your KBZPay User ID, not your KYC name. Tap Look up KYC name or enter the legal name on your wallet.");
+      return;
+    }
+    if (payeeName.length > 0 && payeeName.length < 2) {
+      toast.error("KBZPay account holder name is too short");
       return;
     }
     const available = displayAvailableBalance;
@@ -534,7 +605,10 @@ export function VendorAdminFinances({
               "Content-Type": "application/json",
               ...sessionHeaders,
             },
-            body: JSON.stringify({ kpayPhone: phone, kpayPayeeName: payeeName }),
+            body: JSON.stringify({
+              kpayPhone: phone,
+              ...(payeeName ? { kpayPayeeName: payeeName } : {}),
+            }),
           },
         );
         if (!saveRes.ok) {
@@ -554,7 +628,10 @@ export function VendorAdminFinances({
             "Content-Type": "application/json",
             ...sessionHeaders,
           },
-          body: JSON.stringify({ kpayPhone: phone, kpayPayeeName: payeeName }),
+          body: JSON.stringify({
+            kpayPhone: phone,
+            ...(payeeName ? { kpayPayeeName: payeeName } : {}),
+          }),
         },
       );
       const rawText = await withdrawRes.text().catch(() => "");
@@ -1241,30 +1318,55 @@ export function VendorAdminFinances({
               </p>
             </div>
             <div>
-              <Label htmlFor="kpay-payee-name">KBZPay account holder name</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="kpay-payee-name">KBZPay account holder name</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs shrink-0"
+                  disabled={withdrawing || validatingPayee}
+                  onClick={() => void handleVerifyKpayPayee()}
+                >
+                  {validatingPayee ? (
+                    <>
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      Looking up…
+                    </>
+                  ) : (
+                    "Look up KYC name"
+                  )}
+                </Button>
+              </div>
               <Input
                 id="kpay-payee-name"
-                placeholder="As registered on KBZPay (KYC)"
+                placeholder="Legal name on KBZPay wallet (not User ID 758794)"
                 value={kpayPayeeNameInput}
                 onChange={(e) => setKpayPayeeNameInput(e.target.value)}
                 className="mt-1.5"
-                disabled={withdrawing}
+                disabled={withdrawing || validatingPayee}
                 autoComplete="name"
               />
               <p className="text-xs text-slate-500 mt-1.5">
-                Must match the legal name on your KBZPay wallet — not your store name (e.g. use
-                &quot;Aung Pyae Sone&quot;, not &quot;go go&quot;).
+                Must match KBZPay KYC — not your store name (&quot;go go&quot;) and not the numeric
+                User ID on the My profile screen. Try Burmese script if English fails, or tap Look
+                up KYC name.
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setWithdrawOpen(false)} disabled={withdrawing}>
+            <Button
+              variant="outline"
+              onClick={() => setWithdrawOpen(false)}
+              disabled={withdrawing || validatingPayee}
+            >
               Cancel
             </Button>
             <Button
               onClick={() => void handleWithdraw()}
               disabled={
                 withdrawing ||
+                validatingPayee ||
                 displayAvailableBalance < (wallet?.minWithdrawAmount ?? 1)
               }
             >

@@ -37,6 +37,7 @@ import {
 import {
   getVendorCommissionWallet,
   saveVendorKpayAccount,
+  validateVendorKpayPayee,
   postVendorCommissionWithdraw,
 } from "./vendor_commission_withdraw.tsx";
 import { issueVendorSessionToken, revokeVendorSession, assertVendorSession } from "./vendor_session_guard.tsx";
@@ -1428,6 +1429,7 @@ app.get("/make-server-16010b6f/kpay/resolved-urls", getKPayResolvedUrlsRoute);
 app.get("/make-server-16010b6f/vendor/commission-wallet/:vendorId", getVendorCommissionWallet);
 app.put("/make-server-16010b6f/vendor/kpay-account/:vendorId", saveVendorKpayAccount);
 app.post("/make-server-16010b6f/vendor/kpay-account/:vendorId", saveVendorKpayAccount);
+app.post("/make-server-16010b6f/vendor/kpay-validate/:vendorId", validateVendorKpayPayee);
 app.post("/make-server-16010b6f/vendor/commission-withdraw/:vendorId", postVendorCommissionWithdraw);
 
 // Retry wrapper for database operations with exponential backoff

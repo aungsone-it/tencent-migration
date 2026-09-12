@@ -1208,6 +1208,66 @@ function resolveVpsBusinessPayRelayUrl(baseUrl: string): string {
   return "";
 }
 
+function resolveVpsBusinessPayValidateUrl(baseUrl: string): string {
+  const payUrl = resolveVpsBusinessPayRelayUrl(baseUrl);
+  if (!payUrl) return "";
+  if (/business_pay\.php/i.test(payUrl)) {
+    return payUrl.replace(/business_pay\.php/i, "business_pay_validate.php");
+  }
+  if (/businesspay\.php/i.test(payUrl)) {
+    return payUrl.replace(/businesspay\.php/i, "business_pay_validate.php");
+  }
+  return "";
+}
+
+/** KBZ business pay expects international mobile (959…) in identifier_value for many UAT merchants. */
+export function kbzBusinessPayIdentifierValue(localPhone: string): string {
+  const digits = String(localPhone || "").replace(/\D/g, "");
+  if (digits.startsWith("09") && digits.length >= 10) {
+    return `95${digits.slice(1)}`;
+  }
+  if (digits.startsWith("959") && digits.length >= 11) {
+    return digits;
+  }
+  if (digits.startsWith("95") && digits.length >= 10) {
+    return digits;
+  }
+  return digits;
+}
+
+function isKycNameMismatchMessage(message: string): boolean {
+  return /kyc|payee.*name|name is inconsistent|name.*not match|inconsistent with the system/i.test(
+    message,
+  );
+}
+
+function extractPayeeNameFromKbzBody(body: AnyRecord): string {
+  const nested = providerData(body);
+  const wrapped = asRecord(body.Response);
+  const candidates = [
+    nested.payee_name,
+    nested.payeeName,
+    nested.name,
+    nested.kyc_name,
+    nested.kycName,
+    nested.user_name,
+    nested.userName,
+    nested.real_name,
+    nested.realName,
+    wrapped.payee_name,
+    wrapped.payeeName,
+    wrapped.name,
+    body.payee_name,
+    body.payeeName,
+    body.name,
+  ];
+  for (const candidate of candidates) {
+    const label = text(candidate);
+    if (label.length >= 2 && !/^\d+$/.test(label)) return label;
+  }
+  return "";
+}
+
 function resolveVpsBusinessPayUrl(baseUrl: string): string {
   const relay = resolveVpsBusinessPayRelayUrl(baseUrl);
   if (relay) return relay;
@@ -2978,8 +3038,9 @@ function businessPayPayloadPair(params: {
 }): PayloadPair {
   const nonce = crypto.randomUUID().replaceAll("-", "").slice(0, 32);
   const ts = String(Math.floor(Date.now() / 1000));
+  const identifierValue = kbzBusinessPayIdentifierValue(params.payeePhone);
   const payeeInfo: AnyRecord = {
-    identifier_value: params.payeePhone,
+    identifier_value: identifierValue,
     identifier_type: "01",
     identity_type: "1000",
   };
@@ -2995,7 +3056,7 @@ function businessPayPayloadPair(params: {
     total_amount: params.amount,
     trans_currency: params.currency,
     payee_info: payeeInfo,
-    identifier_value: params.payeePhone,
+    identifier_value: identifierValue,
     identifier_type: "01",
     identity_type: "1000",
   };
@@ -3012,7 +3073,7 @@ function businessPayPayloadPair(params: {
     total_amount: params.amount,
     trade_type: "BUSINESS_PAY",
     trans_currency: params.currency,
-    identifier_value: params.payeePhone,
+    identifier_value: identifierValue,
     identifier_type: "01",
     identity_type: "1000",
     version: "1.0",
@@ -3107,6 +3168,54 @@ function resolveBusinessPayEndpoints(baseUrl: string): string[] {
   return viaProxy.slice(0, 2);
 }
 
+function buildBusinessPayVpsPayload(
+  cfg: ReturnType<typeof kpayConfig>,
+  params: {
+    merchantOrderId: string;
+    amountMmk: number;
+    payeePhone: string;
+    payeeName?: string;
+    title?: string;
+    note?: string;
+  },
+): AnyRecord {
+  const amount = normalizeAmountMMK(params.amountMmk);
+  const identifierValue = kbzBusinessPayIdentifierValue(params.payeePhone);
+  const payeeInfo: AnyRecord = {
+    identifier_value: identifierValue,
+    identifier_type: "01",
+    identity_type: "1000",
+  };
+  if (text(params.payeeName)) {
+    payeeInfo.name = params.payeeName;
+  }
+  return {
+    merch_order_id: params.merchantOrderId,
+    merchantOrderId: params.merchantOrderId,
+    total_amount: amount,
+    trans_currency: "MMK",
+    trade_type: "BUSINESS_PAY",
+    payee_info: payeeInfo,
+    payee_info_json: JSON.stringify(payeeInfo),
+    biz_content: {
+      merch_order_id: params.merchantOrderId,
+      merch_code: cfg.merchCode,
+      appid: cfg.appId,
+      trade_type: "BUSINESS_PAY",
+      total_amount: amount,
+      trans_currency: "MMK",
+      payee_info: payeeInfo,
+    },
+    identifier_value: identifierValue,
+    identifier_type: "01",
+    identity_type: "1000",
+    payee_phone: identifierValue,
+    payee_name: text(params.payeeName) || undefined,
+    title: params.title || "Vendor commission payout",
+    note: params.note || `Payout ${params.merchantOrderId}`,
+  };
+}
+
 async function businessPayViaVpsProxy(params: {
   merchantOrderId: string;
   amountMmk: number;
@@ -3128,42 +3237,9 @@ async function businessPayViaVpsProxy(params: {
         "VPS business pay is not configured (KBZ_VPS_BUSINESS_PAY_URL or refund.php sibling + KBZ_VPS_API_SECRET).",
     };
   }
-  const amount = normalizeAmountMMK(params.amountMmk);
   const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 15_000), 45_000);
   const headers = buildRefundProviderHeaders(cfg);
-  const payeeInfo: AnyRecord = {
-    identifier_value: params.payeePhone,
-    identifier_type: "01",
-    identity_type: "1000",
-  };
-  if (text(params.payeeName)) {
-    payeeInfo.name = params.payeeName;
-  }
-  const payload = {
-    merch_order_id: params.merchantOrderId,
-    merchantOrderId: params.merchantOrderId,
-    total_amount: amount,
-    trans_currency: "MMK",
-    trade_type: "BUSINESS_PAY",
-    payee_info: payeeInfo,
-    payee_info_json: JSON.stringify(payeeInfo),
-    biz_content: {
-      merch_order_id: params.merchantOrderId,
-      merch_code: cfg.merchCode,
-      appid: cfg.appId,
-      trade_type: "BUSINESS_PAY",
-      total_amount: amount,
-      trans_currency: "MMK",
-      payee_info: payeeInfo,
-    },
-    identifier_value: params.payeePhone,
-    identifier_type: "01",
-    identity_type: "1000",
-    payee_phone: params.payeePhone,
-    payee_name: text(params.payeeName) || undefined,
-    title: params.title || "Vendor commission payout",
-    note: params.note || `Payout ${params.merchantOrderId}`,
-  };
+  const payload = buildBusinessPayVpsPayload(cfg, params);
 
   const response = await postJson(vpsUrl, payload, timeoutMs, headers);
   const kbzPayload = asRecord(response.body.kbz || response.body);
@@ -3227,6 +3303,77 @@ async function businessPayViaVpsProxy(params: {
     endpointUsed: vpsUrl,
     providerMessage: providerErrorMessage(response.body, "KBZPay business pay request failed", vpsUrl),
     networkError: response.networkError,
+    rawResponse: response.body,
+  };
+}
+
+export type KPayBusinessPayeeValidateResult = {
+  ok: boolean;
+  valid: boolean;
+  suggestedPayeeName?: string;
+  providerMessage?: string;
+  endpointUsed?: string;
+  rawResponse?: AnyRecord;
+};
+
+/** Look up / validate payee phone + optional name via VPS business_pay_validate.php. */
+export async function validateKPayBusinessPayee(params: {
+  payeePhone: string;
+  payeeName?: string;
+}): Promise<KPayBusinessPayeeValidateResult> {
+  const cfg = kpayConfig();
+  const validateUrl = resolveVpsBusinessPayValidateUrl(cfg.baseUrl);
+  const secret = resolveEnv("KBZ_VPS_API_SECRET");
+  if (!validateUrl || !secret) {
+    return {
+      ok: false,
+      valid: false,
+      providerMessage: "KBZPay payee validation is not configured on the server.",
+    };
+  }
+
+  const headers = buildRefundProviderHeaders(cfg);
+  const timeoutMs = Math.min(Math.max(cfg.timeoutMs, 12_000), 30_000);
+  const payload = buildBusinessPayVpsPayload(cfg, {
+    merchantOrderId: `VVAL-${Date.now().toString(36).toUpperCase()}`,
+    amountMmk: 1,
+    payeePhone: params.payeePhone,
+    payeeName: params.payeeName,
+    title: "Payee validation",
+    note: "Vendor commission payee lookup",
+  });
+
+  const response = await postJson(validateUrl, payload, timeoutMs, headers);
+  const kbzPayload = asRecord(response.body.kbz || response.body);
+  const biz = kbzBizErrorFromBody(kbzPayload);
+  const kbzMsg = text(biz.msg) || providerErrorMessage(response.body, "", validateUrl);
+  const suggestedPayeeName = extractPayeeNameFromKbzBody(kbzPayload) || extractPayeeNameFromKbzBody(response.body);
+  const valid =
+    businessPayIndicatesSuccess(kbzPayload) ||
+    text(biz.result).toUpperCase() === "SUCCESS" ||
+    Boolean(suggestedPayeeName && params.payeeName && suggestedPayeeName.toLowerCase() === params.payeeName.toLowerCase());
+
+  if (valid) {
+    return {
+      ok: true,
+      valid: true,
+      suggestedPayeeName: suggestedPayeeName || text(params.payeeName) || undefined,
+      providerMessage: kbzMsg || "Payee validated",
+      endpointUsed: validateUrl,
+      rawResponse: response.body,
+    };
+  }
+
+  return {
+    ok: true,
+    valid: false,
+    suggestedPayeeName: suggestedPayeeName || undefined,
+    providerMessage:
+      kbzMsg ||
+      (suggestedPayeeName
+        ? `KBZPay expects: ${suggestedPayeeName}`
+        : "Could not validate payee name for this KBZPay wallet."),
+    endpointUsed: validateUrl,
     rawResponse: response.body,
   };
 }
@@ -3296,7 +3443,17 @@ export async function invokeKPayBusinessPay(params: {
   const relayUrl = resolveVpsBusinessPayRelayUrl(cfg.baseUrl);
   const vpsSecret = text(resolveEnv("KBZ_VPS_API_SECRET"));
   if (vpsSecret && relayUrl) {
-    return businessPayViaVpsProxy(params, relayUrl);
+    let result = await businessPayViaVpsProxy(params, relayUrl);
+    const msg = text(result.providerMessage);
+    if (!result.success && !result.pending && isKycNameMismatchMessage(msg) && text(params.payeeName)) {
+      result = await businessPayViaVpsProxy({ ...params, payeeName: undefined }, relayUrl);
+      if (result.success || result.pending) {
+        result.providerMessage =
+          (result.providerMessage ? `${result.providerMessage} ` : "") +
+          "(Retried without payee name after KYC mismatch.)";
+      }
+    }
+    return result;
   }
   if (vpsSecret && (explicitUrl && isWalwalBusinessPayGateway(explicitUrl))) {
     return {

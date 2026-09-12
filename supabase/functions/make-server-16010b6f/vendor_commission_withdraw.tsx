@@ -1,6 +1,10 @@
 import { Context } from "hono";
 import * as kv from "./kv_store.tsx";
-import { invokeKPayBusinessPay, syncKPayTxnStatusFromProvider } from "./kpay_routes.tsx";
+import {
+  invokeKPayBusinessPay,
+  syncKPayTxnStatusFromProvider,
+  validateKPayBusinessPayee,
+} from "./kpay_routes.tsx";
 import {
   paidSubscriptionPaymentDate,
   subscriptionPaymentSplit,
@@ -725,6 +729,43 @@ export async function getVendorCommissionWallet(c: Context) {
   }
 }
 
+export async function validateVendorKpayPayee(c: Context) {
+  try {
+    const vendorId = text(c.req.param("vendorId"));
+    if (!vendorId) return c.json({ error: "vendorId is required" }, 400);
+
+    const authError = await assertVendorSession(c, vendorId);
+    if (authError) return authError;
+
+    const body = (await c.req.json().catch(() => ({}))) as AnyRecord;
+    const vendor = (await kv.get(`vendor:${vendorId}`)) as AnyRecord | null;
+    if (!vendor) return c.json({ error: "Vendor not found" }, 404);
+
+    const kpayPhone =
+      normalizeMyanmarKpayPhone(body.kpayPhone ?? body.kpayAccount ?? body.phone) ||
+      normalizeMyanmarKpayPhone(vendor.kpayPhone ?? vendor.kpayAccount);
+    if (!kpayPhone) {
+      return c.json({ error: "Enter a valid KBZPay phone number first." }, 400);
+    }
+
+    const payeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
+    const validation = await validateKPayBusinessPayee({
+      payeePhone: kpayPhone,
+      payeeName: payeeName || undefined,
+    });
+
+    return c.json({
+      success: validation.valid,
+      validation,
+      kpayPhone,
+      kpayPayeeName: validation.suggestedPayeeName || payeeName || "",
+    });
+  } catch (error: unknown) {
+    console.error("validateVendorKpayPayee error", error);
+    return c.json({ error: "Failed to validate KBZPay account" }, 500);
+  }
+}
+
 export async function saveVendorKpayAccount(c: Context) {
   try {
     const vendorId = text(c.req.param("vendorId"));
@@ -746,26 +787,21 @@ export async function saveVendorKpayAccount(c: Context) {
     if (!vendor) return c.json({ error: "Vendor not found" }, 404);
 
     const kpayPayeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
-    if (!kpayPayeeName) {
-      return c.json(
-        {
-          error:
-            "Enter your KBZPay account holder name exactly as registered on KBZPay (KYC name, not your store name).",
-        },
-        400,
-      );
-    }
 
     const updated = {
       ...vendor,
       kpayPhone,
       kpayAccount: kpayPhone,
-      kpayPayeeName,
+      ...(kpayPayeeName ? { kpayPayeeName } : {}),
       updatedAt: nowIso(),
     };
     await kv.set(`vendor:${vendorId}`, updated);
 
-    return c.json({ success: true, kpayPhone, kpayPayeeName });
+    return c.json({
+      success: true,
+      kpayPhone,
+      ...(kpayPayeeName ? { kpayPayeeName } : {}),
+    });
   } catch (error: unknown) {
     console.error("saveVendorKpayAccount error", error);
     return c.json({ error: "Failed to save KBZPay account" }, 500);
@@ -802,15 +838,13 @@ export async function postVendorCommissionWithdraw(c: Context) {
       return c.json({ error: "Save a KBZPay phone number before withdrawing" }, 400);
     }
 
-    const payeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
-    if (!payeeName) {
-      return c.json(
-        {
-          error:
-            "Enter your KBZPay account holder name exactly as registered on KBZPay (KYC name, not your store name).",
-        },
-        400,
-      );
+    let payeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
+    const validation = await validateKPayBusinessPayee({
+      payeePhone: kpayPhone,
+      payeeName: payeeName || undefined,
+    });
+    if (validation.suggestedPayeeName) {
+      payeeName = validation.suggestedPayeeName;
     }
 
     const requestedAmountHint =

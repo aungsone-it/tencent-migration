@@ -174,6 +174,17 @@ function orderAppertainsToVendor(
   );
 }
 
+/** KBZPay Enterprise Payment requires payee name to match wallet KYC — not the store/business name. */
+function resolveVendorKpayPayeeName(vendor: AnyRecord | null, override?: unknown): string {
+  const fromOverride = text(override);
+  if (fromOverride.length >= 2) return fromOverride;
+  const saved = text(vendor?.kpayPayeeName);
+  if (saved.length >= 2) return saved;
+  const contact = text(vendor?.contactName);
+  if (contact.length >= 2) return contact;
+  return "";
+}
+
 function normalizeMyanmarKpayPhone(raw: unknown): string | null {
   let digits = String(raw ?? "").replace(/\D/g, "");
   if (!digits) return null;
@@ -668,6 +679,7 @@ async function computeVendorWallet(vendorId: string) {
     vendorId,
     vendorName: text(vendor.businessName) || text(vendor.name) || vendorId,
     kpayPhone: text(vendor.kpayPhone) || text(vendor.kpayAccount) || "",
+    kpayPayeeName: resolveVendorKpayPayeeName(vendor),
     orderEarned,
     subscriptionEarned,
     totalEarned,
@@ -733,15 +745,27 @@ export async function saveVendorKpayAccount(c: Context) {
     const vendor = (await kv.get(`vendor:${vendorId}`)) as AnyRecord | null;
     if (!vendor) return c.json({ error: "Vendor not found" }, 404);
 
+    const kpayPayeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
+    if (!kpayPayeeName) {
+      return c.json(
+        {
+          error:
+            "Enter your KBZPay account holder name exactly as registered on KBZPay (KYC name, not your store name).",
+        },
+        400,
+      );
+    }
+
     const updated = {
       ...vendor,
       kpayPhone,
       kpayAccount: kpayPhone,
+      kpayPayeeName,
       updatedAt: nowIso(),
     };
     await kv.set(`vendor:${vendorId}`, updated);
 
-    return c.json({ success: true, kpayPhone });
+    return c.json({ success: true, kpayPhone, kpayPayeeName });
   } catch (error: unknown) {
     console.error("saveVendorKpayAccount error", error);
     return c.json({ error: "Failed to save KBZPay account" }, 500);
@@ -776,6 +800,17 @@ export async function postVendorCommissionWithdraw(c: Context) {
     const kpayPhone = savedPhone || bodyPhone;
     if (!kpayPhone) {
       return c.json({ error: "Save a KBZPay phone number before withdrawing" }, 400);
+    }
+
+    const payeeName = resolveVendorKpayPayeeName(vendor, body.kpayPayeeName ?? body.payeeName);
+    if (!payeeName) {
+      return c.json(
+        {
+          error:
+            "Enter your KBZPay account holder name exactly as registered on KBZPay (KYC name, not your store name).",
+        },
+        400,
+      );
     }
 
     const requestedAmountHint =
@@ -848,11 +883,17 @@ export async function postVendorCommissionWithdraw(c: Context) {
     withdrawals.unshift(pendingRecord);
     await saveVendorWithdrawals(vendorId, withdrawals);
 
-    if (vendor && (!savedPhone || savedPhone !== kpayPhone)) {
+    if (
+      vendor &&
+      (!savedPhone ||
+        savedPhone !== kpayPhone ||
+        text(vendor.kpayPayeeName) !== payeeName)
+    ) {
       await kv.set(`vendor:${vendorId}`, {
         ...vendor,
         kpayPhone,
         kpayAccount: kpayPhone,
+        kpayPayeeName: payeeName,
         updatedAt: nowIso(),
       });
     }
@@ -869,7 +910,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
         merchantOrderId: merchOrderId,
         amountMmk: requestedAmount,
         payeePhone: kpayPhone,
-        payeeName: text(vendor?.businessName) || text(vendor?.name) || undefined,
+        payeeName,
         title: "Vendor commission payout",
         note: `Commission withdrawal for ${wallet.vendorName}`,
       });

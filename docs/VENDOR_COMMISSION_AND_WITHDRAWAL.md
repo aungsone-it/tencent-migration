@@ -97,7 +97,7 @@ Paid subscription payments (`subscription_payment:*` with `status: paid`) contri
 1. **Auth** — validates `x-vendor-session` matches the requested `vendorId`.
 2. **Balance check** — recomputes earnings from KV (`order:`, `product:`, `subscription_payment:`) minus reserved withdrawals.
 3. **Lock** — `vendor_withdraw_lock:{vendorId}` prevents concurrent payouts.
-4. **KBZPay Enterprise Payment** — `kbz.payment.businesspay` via VPS PHP relay (`businesspay.php`) or configured gateway; merchant order id prefix `VWD-`.
+4. **KBZPay Enterprise Payment** — `kbz.payment.businesspay` via VPS PHP relay (`business_pay.php`, sibling of `refund.php`) or configured gateway; merchant order id prefix `VWD-`.
 5. **Status** — `paid`, `processing` (ambiguous/network/KBZ pending), or `failed` (definitive provider rejection).
 6. **Reconcile** — on wallet load, pending/processing rows older than ~45s are checked via `queryorder` and updated.
 
@@ -162,9 +162,9 @@ See `cloudbase/function-env.template.env` (Vendor commission withdrawal section)
 | Variable | Purpose |
 |----------|---------|
 | `KPAY_APPID`, `KPAY_MERCH_CODE`, `KPAY_SIGN_KEY` | KBZPay credentials |
-| `KBZ_VPS_API_SECRET` | Bearer secret for VPS `businesspay.php` relay |
-| `KBZ_VPS_REFUND_URL` | Used to derive `businesspay.php` path when business pay URL unset |
-| `KPAY_BUSINESS_PAY_URL` | Full URL to VPS `businesspay.php` relay (recommended for CloudBase) |
+| `KBZ_VPS_API_SECRET` | Bearer secret for VPS `business_pay.php` relay |
+| `KBZ_VPS_REFUND_URL` | Used to derive `business_pay.php` path when business pay URL unset |
+| `KPAY_BUSINESS_PAY_URL` | Full URL to VPS `business_pay.php` relay — **not** `business_pay_validate.php` |
 | `KPAY_BUSINESS_PAY_MOCK=1` | UAT mock payouts — **blocked in production** |
 | `VENDOR_WITHDRAW_MIN_MMK` | Minimum withdrawable balance (default `1`) |
 | `ALLOW_UNAUTHENTICATED_VENDOR_WITHDRAW=1` | **Dev only** — skip session auth |

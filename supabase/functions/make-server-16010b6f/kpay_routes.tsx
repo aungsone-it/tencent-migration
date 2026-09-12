@@ -167,7 +167,7 @@ function providerErrorMessage(body: AnyRecord, fallback: string, endpointUsed?: 
   if (raw && /<title>404 Not Found/i.test(raw)) {
     const relay = resolveVpsBusinessPayRelayUrl(kpayConfig().baseUrl);
     return relay
-      ? `KBZPay business pay relay returned 404 — deploy businesspay.php on the VPS at ${relay} (copy the refund.php pattern).`
+      ? `KBZPay business pay relay returned 404 at ${relay}. On the VPS (same folder as refund.php) deploy business_pay.php — e.g. https://kbz-api.walwal.shop/kpay_refund_uat/api/business_pay.php — and set KPAY_BUSINESS_PAY_URL to that exact URL on make-server-16010b6f.`
       : "KBZPay business pay endpoint returned 404 — confirm KPAY_BUSINESS_PAY_URL on CloudBase matches the VPS route.";
   }
   if (raw && /No required SSL certificate was sent/i.test(raw)) {
@@ -1152,24 +1152,51 @@ function businessPayNeedsVpsJsonRetry(body: AnyRecord, message: string): boolean
   );
 }
 
+/** Derive payout relay from refund.php sibling (walwal VPS uses business_pay.php or businesspay.php). */
+function deriveBusinessPayUrlFromRefundUrl(refundUrl: string): string {
+  if (!refundUrl.includes("refund.php")) return "";
+  const configured = text(resolveEnv("KPAY_PATH_BUSINESS_PAY", "KPAY_BUSINESS_PAY_PATH"));
+  if (configured) {
+    if (/^https?:\/\//i.test(configured)) return configured;
+    try {
+      const base = refundUrl.replace(/\/[^/]*refund\.php.*$/i, "");
+      return new URL(configured.replace(/^\//, ""), `${base}/`).toString();
+    } catch {
+      // fall through
+    }
+  }
+  return refundUrl.replace(/refund\.php(\?.*)?$/i, "business_pay.php");
+}
+
 /** PHP relay (Bearer + simple JSON) — same pattern as refund.php. Never the /payment/gateway/businesspay nginx mTLS path. */
 function resolveVpsBusinessPayRelayUrl(baseUrl: string): string {
   const explicitPhp =
     text(resolveEnv("KBZ_VPS_BUSINESS_PAY_URL")) ||
     text(resolveEnv("KPAY_BUSINESS_PAY_URL"));
   if (explicitPhp && explicitPhp.includes(".php")) {
-    return /^https?:\/\//i.test(explicitPhp)
+    const resolved = /^https?:\/\//i.test(explicitPhp)
       ? explicitPhp
       : joinUrlWithBase(baseUrl, explicitPhp);
+    if (resolved.toLowerCase().includes("validate")) {
+      const sibling = resolved.replace(/business_pay_validate\.php/i, "business_pay.php");
+      if (sibling !== resolved) return sibling;
+    }
+    return resolved;
   }
 
   const refundUrl = resolveVpsRefundUrl(baseUrl);
-  if (refundUrl.includes("refund.php")) {
-    return refundUrl.replace(/refund\.php/i, "businesspay.php");
-  }
+  const fromRefund = deriveBusinessPayUrlFromRefundUrl(refundUrl);
+  if (fromRefund) return fromRefund;
 
   if (text(baseUrl)) {
-    for (const path of ["/kpay_refund_147258369/api/businesspay.php", "/api/businesspay.php"]) {
+    for (const path of [
+      "/kpay_refund_uat/api/business_pay.php",
+      "/kpay_refund_147258369/api/business_pay.php",
+      "/kpay_refund_uat/api/businesspay.php",
+      "/kpay_refund_147258369/api/businesspay.php",
+      "/api/business_pay.php",
+      "/api/businesspay.php",
+    ]) {
       try {
         return new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
       } catch {
@@ -3245,14 +3272,14 @@ export async function invokeKPayBusinessPay(params: {
 
   const rawBusinessPayUrl = text(resolveExplicitBusinessPayUrl()).toLowerCase();
   if (rawBusinessPayUrl.includes("validate")) {
-    return {
-      ok: false,
-      success: false,
-      pending: false,
-      merchantOrderId: params.merchantOrderId,
-      providerMessage:
-        "KPAY_BUSINESS_PAY_URL points to a validate-only PHP script (business_pay_validate.php). Vendor withdrawal needs the payout relay (businesspay.php) that calls KBZ Enterprise Payment — not the same endpoint as customer checkout QR/PWA.",
-    };
+    const sibling = text(resolveExplicitBusinessPayUrl()).replace(
+      /business_pay_validate\.php/i,
+      "business_pay.php",
+    );
+    console.warn(
+      "[kpay] KPAY_BUSINESS_PAY_URL points to validate-only script; use business_pay.php instead:",
+      sibling,
+    );
   }
 
   const explicitUrl = resolveBusinessPayEndpointUrl(cfg.baseUrl);

@@ -431,26 +431,78 @@ function resolveEffectiveRegionRate(
   return { ...rate, isTownshipException: false };
 }
 
+function findPartnerRegionRate(
+  partner: DeliveryPartnerRecord,
+  regionKey: string,
+): RegionShippingRate | null {
+  const key = String(regionKey || "").trim();
+  if (!key) return null;
+  if (partner.regionRates[key]) return partner.regionRates[key];
+  const lower = key.toLowerCase();
+  for (const [region, rate] of Object.entries(partner.regionRates)) {
+    if (region.toLowerCase() === lower) return rate;
+  }
+  return null;
+}
+
 /** Minimum quoted shipping for a partner + region/township (0 is valid — e.g. office pickup). */
 export async function resolveDeliveryPartnerQuotedFee(args: {
-  partnerId: string;
+  partnerId?: string;
+  partnerName?: string;
   regionKey: string;
   townshipKey?: string;
 }): Promise<number | null> {
   const partnerId = String(args.partnerId || "").trim();
+  const partnerName = String(args.partnerName || "").trim().toLowerCase();
   const regionKey = String(args.regionKey || "").trim();
-  if (!partnerId || !regionKey) return null;
+  if ((!partnerId && !partnerName) || !regionKey) return null;
 
   const partners = await listDeliveryPartners();
-  const partner = partners.find((p) => p.id === partnerId && p.status === "active");
+  let partner =
+    (partnerId
+      ? partners.find((p) => p.id === partnerId && p.status === "active")
+      : undefined) ||
+    (partnerName
+      ? partners.find(
+          (p) => p.status === "active" && p.name.trim().toLowerCase() === partnerName,
+        )
+      : undefined);
   if (!partner) return null;
 
-  const baseRate = partner.regionRates[regionKey];
+  const baseRate = findPartnerRegionRate(partner, regionKey);
   if (!baseRate) return null;
 
   const rate = resolveEffectiveRegionRate(baseRate, args.townshipKey);
   const costMin = parseCostNumber(rate.costMin);
   return costMin;
+}
+
+/** True when checkout sent 0 MMK shipping and the selected logistics partner quotes 0 for that route. */
+export async function orderZeroShippingAllowedByLogistics(body: Record<string, unknown>): Promise<boolean> {
+  const claimed =
+    Number(body.shippingFee ?? body.shippingCost ?? body.shipping ?? 0) || 0;
+  if (claimed !== 0) return false;
+
+  const ship =
+    body.shippingInfo && typeof body.shippingInfo === "object" && !Array.isArray(body.shippingInfo)
+      ? (body.shippingInfo as Record<string, unknown>)
+      : {};
+  const regionKey = String(body.logisticsRegionKey || body.region || ship.region || body.state || ship.state || "").trim();
+  const townshipKey = String(body.city || ship.city || "").trim();
+  const partnerId = String(body.deliveryPartnerId || "").trim();
+  const partnerName = String(
+    body.deliveryPartnerName || body.deliveryService || "",
+  ).trim();
+
+  if (!regionKey || (!partnerId && !partnerName)) return false;
+
+  const quoted = await resolveDeliveryPartnerQuotedFee({
+    partnerId: partnerId || undefined,
+    partnerName: partnerName || undefined,
+    regionKey,
+    townshipKey,
+  });
+  return quoted != null && quoted === 0;
 }
 
 export default logisticsApp;

@@ -1225,17 +1225,14 @@ function resolveVpsBusinessPayValidateUrl(baseUrl: string): string {
   return "";
 }
 
-/** KBZ business pay expects international mobile (959…) in identifier_value for many UAT merchants. */
+/** KBZ Business Pay documents MSISDN identifier_value in Myanmar local 09… format. */
 export function kbzBusinessPayIdentifierValue(localPhone: string): string {
   const digits = String(localPhone || "").replace(/\D/g, "");
-  if (digits.startsWith("09") && digits.length >= 10) {
-    return `95${digits.slice(1)}`;
-  }
   if (digits.startsWith("959") && digits.length >= 11) {
-    return digits;
+    return `0${digits.slice(2)}`;
   }
   if (digits.startsWith("95") && digits.length >= 10) {
-    return digits;
+    return `0${digits.slice(2)}`;
   }
   return digits;
 }

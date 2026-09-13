@@ -665,6 +665,17 @@ export function VendorAdminFinances({
         message?: string;
         wallet?: VendorCommissionWallet;
         withdrawal?: VendorCommissionWallet["withdrawals"][number];
+        diagnostic?: {
+          reference?: string;
+          providerCode?: string;
+          providerMessage?: string;
+          networkError?: string;
+          tradeStatus?: string;
+          paymentOrderId?: string;
+          mmOrderId?: string;
+          endpointUsed?: string;
+          rawResponse?: unknown;
+        };
       };
       if (rawText) {
         try {
@@ -681,6 +692,14 @@ export function VendorAdminFinances({
       }
 
       if (!withdrawRes.ok || payload.success === false) {
+        console.error("[Vendor withdrawal] KBZ payout failed", {
+          httpStatus: withdrawRes.status,
+          httpStatusText: withdrawRes.statusText,
+          diagnostic: payload.diagnostic,
+          withdrawal: payload.withdrawal,
+          responseBody: payload,
+          rawResponseText: rawText,
+        });
         let serverMsg =
           payload.error ||
           payload.message ||
@@ -692,6 +711,17 @@ export function VendorAdminFinances({
         if (/kyc|payee.*name|name is inconsistent/i.test(serverMsg)) {
           serverMsg =
             "KBZPay rejected the payout: account holder name must match your KBZPay KYC exactly (not your store name). Update the name field and try again.";
+        }
+        const diagnosticParts = [
+          payload.diagnostic?.providerCode
+            ? `KBZ code ${payload.diagnostic.providerCode}`
+            : "",
+          payload.diagnostic?.reference
+            ? `ref ${payload.diagnostic.reference}`
+            : "",
+        ].filter(Boolean);
+        if (diagnosticParts.length > 0) {
+          serverMsg = `${serverMsg} (${diagnosticParts.join(", ")}). Full response logged in Console.`;
         }
         const isLocalMockSuccess =
           import.meta.env.DEV &&

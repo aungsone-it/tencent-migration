@@ -1015,6 +1015,30 @@ export async function postVendorCommissionWithdraw(c: Context) {
 
     const updatedAt = nowIso();
     const ambiguous = payoutIsAmbiguous(payout);
+    const payoutDiagnostic = {
+      reference: merchOrderId,
+      vendorId,
+      amountMmk: requestedAmount,
+      payeePhoneSuffix: kpayPhone.slice(-4),
+      ok: payout.ok,
+      success: payout.success,
+      pending: payout.pending,
+      providerCode: payout.providerCode || "",
+      providerMessage: payout.providerMessage || "",
+      networkError: payout.networkError || "",
+      tradeStatus: payout.tradeStatus || "",
+      paymentOrderId: payout.paymentOrderId || "",
+      mmOrderId: payout.mmOrderId || "",
+      endpointUsed: payout.endpointUsed || "",
+      rawResponse: payout.rawResponse || {},
+    };
+
+    if (!payout.success) {
+      console.error(
+        `[vendor-withdrawal] KBZ payout ${payout.pending || ambiguous ? "pending" : "failed"}`,
+        JSON.stringify(payoutDiagnostic),
+      );
+    }
 
     if (payout.success) {
       latestWithdrawals[idx] = {
@@ -1112,6 +1136,7 @@ export async function postVendorCommissionWithdraw(c: Context) {
     return c.json({
       success: false,
       error: record.errorMessage || "KBZPay payout failed",
+      diagnostic: payoutDiagnostic,
       withdrawal: record,
       wallet: refreshed,
     });

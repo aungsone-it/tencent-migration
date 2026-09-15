@@ -6,6 +6,7 @@ import {
   formatPaymentStatusLabel,
 } from "../utils/normalizeOrderBadgeStatus";
 import { isKPayOrderLike } from "../utils/orderPaymentMethod";
+import { formatLocalMyanmarPhoneDisplay } from "../utils/customerAuthIdentity";
 import { shippingAddressLinesForInvoice } from "../utils/orderShippingAddress";
 
 export interface InvoiceLineItem {
@@ -153,7 +154,11 @@ export function InvoiceSheet({ order }: { order: InvoiceSheetOrder }) {
             {line}
           </p>
         ))}
-        {order.phone && <p className="phone-line">Tel: {order.phone}</p>}
+        {order.phone && (
+          <p className="phone-line">
+            Tel: {formatLocalMyanmarPhoneDisplay(order.phone)}
+          </p>
+        )}
         {order.sellerId?.trim() && (
           <p className="phone-line">Seller ID: {order.sellerId.trim()}</p>
         )}

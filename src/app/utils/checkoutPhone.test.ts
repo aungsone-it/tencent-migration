@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCheckoutPhoneDisplay,
+  formatLocalMyanmarPhoneDisplay,
   normalizeCheckoutPhone,
   normalizeMyanmarPhone,
 } from "./customerAuthIdentity";
@@ -48,5 +49,13 @@ describe("formatCheckoutPhoneDisplay", () => {
   it("formats mobile and leaves local numbers plain", () => {
     expect(formatCheckoutPhoneDisplay("+959440226433")).toContain("+95");
     expect(formatCheckoutPhoneDisplay("1234567")).toBe("1234567");
+  });
+});
+
+describe("formatLocalMyanmarPhoneDisplay", () => {
+  it("formats international Myanmar numbers as local 09…", () => {
+    expect(formatLocalMyanmarPhoneDisplay("+959955520888")).toBe("09955520888");
+    expect(formatLocalMyanmarPhoneDisplay("09955520888")).toBe("09955520888");
+    expect(formatLocalMyanmarPhoneDisplay("9955520888")).toBe("09955520888");
   });
 });

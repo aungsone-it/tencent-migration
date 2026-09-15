@@ -30,6 +30,8 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | **Seller ID at checkout** | Required field on vendor checkout; shown on admin order detail, vendor orders, print invoice, and order export |
 | **Free shipping checkout UI** | When cart qualifies, delivery dropdown shows **အခမဲ့ / FREE** (not quoted MMK fee) |
 | **Local API dev** | `npm run dev:api` (function on `:8787`) + `npm run dev:local` (Vite proxies to local API) — see [Local Development](#local-development) |
+| **Vendor KBZPay withdrawal** | **Verify wallet** → **Withdraw** flow; `business_pay_validate.php` + `business_pay.php` VPS relays; payout diagnostics in browser Console + CloudBase logs — [docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md](docs/VENDOR_COMMISSION_AND_WITHDRAWAL.md) |
+| **Invoice phone format** | Print invoice **Tel** line uses local **`09…`** (not `+95…`) via `formatLocalMyanmarPhoneDisplay` |
 
 ## Recent Updates (July 2026)
 

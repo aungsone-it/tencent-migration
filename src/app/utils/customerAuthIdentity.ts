@@ -231,6 +231,18 @@ export function formatCustomerPhoneDisplay(phone: string | null | undefined): st
   return `+95 ${local[0]} ${local.slice(1, 4)} ${local.slice(4, 7)} ${local.slice(7)}`;
 }
 
+/** Format Myanmar mobile for shipping labels/invoices — local 09… style. */
+export function formatLocalMyanmarPhoneDisplay(phone: string | null | undefined): string {
+  const raw = String(phone || "").trim();
+  if (!raw) return "";
+
+  const digits = raw.replace(/\D/g, "");
+  if (/^959\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  if (/^09\d{9}$/.test(digits)) return digits;
+  if (/^9\d{9}$/.test(digits)) return `0${digits}`;
+  return raw;
+}
+
 export function formatUserPhoneDisplay(user: CustomerAuthUser | null | undefined): string {
   const phone = resolveCustomerPhone(user);
   return phone ? formatCustomerPhoneDisplay(phone) : "Not provided";

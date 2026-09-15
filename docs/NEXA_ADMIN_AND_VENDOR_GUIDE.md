@@ -108,6 +108,7 @@ Canonical assignable roles (frontend `superAdminRolePermissions.ts`, backend `CA
 - Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
 - **Order numbers:** serial format **`NOS-00001`**, **`NOS-00002`**, … (allocated via `GET /orders/next-number` at checkout)
 - **Seller ID:** required customer field at vendor checkout; visible on order detail (above notes) and print invoice under customer phone
+- **Print invoice Tel:** customer phone shown in local **`09…`** format (international `+959…` normalized on the label)
 - **KBZPay draft recovery:** amber panel lists paid PWA checkouts that never became orders; **Recover order** creates the order and prepends it to the list without a full refetch
 - Status changes (including cancel on recovered KPay orders) use optimistic UI + cache patches
 - **Realtime list refresh:** `OrderRealtimeBridge` polls `/realtime/pulses` every **2s**; order counter bumps trigger debounced **silent** background refetch (no full-list blink)
@@ -206,11 +207,12 @@ Vendor admin → **Finances** shows revenue, commission, and **available balance
 |-------|------|
 | **Default commission** | **0%** unless super admin sets vendor contract (`commission`) or product-specific rate |
 | **Product commission field** | Leave blank → uses vendor contract; enter a number for a product override |
-| **Withdrawable orders** | `ready-to-ship`, `fulfilled`, `shipped`, or `delivered` with **collected payment** (COD only after delivery) |
-| **KBZPay phone** | Saved on vendor record before withdraw; Myanmar `09…` format |
+| **Withdrawable orders** | `ready-to-ship`, `fulfilled`, `shipped`, or `delivered` — **payment status not required** (unpaid COD in ready-to-ship qualifies) |
+| **KBZPay phone** | Myanmar `09…` format (`+959…` accepted); saved on vendor record |
+| **Wallet verification** | **Verify wallet** must succeed before **Withdraw now**; token expires in 15 minutes and is consumed per attempt |
 | **Session** | Vendor must be signed in (server session token); re-login once after session-auth deploy |
 
-Operators configure KBZ Enterprise Payment / VPS relay on the backend — see [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
+Operators configure KBZ Enterprise Payment / VPS relay on the backend — see [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md). If payout fails with KBZ code **EB039** (“under review”), contact KBZ to activate Business Pay on the merchant account.
 
 ### Public storefront verification
 

@@ -88,14 +88,18 @@ The job syncs KBZ payment status, finalizes paid drafts, and logs `{ scanned, fi
 
 ## Vendor commission withdrawal (KBZPay payout)
 
-Separate from **customer checkout** — pays **vendor net earnings** to the vendor’s KBZPay wallet via KBZ Enterprise Payment (`businesspay`).
+Separate from **customer checkout** — pays **vendor net earnings** to the vendor’s KBZPay wallet via KBZ Enterprise Payment (`kbz.payment.businesspay`).
 
 | Topic | Detail |
 |-------|--------|
-| **UI** | Vendor admin → Finances → Withdraw to KBZPay |
+| **UI** | Vendor admin → Finances → **Verify wallet** → **Withdraw to KBZPay** |
 | **Default commission** | **0%** unless admin sets vendor contract or product rate |
+| **Withdrawable orders** | `ready-to-ship`, `fulfilled`, `shipped`, `delivered` — payment collection **not** required |
 | **Auth** | `x-vendor-session` header (token from `POST /vendor-auth/login`) |
-| **Relay** | VPS `businesspay.php` + `KBZ_VPS_API_SECRET` (CloudBase cannot use mTLS gateway directly) |
+| **Wallet verify** | `POST /vendor/kpay-validate/:vendorId` → VPS `business_pay_validate.php` → short-lived `verificationToken` |
+| **Payout relay** | VPS `business_pay.php` + `KBZ_VPS_API_SECRET` (CloudBase cannot use mTLS gateway directly) |
+| **Phone format** | Local **`09…`** MSISDN in payout payload (`identifier_value`); UI accepts `+959…` and normalizes |
+| **Diagnostics** | Failed payouts return `diagnostic` in API response; browser Console logs `[Vendor withdrawal] KBZ payout failed` |
 
 Canonical reference: [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
 

@@ -55,7 +55,7 @@ Platform staff at `https://www.nexa-mm.com/admin` have one of **five roles**. Th
 4. Complete setup at `/vendor/setup` if prompted after approval.
 5. **Products → Select Product** — pick from the **platform catalog** (read-only price/stock). **Products → Categories** — create store tabs and assign selected products.
 6. **Free shipping** (if enabled for your store): mark products or whole categories on **Products** / **Categories** — see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
-7. **Finances** — view earnings and withdraw commission to your **KBZPay wallet** when balance is available. Platform commission is **0% by default** unless the admin set a rate for your store or specific products. You must be signed in; if withdrawal fails with “session expired”, sign out and sign in again.
+7. **Finances** — view earnings and withdraw commission to your **KBZPay wallet** when balance is available. Enter your KBZPay phone (`09…`), click **Verify wallet**, then **Withdraw now**. Platform commission is **0% by default** unless the admin set a rate for your store or specific products. You must be signed in; if withdrawal fails with “session expired”, sign out and sign in again.
 8. **Orders** — update status; use **KBZPay draft recovery** if customer paid but no order exists.
 9. **Subscriptions** — Plans and Subscribers (if enabled).
 10. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
@@ -90,4 +90,6 @@ At `https://www.nexa-mm.com/vendor/application`:
 - Login issues: use **Forgot password** (OTP email) or contact your system admin.
 - Vendor application “Checking email…” stuck: refresh and try again; server validates again on submit.
 - Activity missing after approve: ensure you were logged in as staff (actions need your user account).
-- Vendor withdrawal “session expired”: sign out at `/vendor/login` and sign in again, then retry **Finances → Withdraw**.
+- Vendor withdrawal “session expired”: sign out at `/vendor/login` and sign in again, then retry **Finances → Verify wallet → Withdraw**.
+- Vendor withdrawal “under review” / **EB039**: KBZ has not finished enabling Business Pay on the merchant account — contact KBZ support; wait before retrying.
+- Print invoice phone shows **`09…`** (not `+95…`) on shipping labels.

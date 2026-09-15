@@ -208,6 +208,8 @@ Customer registration phone OTP uses `TENCENT_SMS_SDK_APP_ID`, `TENCENT_SMS_SIGN
 
 Set `KPAY_*` on `make-server-16010b6f` and `kpay-webhook`. Update `KPAY_NOTIFY_URL` to your public `kpay-webhook` URL. Set `KPAY_PWA_FRONTEND_RETURN_URL` to the unified apex summary (current: `https://nexa-apex.online/summary`). Run `npm run kpay:urls` to verify.
 
+**Vendor commission withdrawal** (separate from customer checkout): set `KBZ_VPS_API_SECRET`, `KPAY_BUSINESS_PAY_URL` (VPS `business_pay.php`), and optionally `KBZ_VPS_BUSINESS_PAY_VALIDATE_URL` (wallet verify). Requires KBZ Enterprise Payment enabled on the merchant account. See [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
+
 ## 6) Domain and vendor host notes
 
 - **Customer shopping** runs on vendor storefront hosts — not a shared marketplace `/products` route.
@@ -228,6 +230,7 @@ Production apex examples: `nexa-mm.com`, `nexa-apex.online` (configure in `VITE_
 7. Verify admin destructive routes require operation secret headers.
 8. Run read-model validation — [READ_MODEL_ROLLOUT.md](./READ_MODEL_ROLLOUT.md).
 9. After EdgeOne deploy: confirm `/version.json` returns new `buildId` and stale tabs refresh.
+10. **Vendor withdrawal:** vendor re-login → Finances → **Verify wallet** → test withdraw in UAT; check browser Console for `[Vendor withdrawal]` diagnostics on failure.
 
 ## 8) Troubleshooting
 

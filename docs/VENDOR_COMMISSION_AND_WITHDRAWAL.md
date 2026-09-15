@@ -64,7 +64,7 @@ Accrues when:
 
 ### KBZPay withdrawal (Available to withdraw)
 
-Uses **order status only** (not unpaid/paid):
+Uses **order status only** — payment collection is **not** required (unpaid COD in `ready-to-ship` can withdraw):
 
 - `ready-to-ship`
 - `fulfilled`
@@ -73,7 +73,7 @@ Uses **order status only** (not unpaid/paid):
 
 `processing` alone does **not** qualify for withdrawal (it may still appear on dashboard accrual cards).
 
-`inventoryDeducted === false` still blocks withdrawal. Cancelled and refunded orders stay excluded.
+`inventoryDeducted === false` does **not** block withdrawal (only dashboard accrual). Cancelled and refunded orders stay excluded.
 
 ### Subscriptions
 
@@ -89,17 +89,22 @@ Paid subscription payments (`subscription_payment:*` with `status: paid`) contri
 
 1. Vendor signs in at `/vendor/login` (issues a server session token — see §4).
 2. Open **Finances**; available balance reflects eligible earnings minus in-flight/paid withdrawals.
-3. Enter or confirm **KBZPay phone** (Myanmar `09…` format).
-4. Click **Withdraw now** — the UI saves the KBZ account first if the phone changed, then requests a full available-balance payout (integer MMK).
+3. Enter **KBZPay phone** (Myanmar `09…` format; `+959…` is accepted and normalized).
+4. Click **Verify wallet** — server calls `business_pay_validate.php` and confirms the wallet can receive Business Pay transfers. On success, a short-lived verification token is issued (15 minutes).
+5. Click **Withdraw now** — requires a valid verification for the same phone. The UI saves the KBZ account first if the phone changed, then requests a full available-balance payout (integer MMK). Changing the phone clears verification and requires **Verify wallet** again.
+
+**Note:** KBZ `business_pay_validate` does **not** return the payee KYC name. There is no “look up account holder name” step — payout is phone-only.
 
 ### Server behavior
 
 1. **Auth** — validates `x-vendor-session` matches the requested `vendorId`.
-2. **Balance check** — recomputes earnings from KV (`order:`, `product:`, `subscription_payment:`) minus reserved withdrawals.
-3. **Lock** — `vendor_withdraw_lock:{vendorId}` prevents concurrent payouts.
-4. **KBZPay Enterprise Payment** — `kbz.payment.businesspay` via VPS PHP relay (`business_pay.php`, sibling of `refund.php`) or configured gateway; merchant order id prefix `VWD-`.
-5. **Status** — `paid`, `processing` (ambiguous/network/KBZ pending), or `failed` (definitive provider rejection).
-6. **Reconcile** — on wallet load, pending/processing rows older than ~45s are checked via `queryorder` and updated.
+2. **Payee validation** — `POST /vendor/kpay-validate/:vendorId` calls `validateKPayBusinessPayee` → VPS `business_pay_validate.php`.
+3. **Verification token** — stored at `vendor_kpay_payee_verification:{vendorId}`; consumed on each payout attempt (success or failure).
+4. **Balance check** — recomputes earnings from KV (`order:`, `product:`) minus reserved withdrawals.
+5. **Lock** — `vendor_withdraw_lock:{vendorId}` prevents concurrent payouts.
+6. **KBZPay Enterprise Payment** — `kbz.payment.businesspay` via VPS PHP relay (`business_pay.php`, sibling of `refund.php`); `identifier_value` sent in local **`09…`** MSISDN format; merchant order id prefix `VWD-`.
+7. **Status** — `paid`, `processing` (ambiguous/network/KBZ pending), or `failed` (definitive provider rejection). Failed responses include a `diagnostic` object (KBZ code, endpoint, raw response) and are logged server-side as `[vendor-withdrawal] KBZ payout failed`.
+8. **Reconcile** — on wallet load, pending/processing rows older than ~45s are checked via `queryorder`; unconfirmed “paid” rows without KBZ ids are auto-failed after 48h.
 
 Fractional MMK earnings carry forward; only **whole MMK** amounts are sent (`floor` of available balance).
 
@@ -136,7 +141,8 @@ Base: `{CLOUDBASE_API_BASE_URL}` (ends with `/make-server-16010b6f`).
 |--------|------|------|---------|
 | `GET` | `/vendor/commission-wallet/:vendorId` | `x-vendor-session` | Balances, history, reconcile processing rows |
 | `PUT` / `POST` | `/vendor/kpay-account/:vendorId` | `x-vendor-session` | Save KBZPay payout phone on vendor record |
-| `POST` | `/vendor/commission-withdraw/:vendorId` | `x-vendor-session` | Initiate payout (uses saved phone; body phone must match if both sent) |
+| `POST` | `/vendor/kpay-validate/:vendorId` | `x-vendor-session` | Verify wallet via `business_pay_validate.php`; returns `verificationToken` |
+| `POST` | `/vendor/commission-withdraw/:vendorId` | `x-vendor-session` | Initiate payout — requires `verificationToken` + matching `kpayPhone` |
 
 Withdraw route is **excluded** from the global 25s function timeout so KBZPay can take up to ~45s.
 
@@ -149,9 +155,10 @@ Withdraw route is **excluded** from the global 25s function timeout so KBZPay ca
 | `vendor_withdrawals:{vendorId}` | Array of withdrawal records (`pending` / `processing` / `paid` / `failed`) |
 | `vendor_withdraw_lock:{vendorId}` | In-flight lock (prevents double payout) |
 | `vendor_withdrawal_txn:{merchOrderId}` | Single withdrawal record keyed by `VWD-*` merchant order id |
+| `vendor_kpay_payee_verification:{vendorId}` | Short-lived wallet verification token (15 min TTL) |
 | `kpay_txn:{merchOrderId}` | KBZ query/reconcile state for the same merchant order id |
 
-Reserved balance includes rows in `pending`, `processing`, or `paid` (mock payouts only count when `countsAsWithdrawal: true`).
+Reserved balance counts `pending`, `processing`, and confirmed `paid` rows only. Unconfirmed “paid” rows (no KBZ payment ids) are auto-failed on reconcile. Mock payouts count only when `countsAsWithdrawal: true`.
 
 ---
 
@@ -162,14 +169,17 @@ See `cloudbase/function-env.template.env` (Vendor commission withdrawal section)
 | Variable | Purpose |
 |----------|---------|
 | `KPAY_APPID`, `KPAY_MERCH_CODE`, `KPAY_SIGN_KEY` | KBZPay credentials |
-| `KBZ_VPS_API_SECRET` | Bearer secret for VPS `business_pay.php` relay |
-| `KBZ_VPS_REFUND_URL` | Used to derive `business_pay.php` path when business pay URL unset |
-| `KPAY_BUSINESS_PAY_URL` | Full URL to VPS `business_pay.php` relay — **not** `business_pay_validate.php` |
+| `KBZ_VPS_API_SECRET` | Bearer secret for VPS `business_pay.php` and `business_pay_validate.php` relays |
+| `KBZ_VPS_REFUND_URL` | Used to derive sibling `business_pay.php` / `business_pay_validate.php` when URLs unset |
+| `KPAY_BUSINESS_PAY_URL` | Full URL to VPS **`business_pay.php`** (actual payout) — **not** validate-only |
+| `KBZ_VPS_BUSINESS_PAY_VALIDATE_URL` | Optional explicit URL for **`business_pay_validate.php`** (wallet verify) |
 | `KPAY_BUSINESS_PAY_MOCK=1` | UAT mock payouts — **blocked in production** |
 | `VENDOR_WITHDRAW_MIN_MMK` | Minimum withdrawable balance (default `1`) |
 | `ALLOW_UNAUTHENTICATED_VENDOR_WITHDRAW=1` | **Dev only** — skip session auth |
 
 CloudBase **cannot** call KBZ `/payment/gateway/businesspay/` directly (mTLS). Use the VPS PHP relay (same pattern as `refund.php`).
+
+**Phone format:** store and display vendor payout phones as **`09…`**. Payout payloads send `identifier_value` in local `09…` MSISDN form (KBZ Business Pay contract). `+959…` input is normalized before send.
 
 ---
 
@@ -177,12 +187,25 @@ CloudBase **cannot** call KBZ `/payment/gateway/businesspay/` directly (mTLS). U
 
 Before enabling vendor withdrawals in production:
 
-1. KBZ **Enterprise Payment** enabled on the merchant account + VPS relay deployed.
-2. `make-server-16010b6f` redeployed with latest `vendor_commission_withdraw.tsx` and `vendor_session_guard.tsx`.
+1. KBZ **Enterprise Payment** (`kbz.payment.businesspay`) enabled on the merchant account + VPS relay deployed (`business_pay.php` + `business_pay_validate.php`).
+2. `make-server-16010b6f` redeployed with latest withdrawal + KBZ routes; frontend redeployed for Finances UI.
 3. Vendor login returns `sessionToken`; Finances loads without 401.
-4. Test withdraw in UAT with `KPAY_BUSINESS_PAY_MOCK=1` if gateway unavailable.
-5. Confirm dashboard Commission Earned includes ready-to-ship+ (including unpaid COD), while KBZPay withdraw only includes **paid/collected** orders in **ready-to-ship+** statuses.
-6. Confirm commission defaults to **0%** for vendors/products without admin-defined rates.
+4. **Verify wallet** succeeds for a test KBZPay number before attempting payout.
+5. Test withdraw in UAT with `KPAY_BUSINESS_PAY_MOCK=1` if gateway unavailable.
+6. Confirm dashboard Commission Earned includes `processing`+ (including unpaid COD), while KBZPay withdraw includes **ready-to-ship+** by order status (payment not required).
+7. Confirm commission defaults to **0%** for vendors/products without admin-defined rates.
+
+### Troubleshooting failed payouts
+
+| Symptom | Likely cause | Action |
+|---------|--------------|--------|
+| Verify succeeds, withdraw fails with **EB039** / “still under review” | KBZ Enterprise Payment not fully activated for the UAT/prod merchant, or KBZ rate-limit/review | Contact KBZ to enable Business Pay; wait and retry (do not spam requests) |
+| **Service not available** toast | KBZ gateway rejection (check browser Console for `[Vendor withdrawal] KBZ payout failed` → `diagnostic.providerCode`) | Inspect `diagnostic.rawResponse`; check CloudBase logs for `[vendor-withdrawal]` |
+| “Verification missing or expired” | Token consumed by a prior attempt, phone changed, or >15 min elapsed | Click **Verify wallet** again, then **Withdraw now** |
+| Balance shows 0 but Commission Earned > 0 | Orders still in `processing`, or balance reserved by failed/processing withdrawal | Check withdrawal history; failed rows release balance |
+| KYC name mismatch (legacy) | Old deployments sent store name as payee | Current code sends phone only — redeploy backend |
+
+Browser Console logs the full failed payout object after each attempt. CloudBase function logs include the same `diagnostic` JSON.
 
 ---
 

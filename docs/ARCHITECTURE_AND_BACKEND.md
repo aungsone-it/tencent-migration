@@ -55,6 +55,7 @@ All major entities are stored as JSON documents in `kv_store_16010b6f`:
 | `vendor_withdrawals:{vendorId}` | KBZPay commission payout history for a vendor |
 | `vendor_withdraw_lock:{vendorId}` | In-flight withdrawal lock (prevents concurrent payouts) |
 | `vendor_withdrawal_txn:{merchOrderId}` | Single withdrawal record keyed by `VWD-*` merchant order id |
+| `vendor_kpay_payee_verification:{vendorId}` | Short-lived wallet verification token (15 min) before payout |
 | `vendor_session:{token}` | Vendor login session (30-day TTL) for secured payout routes |
 | `vendor_session_active:{vendorId}` | Active session token pointer per vendor |
 | `customer:{uid}:cart` | Signed-in cart |
@@ -177,7 +178,8 @@ Implementation: `order_number.ts` — KV counter `order_serial_counter`, reserva
 |--------|-------|---------|
 | `GET` | `/vendor/commission-wallet/:vendorId` | Balances and withdrawal history |
 | `PUT` / `POST` | `/vendor/kpay-account/:vendorId` | Save KBZPay payout phone |
-| `POST` | `/vendor/commission-withdraw/:vendorId` | Payout available balance via KBZ `businesspay` |
+| `POST` | `/vendor/kpay-validate/:vendorId` | Verify wallet via `business_pay_validate.php`; returns `verificationToken` |
+| `POST` | `/vendor/commission-withdraw/:vendorId` | Payout available balance via KBZ `businesspay` (requires verification token) |
 | `POST` | `/vendor-auth/logout` | Revoke vendor session token |
 
 Default platform commission is **0%** unless admin sets vendor or product rates. See [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
@@ -275,9 +277,11 @@ See [PAYMENTS.md](./PAYMENTS.md).
 Vendors withdraw accrued net earnings to a **KBZPay wallet** from vendor admin → **Finances**.
 
 - **Default platform commission:** **0%** on vendor contract and products unless admin sets a rate (see [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md)).
-- **Payout API:** `POST /vendor/commission-withdraw/:vendorId` — requires `x-vendor-session` header (issued on vendor login).
-- **Infrastructure:** KBZ `businesspay` via VPS PHP relay (`businesspay.php` + `KBZ_VPS_API_SECRET`); not the customer checkout QR/PWA path.
-- **KV:** `vendor_withdrawals:*`, `vendor_withdraw_lock:*`, `vendor_session:*`.
+- **Withdrawable orders:** `ready-to-ship`+ by order status; payment collection not required.
+- **Flow:** Verify wallet (`POST /vendor/kpay-validate/:vendorId`) → withdraw (`POST /vendor/commission-withdraw/:vendorId` with `verificationToken`).
+- **Payout API:** requires `x-vendor-session` header (issued on vendor login).
+- **Infrastructure:** KBZ `businesspay` via VPS PHP relay (`business_pay.php` + `business_pay_validate.php` + `KBZ_VPS_API_SECRET`); not the customer checkout QR/PWA path. Payout `identifier_value` uses local **`09…`** MSISDN.
+- **KV:** `vendor_withdrawals:*`, `vendor_withdraw_lock:*`, `vendor_kpay_payee_verification:*`, `vendor_session:*`.
 
 Full reference: [VENDOR_COMMISSION_AND_WITHDRAWAL.md](./VENDOR_COMMISSION_AND_WITHDRAWAL.md).
 

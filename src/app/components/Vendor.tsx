@@ -72,6 +72,22 @@ import { toast } from "sonner";
 
 type VendorStatus = "active" | "inactive" | "pending" | "suspended" | "banned";
 
+/** Fixed column widths — location capped so one long address does not stretch the table. */
+function VendorTableColGroup() {
+  return (
+    <colgroup>
+      <col style={{ width: "3rem" }} />
+      <col style={{ width: "16%" }} />
+      <col style={{ width: "13%" }} />
+      <col style={{ width: "10.5rem" }} />
+      <col style={{ width: "7.5rem" }} />
+      <col style={{ width: "11.5rem" }} />
+      <col style={{ width: "6.5rem" }} />
+      <col style={{ width: "5.5rem" }} />
+    </colgroup>
+  );
+}
+
 // 🚀 MODULE-LEVEL CACHE: Persists across component unmount/remount
 let cachedVendors: any[] = [];
 
@@ -1296,18 +1312,19 @@ export function Vendor({
       <Card className="border border-slate-200">
         {showTableSkeleton ? (
           <div className="overflow-x-auto scrollbar-thin-x">
-            <table className="w-full">
+            <table className="w-full table-fixed">
+              <VendorTableColGroup />
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="text-left p-4 w-12">
+                  <th className="text-left p-4">
                     <div className="w-4 h-4 bg-slate-200 rounded animate-pulse" aria-hidden />
                   </th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.name")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.email")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.location")}</th>
-                  <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.products")}</th>
-                  <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.status")}</th>
-                  <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.joined")}</th>
+                  <th className="text-left px-2 py-4 text-sm font-medium text-slate-600">{t("vendor.products")}</th>
+                  <th className="text-left px-2 py-4 text-sm font-medium text-slate-600">{t("vendor.status")}</th>
+                  <th className="text-left px-2 py-4 text-sm font-medium text-slate-600">{t("vendor.joined")}</th>
                   <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.actions")}</th>
                 </tr>
               </thead>
@@ -1356,10 +1373,11 @@ export function Vendor({
         ) : (
           <>
             <div className="overflow-x-auto scrollbar-thin-x">
-              <table className="w-full">
+              <table className="w-full table-fixed">
+                <VendorTableColGroup />
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
-                    <th className="text-left p-4 w-12">
+                    <th className="text-left p-4">
                       <Checkbox
                         checked={
                           vendorRowsInDisplay.length > 0 &&
@@ -1372,9 +1390,9 @@ export function Vendor({
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.name')}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.email')}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t("vendor.location")}</th>
-                    <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.products')}</th>
-                    <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.status')}</th>
-                    <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.joined')}</th>
+                    <th className="text-left px-2 py-4 text-sm font-medium text-slate-600">{t('vendor.products')}</th>
+                    <th className="text-left px-2 py-4 text-sm font-medium text-slate-600">{t('vendor.status')}</th>
+                    <th className="text-left px-2 py-4 text-sm font-medium text-slate-600">{t('vendor.joined')}</th>
                     <th className="text-left p-4 text-sm font-medium text-slate-600">{t('vendor.actions')}</th>
                   </tr>
                 </thead>
@@ -1419,26 +1437,28 @@ export function Vendor({
                             </div>
                           </td>
                           <td className="p-4">
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <MapPin className="w-3.5 h-3.5" />
-                              <span>{app.location?.trim() || "—"}</span>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2">
-                              <Package className="w-4 h-4 text-slate-400" />
-                              <span className="text-sm font-medium text-slate-900 tabular-nums">
-                                ~{app.estimatedProducts || 0}
+                            <div className="flex items-start gap-2 text-sm text-slate-600 min-w-0">
+                              <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                              <span
+                                className="line-clamp-2 break-words"
+                                title={app.location?.trim() || undefined}
+                              >
+                                {app.location?.trim() || "—"}
                               </span>
                             </div>
                           </td>
-                          <td className="p-4">
+                          <td className="px-2 py-4">
+                            <span className="text-sm font-medium text-slate-900 tabular-nums">
+                              ~{app.estimatedProducts || 0}
+                            </span>
+                          </td>
+                          <td className="px-2 py-4">
                             <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 border">
                               {t("vendor.pending")}
                             </Badge>
                           </td>
-                          <td className="p-4">
-                            <span className="text-sm text-slate-600">{app.appliedDate}</span>
+                          <td className="px-2 py-4">
+                            <span className="text-sm text-slate-600 whitespace-nowrap">{app.appliedDate}</span>
                           </td>
                           <td className="p-4">
                             <Button
@@ -1507,25 +1527,29 @@ export function Vendor({
                           </div>
                         </td>
                         <td className="p-4">
-                          <div className="flex items-center gap-2 text-sm text-slate-600">
-                            <MapPin className="w-3.5 h-3.5" />
-                            <span>{vendor.location?.trim() || "—"}</span>
+                          <div className="flex items-start gap-2 text-sm text-slate-600 min-w-0">
+                            <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span
+                              className="line-clamp-2 break-words"
+                              title={vendor.location?.trim() || undefined}
+                            >
+                              {vendor.location?.trim() || "—"}
+                            </span>
                           </div>
                         </td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <Package className="w-4 h-4 text-slate-400" />
-                            <span className="text-sm font-medium text-slate-900">{safeNumber(vendor.productsCount)}</span>
-                          </div>
+                        <td className="px-2 py-4">
+                          <span className="text-sm font-medium text-slate-900 tabular-nums">
+                            {safeNumber(vendor.productsCount)}
+                          </span>
                         </td>
-                        <td className="p-4">
-                          <div className="flex flex-wrap items-center gap-1.5">
+                        <td className="px-2 py-4">
+                          <div className="flex flex-col items-start gap-1 min-w-0">
                             {getStatusBadge(vendor)}
                             {getFreeShippingBadge(vendor)}
                           </div>
                         </td>
-                        <td className="p-4">
-                          <span className="text-sm text-slate-600">{vendorDisplayJoined(vendor)}</span>
+                        <td className="px-2 py-4">
+                          <span className="text-sm text-slate-600 whitespace-nowrap">{vendorDisplayJoined(vendor)}</span>
                         </td>
                         <td className="p-4">
                           <div className="flex items-center gap-2">

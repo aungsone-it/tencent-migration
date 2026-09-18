@@ -129,7 +129,6 @@ export function VendorAdminAddProduct({
   const [variants, setVariants] = useState<Variant[]>([]);
   const variantsRef = useRef<Variant[]>([]);
   const variantOptionsRef = useRef(variantOptions);
-  const skuPrefixRef = useRef(sku);
   variantsRef.current = variants;
   
   // Initialize variants from initialData when editing
@@ -230,13 +229,10 @@ export function VendorAdminAddProduct({
       options: variantOptions,
       previous: variantsRef.current,
       previousOptions: variantOptionsRef.current,
-      skuPrefix: sku,
-      previousSkuPrefix: skuPrefixRef.current,
     });
     variantOptionsRef.current = variantOptions;
-    skuPrefixRef.current = sku;
     setVariants(nextVariants);
-  }, [variantOptions, hasVariants, sku]);
+  }, [variantOptions, hasVariants]);
 
   const updateVariant = (id: string, field: keyof Variant, value: any) => {
     setVariants(variants.map(v => v.id === id ? { ...v, [field]: value } : v));

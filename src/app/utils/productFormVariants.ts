@@ -89,18 +89,6 @@ export function detectOptionValueRename(
   return renames.length === 1 ? renames[0] : null;
 }
 
-export function slugSkuPart(value: string): string {
-  return value
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toUpperCase();
-}
-
-export function buildAutoSku(prefix: string, combo: string[]): string {
-  return [prefix, ...combo].map(slugSkuPart).filter(Boolean).join("-");
-}
-
 function comboFromVariant(variant: ProductFormVariant): string[] {
   return [variant.option1, variant.option2, variant.option3]
     .map((v) => String(v ?? "").trim())
@@ -150,18 +138,8 @@ export function generateProductFormVariants(args: {
   options: ProductFormVariantOption[];
   previous: ProductFormVariant[];
   previousOptions?: ProductFormVariantOption[];
-  skuPrefix?: string;
-  previousSkuPrefix?: string;
-  defaultPrice?: string;
 }): ProductFormVariant[] {
-  const {
-    options,
-    previous,
-    previousOptions,
-    skuPrefix = "",
-    previousSkuPrefix = "",
-    defaultPrice = "",
-  } = args;
+  const { options, previous, previousOptions } = args;
 
   const rename = detectOptionValueRename(previousOptions, options);
   const remappedPrevious = rename
@@ -177,20 +155,12 @@ export function generateProductFormVariants(args: {
 
   return combos.map((combo) => {
     const existing = byKey.get(variantComboKey(combo));
-    const nextAutoSku = buildAutoSku(skuPrefix, combo);
     if (existing) {
-      const previousAutoSku = buildAutoSku(previousSkuPrefix, comboFromVariant(existing));
-      const unprefixedAutoSku = buildAutoSku("", comboFromVariant(existing));
-      const skuIsGenerated =
-        !existing.sku?.trim() ||
-        existing.sku === previousAutoSku ||
-        existing.sku === unprefixedAutoSku;
       return {
         ...existing,
         option1: combo[0] || "",
         option2: combo[1],
         option3: combo[2],
-        sku: skuIsGenerated ? nextAutoSku : existing.sku,
         image: existing.image?.trim()
           ? existing.image
           : inferImageForCombo(combo, remappedPrevious, optionValueCounts),
@@ -202,8 +172,8 @@ export function generateProductFormVariants(args: {
       option1: combo[0] || "",
       option2: combo[1],
       option3: combo[2],
-      price: defaultPrice,
-      sku: nextAutoSku,
+      price: "",
+      sku: "",
       inventory: 0,
       weight: "",
       image: inferImageForCombo(combo, remappedPrevious, optionValueCounts),
@@ -235,16 +205,6 @@ export function dominantOptionIndex(options: ProductFormVariantOption[]): number
     }
   });
   return best;
-}
-
-export function fillEmptyVariantSkus(
-  variants: ProductFormVariant[],
-  skuPrefix: string
-): ProductFormVariant[] {
-  return variants.map((variant) => {
-    if (variant.sku?.trim()) return variant;
-    return { ...variant, sku: buildAutoSku(skuPrefix, comboFromVariant(variant)) };
-  });
 }
 
 export function findDuplicateVariantSkus(

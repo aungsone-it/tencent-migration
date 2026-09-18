@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   applyImageToOptionValue,
-  buildAutoSku,
   cartesianOptionValues,
   detectOptionValueRename,
-  fillEmptyVariantSkus,
   findDuplicateVariantSkus,
   generateProductFormVariants,
   inferImageForCombo,
@@ -44,19 +42,24 @@ describe("productFormVariants", () => {
     expect(combos[15]).toEqual(["M", "Red"]);
   });
 
-  it("auto-builds SKUs from prefix + size + color", () => {
-    expect(buildAutoSku("SHIRT", ["S", "Red"])).toBe("SHIRT-S-RED");
-    expect(buildAutoSku("", ["Navy Blue", "XXL"])).toBe("NAVY-BLUE-XXL");
+  it("leaves new variant SKUs empty", () => {
+    const variants = generateProductFormVariants({
+      options: twoAxisOptions,
+      previous: [],
+    });
+    expect(variants).toHaveLength(75);
+    expect(variants.every((v) => v.sku === "")).toBe(true);
   });
 
   it("preserves SKUs and images when a 16th color is added", () => {
     const previous = generateProductFormVariants({
       options: twoAxisOptions,
       previous: [],
-      skuPrefix: "TEE",
-    }).map((variant) =>
-      variant.option2 === "Red" ? { ...variant, image: "red.png" } : variant
-    );
+    }).map((variant) => ({
+      ...variant,
+      sku: `${variant.option1}-${variant.option2}`,
+      image: variant.option2 === "Red" ? "red.png" : variant.image,
+    }));
 
     const next = generateProductFormVariants({
       options: [
@@ -65,24 +68,23 @@ describe("productFormVariants", () => {
       ],
       previous,
       previousOptions: twoAxisOptions,
-      skuPrefix: "TEE",
     });
 
     expect(next).toHaveLength(80);
     const kept = next.find((v) => v.option1 === "M" && v.option2 === "Red");
-    expect(kept?.sku).toBe("TEE-M-RED");
+    expect(kept?.sku).toBe("M-Red");
     expect(kept?.image).toBe("red.png");
-    expect(next.find((v) => v.option1 === "M" && v.option2 === "Ivory")?.sku).toBe(
-      "TEE-M-IVORY"
-    );
+    expect(next.find((v) => v.option1 === "M" && v.option2 === "Ivory")?.sku).toBe("");
   });
 
   it("keeps SKUs when a color is renamed", () => {
     const previous = generateProductFormVariants({
       options: twoAxisOptions,
       previous: [],
-      skuPrefix: "TEE",
-    });
+    }).map((variant) => ({
+      ...variant,
+      sku: `${variant.option1}-${variant.option2}`,
+    }));
     const redSku = previous.find((v) => v.option1 === "S" && v.option2 === "Red")?.sku;
 
     const renamedColors = colors.map((c) => (c === "Red" ? "Crimson" : c));
@@ -93,7 +95,6 @@ describe("productFormVariants", () => {
       ],
       previous,
       previousOptions: twoAxisOptions,
-      skuPrefix: "TEE",
     });
 
     expect(detectOptionValueRename(twoAxisOptions, [
@@ -111,7 +112,7 @@ describe("productFormVariants", () => {
         option1: "S",
         option2: "Red",
         price: "",
-        sku: "TEE-S-RED",
+        sku: "CUSTOM-S-RED",
         inventory: 0,
         image: "red.png",
       },
@@ -126,10 +127,13 @@ describe("productFormVariants", () => {
         { name: "Color", values: ["Red"] },
       ],
       previous,
-      skuPrefix: "TEE",
     });
     expect(next.find((v) => v.option1 === "XL" && v.option2 === "Red")?.image).toBe(
       "red.png"
+    );
+    expect(next.find((v) => v.option1 === "XL" && v.option2 === "Red")?.sku).toBe("");
+    expect(next.find((v) => v.option1 === "S" && v.option2 === "Red")?.sku).toBe(
+      "CUSTOM-S-RED"
     );
   });
 
@@ -137,84 +141,12 @@ describe("productFormVariants", () => {
     const variants = generateProductFormVariants({
       options: twoAxisOptions,
       previous: [],
-      skuPrefix: "TEE",
     });
     const updated = applyImageToOptionValue(variants, 1, "Navy", "navy.png");
     const navy = updated.filter((v) => v.option2 === "Navy");
     expect(navy).toHaveLength(5);
     expect(navy.every((v) => v.image === "navy.png")).toBe(true);
     expect(updated.filter((v) => v.option2 === "Red" && v.image).length).toBe(0);
-  });
-
-  it("fills only empty SKUs from the prefix", () => {
-    const filled = fillEmptyVariantSkus(
-      [
-        {
-          id: "1",
-          option1: "S",
-          option2: "Red",
-          price: "",
-          sku: "CUSTOM",
-          inventory: 0,
-        },
-        {
-          id: "2",
-          option1: "M",
-          option2: "Red",
-          price: "",
-          sku: "",
-          inventory: 0,
-        },
-      ],
-      "TEE"
-    );
-    expect(filled[0].sku).toBe("CUSTOM");
-    expect(filled[1].sku).toBe("TEE-M-RED");
-  });
-
-  it("updates generated SKUs when the prefix is added later", () => {
-    const previous = generateProductFormVariants({
-      options: [
-        { name: "Size", values: ["S"] },
-        { name: "Color", values: ["Red"] },
-      ],
-      previous: [],
-      skuPrefix: "",
-    });
-    expect(previous[0].sku).toBe("S-RED");
-
-    const next = generateProductFormVariants({
-      options: [
-        { name: "Size", values: ["S"] },
-        { name: "Color", values: ["Red"] },
-      ],
-      previous,
-      previousSkuPrefix: "",
-      skuPrefix: "TEE",
-    });
-    expect(next[0].sku).toBe("TEE-S-RED");
-  });
-
-  it("does not overwrite a custom SKU when the prefix changes", () => {
-    const next = generateProductFormVariants({
-      options: [
-        { name: "Size", values: ["S"] },
-        { name: "Color", values: ["Red"] },
-      ],
-      previous: [
-        {
-          id: "1",
-          option1: "S",
-          option2: "Red",
-          price: "",
-          sku: "CUSTOM-001",
-          inventory: 0,
-        },
-      ],
-      previousSkuPrefix: "",
-      skuPrefix: "TEE",
-    });
-    expect(next[0].sku).toBe("CUSTOM-001");
   });
 
   it("flags duplicate SKUs inside the product", () => {

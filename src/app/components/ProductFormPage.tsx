@@ -20,9 +20,7 @@ import { useLanguage } from "../contexts/LanguageContext";
 import { IMAGE_CONFIG } from "../../constants";
 import {
   applyImageToOptionValue,
-  buildAutoSku,
   dominantOptionIndex,
-  fillEmptyVariantSkus,
   findDuplicateVariantSkus,
   generateProductFormVariants,
   LIVE_VARIANT_SKU_CHECK_LIMIT,
@@ -192,10 +190,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
   const [isInitializing, setIsInitializing] = useState(true); // 🔥 NEW: Track if we're loading initial data
   const variantsRef = useRef<Variant[]>([]);
   const variantOptionsRef = useRef(variantOptions);
-  const priceRef = useRef(price);
-  const skuPrefixRef = useRef(sku);
   variantsRef.current = variants;
-  priceRef.current = price;
 
   const patchVariant = (id: string, patch: Partial<Variant>) => {
     setVariants((prev) => prev.map((variant) => (variant.id === id ? { ...variant, ...patch } : variant)));
@@ -504,7 +499,6 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         setVariants([]);
       }
       variantOptionsRef.current = variantOptions;
-      skuPrefixRef.current = sku;
       return;
     }
 
@@ -514,7 +508,6 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         setVariants([]);
       }
       variantOptionsRef.current = variantOptions;
-      skuPrefixRef.current = sku;
       return;
     }
 
@@ -522,14 +515,10 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       options: variantOptions,
       previous: variantsRef.current,
       previousOptions: variantOptionsRef.current,
-      skuPrefix: sku,
-      previousSkuPrefix: skuPrefixRef.current,
-      defaultPrice: priceRef.current,
     });
     variantOptionsRef.current = variantOptions;
-    skuPrefixRef.current = sku;
     setVariants(nextVariants);
-  }, [hasVariants, variantOptions, isInitializing, mode, sku]);
+  }, [hasVariants, variantOptions, isInitializing, mode]);
 
   const handleProductStatusChange = (newStatus: string) => {
     setStatus(newStatus);
@@ -1222,31 +1211,6 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
 
                 {hasVariants && (
                   <div className="space-y-4 pt-4">
-                    <div>
-                      <Label htmlFor="variant-sku-prefix">SKU prefix</Label>
-                      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <Input
-                          id="variant-sku-prefix"
-                          placeholder="e.g. SHIRT"
-                          value={sku}
-                          onChange={(e) => setSku(e.target.value)}
-                          disabled={isReadOnly}
-                        />
-                        {!isReadOnly && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setVariants((prev) => fillEmptyVariantSkus(prev, sku))}
-                          >
-                            Fill empty SKUs
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1.5">
-                        New combinations get SKUs like {buildAutoSku(sku, ["Red", "S"]) || "RED-S"}. Existing SKUs stay unless they are empty.
-                      </p>
-                    </div>
-
                     {variantOptions.map((option, optionIdx) => (
                       <div key={optionIdx} className="border border-slate-200 rounded-lg p-4">
                         <div className="flex items-start gap-4 mb-3">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { categoriesApi } from "../../utils/api";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface CategorySelectProps {
   value: string;
@@ -9,6 +10,7 @@ interface CategorySelectProps {
 }
 
 export function CategorySelect({ value, onValueChange, disabled }: CategorySelectProps) {
+  const { t } = useLanguage();
   const [categories, setCategories] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -41,7 +43,15 @@ export function CategorySelect({ value, onValueChange, disabled }: CategorySelec
   return (
     <Select value={value} onValueChange={onValueChange} disabled={disabled || isLoading || categories.length === 0}>
       <SelectTrigger className="mt-2">
-        <SelectValue placeholder={isLoading ? "Loading categories..." : categories.length === 0 ? "No categories found" : "Select category"} />
+        <SelectValue
+          placeholder={
+            isLoading
+              ? t("addProduct.categoryPlaceholder")
+              : categories.length === 0
+                ? t("categories.noCategoriesFound")
+                : t("addProduct.selectCategory")
+          }
+        />
       </SelectTrigger>
       <SelectContent>
         {categories.length > 0 ? (
@@ -52,7 +62,7 @@ export function CategorySelect({ value, onValueChange, disabled }: CategorySelec
           ))
         ) : (
           <SelectItem value="no-categories-available" disabled>
-            No categories found
+            {t("categories.noCategoriesFound")}
           </SelectItem>
         )}
       </SelectContent>

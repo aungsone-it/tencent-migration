@@ -129,6 +129,7 @@ export function VendorAdminAddProduct({
   const [variants, setVariants] = useState<Variant[]>([]);
   const variantsRef = useRef<Variant[]>([]);
   const variantOptionsRef = useRef(variantOptions);
+  const defaultPriceRef = useRef(price);
   variantsRef.current = variants;
   
   // Initialize variants from initialData when editing
@@ -177,7 +178,7 @@ export function VendorAdminAddProduct({
 
   const addVariantOption = () => {
     if (variantOptions.length < 3) {
-      setVariantOptions([...variantOptions, { name: `Option ${variantOptions.length + 1}`, values: [] }]);
+      setVariantOptions([...variantOptions, { name: `Option ${variantOptions.length + 1}`, values: [""] }]);
     }
   };
 
@@ -214,6 +215,7 @@ export function VendorAdminAddProduct({
     if (!hasVariants || variantOptions.length === 0) {
       if (variantsRef.current.length > 0) setVariants([]);
       variantOptionsRef.current = variantOptions;
+      defaultPriceRef.current = price;
       return;
     }
 
@@ -222,6 +224,7 @@ export function VendorAdminAddProduct({
     if (validOptions.length === 0) {
       if (variantsRef.current.length > 0) setVariants([]);
       variantOptionsRef.current = variantOptions;
+      defaultPriceRef.current = price;
       return;
     }
 
@@ -229,10 +232,13 @@ export function VendorAdminAddProduct({
       options: variantOptions,
       previous: variantsRef.current,
       previousOptions: variantOptionsRef.current,
+      defaultPrice: price,
+      previousDefaultPrice: defaultPriceRef.current,
     });
     variantOptionsRef.current = variantOptions;
+    defaultPriceRef.current = price;
     setVariants(nextVariants);
-  }, [variantOptions, hasVariants]);
+  }, [variantOptions, hasVariants, price]);
 
   const updateVariant = (id: string, field: keyof Variant, value: any) => {
     setVariants(variants.map(v => v.id === id ? { ...v, [field]: value } : v));

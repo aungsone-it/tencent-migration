@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import { useLocation } from "react-router";
 import { Language, LanguageContext } from "./language-core";
 import { enTranslations } from "./translations/en";
+import { zhTranslations } from "./translations/zh";
 import {
   isAdminLanguageScope,
   readStoredLanguage,
@@ -20,7 +21,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   );
   const [storefrontLanguageOverride, setStorefrontLanguageOverrideState] =
     useState<Language | null>(null);
-  const [zhMap, setZhMap] = useState<TranslationMap | null>(null);
   const [myMap, setMyMap] = useState<TranslationMap | null>(null);
 
   const effectiveLanguage: Language =
@@ -36,17 +36,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     if (storefrontLanguageOverride) return;
     writeStoredLanguage(languageScope, language);
   }, [language, languageScope, storefrontLanguageOverride]);
-
-  useEffect(() => {
-    if (effectiveLanguage !== "zh" || zhMap) return;
-    let cancelled = false;
-    void import("./translations/zh").then((mod) => {
-      if (!cancelled) setZhMap(mod.zhTranslations as TranslationMap);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveLanguage, zhMap]);
 
   useEffect(() => {
     if (effectiveLanguage !== "my" || myMap) return;
@@ -69,15 +58,15 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const t = useCallback(
     (key: string): string => {
-      if (effectiveLanguage === "zh" && zhMap) {
-        return zhMap[key] ?? enTranslations[key] ?? key;
+      if (effectiveLanguage === "zh") {
+        return zhTranslations[key] ?? enTranslations[key] ?? key;
       }
       if (effectiveLanguage === "my" && myMap) {
         return myMap[key] ?? enTranslations[key] ?? key;
       }
       return enTranslations[key] ?? key;
     },
-    [effectiveLanguage, zhMap, myMap]
+    [effectiveLanguage, myMap, zhTranslations, enTranslations]
   );
 
   const value = useMemo(

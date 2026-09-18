@@ -20,11 +20,15 @@ import { useLanguage } from "../contexts/LanguageContext";
 import { IMAGE_CONFIG } from "../../constants";
 import {
   applyImageToOptionValue,
-  dominantOptionIndex,
-  findDuplicateVariantSkus,
   generateProductFormVariants,
+  findDuplicateVariantSkus,
   LIVE_VARIANT_SKU_CHECK_LIMIT,
+  optionValueImageKey,
+  optionValueImagesFromVariants,
   sanitizeVariantOptions,
+  sharedImageForOptionValue,
+  variantOptionSlotIndex,
+  visualOptionIndex,
 } from "../utils/productFormVariants";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
@@ -187,17 +191,19 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     { name: "", values: [""] },
   ]);
   const [variants, setVariants] = useState<Variant[]>([]);
+  const [optionValueImages, setOptionValueImages] = useState<Record<string, string>>({});
   const [isInitializing, setIsInitializing] = useState(true); // 🔥 NEW: Track if we're loading initial data
   const variantsRef = useRef<Variant[]>([]);
   const variantOptionsRef = useRef(variantOptions);
+  const defaultPriceRef = useRef(price);
   variantsRef.current = variants;
 
   const patchVariant = (id: string, patch: Partial<Variant>) => {
     setVariants((prev) => prev.map((variant) => (variant.id === id ? { ...variant, ...patch } : variant)));
   };
-  const colorSizeImageOptionIndex = dominantOptionIndex(variantOptions);
-  const colorSizeImageOptionName =
-    sanitizeVariantOptions(variantOptions)[colorSizeImageOptionIndex]?.name || "this option";
+  const visualUiIndex = visualOptionIndex(variantOptions);
+  const visualSlot = variantOptionSlotIndex(variantOptions, visualUiIndex);
+  const visualOptionName = variantOptions[visualUiIndex]?.name?.trim() || "this option";
   
   // Initialize variants from initialData when editing
   useEffect(() => {
@@ -229,11 +235,10 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         setHasVariants(true);
         
         // Set variants FIRST before variantOptions to preserve data
-        setVariants(
-          initialData.variants.map((v: Record<string, unknown>, idx: number) =>
-            normalizeVariantForForm(v, idx)
-          )
+        const loadedVariants = initialData.variants.map(
+          (v: Record<string, unknown>, idx: number) => normalizeVariantForForm(v, idx)
         );
+        setVariants(loadedVariants);
         console.log("✅ Set variants state with", initialData.variants.length, "variants");
         
         // Reconstruct variant options from variants
@@ -241,6 +246,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
           console.log("📝 Loading variant options:", initialData.variantOptions);
           setVariantOptions(initialData.variantOptions);
           variantOptionsRef.current = initialData.variantOptions;
+          setOptionValueImages(
+            optionValueImagesFromVariants(initialData.variantOptions, loadedVariants)
+          );
           console.log("✅ Set variantOptions state");
         } else {
           const derivedOptions = deriveVariantOptionsFromVariants(initialData.variants);
@@ -248,6 +256,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
             console.log("📝 Derived variant options from variants:", derivedOptions);
             setVariantOptions(derivedOptions);
             variantOptionsRef.current = derivedOptions;
+            setOptionValueImages(optionValueImagesFromVariants(derivedOptions, loadedVariants));
           } else {
             console.log("⚠️ No variantOptions found, will not auto-generate");
           }
@@ -304,7 +313,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       try {
         const result = await productsApi.checkSku(sku, initialData?.id);
         if (!result.isUnique) {
-          setSkuError(`⚠️ SKU already exists in: ${result.existingProduct?.name || 'another product'}`);
+          setSkuError(
+            t("addProduct.skuAlreadyExists").replace(
+              "{name}",
+              result.existingProduct?.name || t("addProduct.anotherProduct")
+            )
+          );
         } else {
           setSkuError("");
         }
@@ -317,7 +331,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     }, 600); // Wait 600ms after user stops typing
 
     return () => clearTimeout(timeoutId);
-  }, [sku, isReadOnly, hasVariants, initialData?.id]);
+  }, [sku, isReadOnly, hasVariants, initialData?.id, t]);
 
   // Debounced SKU validation for variants
   useEffect(() => {
@@ -329,8 +343,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     const timeoutId = setTimeout(async () => {
       const errors: { [key: string]: string } = {};
       const duplicateSkus = findDuplicateVariantSkus(variants);
-      duplicateSkus.forEach((message, variantId) => {
-        errors[variantId] = message;
+      duplicateSkus.forEach((_, variantId) => {
+        const skuValue = variants.find((v) => v.id === variantId)?.sku?.trim() || "";
+        errors[variantId] = t("addProduct.duplicateSku").replace("{sku}", skuValue);
       });
 
       const uniqueSkus = [
@@ -360,7 +375,10 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
           if (!row || row.result.isUnique) continue;
           taken.set(
             row.value.toLowerCase(),
-            `⚠️ Exists in: ${row.result.existingProduct?.name || "another product"}`
+            t("addProduct.skuExistsIn").replace(
+              "{name}",
+              row.result.existingProduct?.name || t("addProduct.anotherProduct")
+            )
           );
         }
         for (const variant of variants) {
@@ -379,6 +397,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     hasVariants,
     isReadOnly,
     initialData?.id,
+    t,
   ]);
 
   // 🔥 Fetch approved vendors on mount
@@ -449,7 +468,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
 
   const addVariantOption = () => {
     if (variantOptions.length < 3) {
-      setVariantOptions([...variantOptions, { name: `Option ${variantOptions.length + 1}`, values: [] }]);
+      setVariantOptions([...variantOptions, { name: `Option ${variantOptions.length + 1}`, values: [""] }]);
     }
   };
 
@@ -499,6 +518,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         setVariants([]);
       }
       variantOptionsRef.current = variantOptions;
+      defaultPriceRef.current = price;
       return;
     }
 
@@ -508,6 +528,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         setVariants([]);
       }
       variantOptionsRef.current = variantOptions;
+      defaultPriceRef.current = price;
       return;
     }
 
@@ -515,10 +536,14 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       options: variantOptions,
       previous: variantsRef.current,
       previousOptions: variantOptionsRef.current,
+      optionValueImages,
+      defaultPrice: price,
+      previousDefaultPrice: defaultPriceRef.current,
     });
     variantOptionsRef.current = variantOptions;
+    defaultPriceRef.current = price;
     setVariants(nextVariants);
-  }, [hasVariants, variantOptions, isInitializing, mode]);
+  }, [hasVariants, variantOptions, isInitializing, mode, optionValueImages, price]);
 
   const handleProductStatusChange = (newStatus: string) => {
     setStatus(newStatus);
@@ -527,20 +552,20 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
   const handleSubmit = async () => {
     // Validation: Check required fields based on whether variants are enabled
     if (!title) {
-      toast.error("Please fill in the product title");
+      toast.error(t("addProduct.fillTitle"));
       return;
     }
 
     if (isCheckingSku) {
-      toast.error("Please wait for SKU validation to finish");
+      toast.error(t("addProduct.waitSkuValidation"));
       return;
     }
     if (skuError) {
-      toast.error("Fix the SKU error before saving");
+      toast.error(t("addProduct.fixSkuError"));
       return;
     }
     if (Object.values(variantSkuErrors).some(Boolean)) {
-      toast.error("Fix variant SKU errors before saving");
+      toast.error(t("addProduct.fixVariantSkuErrors"));
       return;
     }
 
@@ -553,11 +578,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       const duplicateSkus = findDuplicateVariantSkus(variantsForSave);
       if (duplicateSkus.size > 0) {
         const nextErrors: { [key: string]: string } = {};
-        duplicateSkus.forEach((message, variantId) => {
-          nextErrors[variantId] = message;
+        duplicateSkus.forEach((_, variantId) => {
+          const skuValue = variantsForSave.find((v) => v.id === variantId)?.sku?.trim() || "";
+          nextErrors[variantId] = t("addProduct.duplicateSku").replace("{sku}", skuValue);
         });
         setVariantSkuErrors((prev) => ({ ...prev, ...nextErrors }));
-        toast.error("Variant SKUs must be unique. Duplicate SKUs are not allowed.");
+        toast.error(t("addProduct.duplicateSkusNotAllowed"));
         return;
       }
     }
@@ -566,26 +592,26 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     if (!isOffShelf) {
       if (hasVariants) {
         if (variantsForSave.length === 0) {
-          toast.error("Please add at least one variant");
+          toast.error(t("addProduct.addAtLeastOneVariant"));
           return;
         }
         const hasValidVariant = variantsForSave.some((v) => v.sku && v.sku.trim() !== "");
         if (!hasValidVariant) {
-          toast.error("Please fill in SKU for at least one variant");
+          toast.error(t("addProduct.fillVariantSku"));
           return;
         }
         const hasVariantWithPrice = variantsForSave.some((v) => parsePriceInput(v.price) > 0);
         if (!hasVariantWithPrice) {
-          toast.error("Please fill in price for at least one variant");
+          toast.error(t("addProduct.fillVariantPrice"));
           return;
         }
       } else {
         if (parsePriceInput(price) <= 0) {
-          toast.error("Please fill in all required fields: Title, Price, and SKU");
+          toast.error(t("addProduct.fillRequiredFields"));
           return;
         }
         if (!sku?.trim()) {
-          toast.error("Please fill in all required fields: Title, Price, and SKU");
+          toast.error(t("addProduct.fillRequiredFields"));
           return;
         }
       }
@@ -636,7 +662,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
               (v as { image: string }).image.startsWith("data:image/")
           ));
       if (hasInlineImages) {
-        toast.info("Uploading product images...", { duration: 3000 });
+        toast.info(t("addProduct.uploadingProductImages"), { duration: 3000 });
       }
 
       const specificationsForSave = specifications
@@ -689,7 +715,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       
       // Warn if payload is too large
       if (payloadSize > 4 * 1024 * 1024) { // 4MB warning threshold
-        toast.warning(`Large upload (${sizeInMB}MB). This may take a moment...`, { duration: 3000 });
+        toast.warning(t("addProduct.largeUpload").replace("{size}", sizeInMB), { duration: 3000 });
       }
       
       // If editing, pass the product ID as the first argument
@@ -700,7 +726,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       }
     } catch (error) {
       console.error("Error saving product:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to save product");
+      toast.error(error instanceof Error ? error.message : t("addProduct.failedToSave"));
     } finally {
       setIsSaving(false);
     }
@@ -710,14 +736,14 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     const files = e.target.files;
     if (files) {
       setUploadingImages(true);
-      toast.info("Compressing images...", { duration: 2000 });
+      toast.info(t("addProduct.compressingImages"), { duration: 2000 });
       
       try {
         // Convert FileList to Array and filter only images
         const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
         
         if (imageFiles.length === 0) {
-          toast.error("No valid image files selected");
+          toast.error(t("addProduct.noValidImages"));
           setUploadingImages(false);
           return;
         }
@@ -727,7 +753,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         const availableSlots = Math.max(0, MAX_PRODUCT_IMAGES - images.length);
         const filesToProcess = imageFiles.slice(0, availableSlots);
         if (filesToProcess.length === 0) {
-          toast.error(`Maximum ${MAX_PRODUCT_IMAGES} images per product`);
+          toast.error(t("addProduct.maxImages").replace("{count}", String(MAX_PRODUCT_IMAGES)));
           setUploadingImages(false);
           return;
         }
@@ -736,11 +762,11 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         }
 
         setImages((prev) => [...dataUrls, ...prev].slice(0, MAX_PRODUCT_IMAGES));
-        toast.success(`${dataUrls.length} image(s) added`);
+        toast.success(t("addProduct.imagesAdded").replace("{count}", String(dataUrls.length)));
       } catch (error) {
         console.error("Error uploading images:", error);
         toast.error(
-          error instanceof Error ? error.message : "Failed to upload images"
+          error instanceof Error ? error.message : t("addProduct.failedToUpload")
         );
       } finally {
         setUploadingImages(false);
@@ -761,14 +787,14 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     const files = e.dataTransfer.files;
     if (files && files.length > 0 && images.length < MAX_PRODUCT_IMAGES) {
       setUploadingImages(true);
-      toast.info("Compressing images...", { duration: 2000 });
+      toast.info(t("addProduct.compressingImages"), { duration: 2000 });
       
       try {
         // Convert FileList to Array and filter only images
         const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
         
         if (imageFiles.length === 0) {
-          toast.error("No valid image files selected");
+          toast.error(t("addProduct.noValidImages"));
           setUploadingImages(false);
           return;
         }
@@ -784,11 +810,11 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         }
 
         setImages((prev) => [...dataUrls, ...prev]);
-        toast.success(`${dataUrls.length} image(s) added`);
+        toast.success(t("addProduct.imagesAdded").replace("{count}", String(dataUrls.length)));
       } catch (error) {
         console.error("Error uploading images:", error);
         toast.error(
-          error instanceof Error ? error.message : "Failed to upload images"
+          error instanceof Error ? error.message : t("addProduct.failedToUpload")
         );
       } finally {
         setUploadingImages(false);
@@ -816,7 +842,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
               </Button>
               <div>
                 <h1 className="text-2xl font-semibold text-slate-900">
-                  {mode === "add" ? t('addProduct.title') : mode === "edit" ? "Edit product" : "View product"}
+                  {mode === "add" ? t('addProduct.title') : mode === "edit" ? t('addProduct.editTitle') : t('addProduct.viewTitle')}
                 </h1>
               </div>
             </div>
@@ -832,13 +858,13 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     className="bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50"
                   >
                     {isSaving && <Sparkles className="w-4 h-4 mr-2 animate-spin" />}
-                    {isSaving ? "Saving..." : t('addProduct.save')}
+                    {isSaving ? t('addProduct.saving') : t('addProduct.save')}
                   </Button>
                 </>
               )}
               {isReadOnly && (
                 <Button variant="outline" onClick={onCancel}>
-                  Close
+                  {t('addProduct.close')}
                 </Button>
               )}
             </div>
@@ -859,7 +885,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     <Label htmlFor="title">{t('addProduct.productTitle')}</Label>
                     <Input
                       id="title"
-                      placeholder="Short sleeve t-shirt"
+                      placeholder={t('addProduct.titlePlaceholder')}
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       disabled={isReadOnly}
@@ -950,7 +976,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
               <CardHeader>
                 <CardTitle>{t('addProduct.media')}</CardTitle>
                 <CardDescription>
-                  Add up to {MAX_PRODUCT_IMAGES} photos. Assign them to colors or sizes in Variants. First image is the cover. Images upload to storage when you save.
+                  {t('addProduct.mediaHint').replace('{count}', String(MAX_PRODUCT_IMAGES))}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -960,7 +986,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     {uploadingImages ? (
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-8 text-center">
                         <Loader2 className="h-10 w-10 animate-spin text-purple-600" />
-                        <p className="text-sm font-medium text-slate-700">Uploading images...</p>
+                        <p className="text-sm font-medium text-slate-700">{t('addProduct.uploadingImages')}</p>
                       </div>
                     ) : (
                       <label
@@ -974,12 +1000,18 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                         </div>
                         <div>
                           <span className="text-sm font-medium text-purple-600 hover:text-purple-700">
-                            Click to upload
+                            {t('addProduct.clickToUpload')}
                           </span>
-                          <span className="text-sm text-slate-500"> or drag and drop</span>
+                          <span className="text-sm text-slate-500">{t('addProduct.orDragAndDrop')}</span>
                           <p className="mt-1 text-xs text-slate-500">
-                            PNG, JPG, GIF up to 10MB ({MAX_PRODUCT_IMAGES - images.length}{" "}
-                            {MAX_PRODUCT_IMAGES - images.length === 1 ? "slot" : "slots"} remaining)
+                            {t('addProduct.uploadFormats')
+                              .replace('{count}', String(MAX_PRODUCT_IMAGES - images.length))
+                              .replace(
+                                '{unit}',
+                                MAX_PRODUCT_IMAGES - images.length === 1
+                                  ? t('addProduct.slot')
+                                  : t('addProduct.slots')
+                              )}
                           </p>
                         </div>
                       </label>
@@ -1016,7 +1048,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                               onClick={() => setAsMainImage(idx)}
                               className="h-8 text-xs"
                             >
-                              Set as main
+                              {t('addProduct.setAsMain')}
                             </Button>
                           )}
                           {!isReadOnly && (
@@ -1034,7 +1066,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                         {/* Main Badge */}
                         {idx === 0 && (
                           <Badge className="absolute top-2 left-2 bg-purple-600 text-white border-0 shadow-md">
-                            Main Image
+                            {t('addProduct.mainImage')}
                           </Badge>
                         )}
                         
@@ -1051,7 +1083,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                 {images.length === 0 && isReadOnly && (
                   <div className="text-center py-8 text-slate-400">
                     <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No images uploaded</p>
+                    <p className="text-sm">{t('addProduct.noImages')}</p>
                   </div>
                 )}
               </CardContent>
@@ -1060,12 +1092,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
             {/* Pricing */}
             <Card>
               <CardHeader>
-                <CardTitle>Pricing</CardTitle>
+                <CardTitle>{t('addProduct.pricing')}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="price">Price</Label>
+                    <Label htmlFor="price">{t('addProduct.price')}</Label>
                     <div className="relative mt-2">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <Input
@@ -1091,7 +1123,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="compareAtPrice">Compare-at price</Label>
+                    <Label htmlFor="compareAtPrice">{t('addProduct.compareAtPrice')}</Label>
                     <div className="relative mt-2">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <Input
@@ -1118,7 +1150,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                   </div>
                 </div>
                 <div>
-                  <Label htmlFor="costPerItem">Cost per item</Label>
+                  <Label htmlFor="costPerItem">{t('addProduct.costPerItem')}</Label>
                   <div className="relative mt-2">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                     <Input
@@ -1142,12 +1174,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                       className="pl-7"
                     />
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">Customers won't see this price</p>
+                  <p className="text-xs text-slate-500 mt-1">{t('addProduct.costPerItemHint')}</p>
                 </div>
                 
                 {/* 🔥 Commission Rate Field */}
                 <div>
-                  <Label htmlFor="commissionRate">Commission Rate (%)</Label>
+                  <Label htmlFor="commissionRate">{t('addProduct.commissionRate')}</Label>
                   <div className="relative mt-2">
                     <Input
                       id="commissionRate"
@@ -1171,7 +1203,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">%</span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">Leave blank for no product-specific rate (uses vendor contract, otherwise 0%).</p>
+                  <p className="text-xs text-slate-500 mt-1">{t('addProduct.commissionRateHint')}</p>
                 </div>
                 
                 {compareAtPrice && parseFloat(compareAtPrice) > parseFloat(price) && (
@@ -1179,8 +1211,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     <AlertCircle className="w-4 h-4 text-green-600 mt-0.5" />
                     <div>
                       <p className="text-sm font-medium text-green-900">
-                        Savings: ${(parseFloat(compareAtPrice) - parseFloat(price)).toFixed(2)} (
-                        {(((parseFloat(compareAtPrice) - parseFloat(price)) / parseFloat(compareAtPrice)) * 100).toFixed(0)}% off)
+                        {t('addProduct.savings')
+                          .replace('${amount}', `$${(parseFloat(compareAtPrice) - parseFloat(price)).toFixed(2)}`)
+                          .replace('{percent}', (((parseFloat(compareAtPrice) - parseFloat(price)) / parseFloat(compareAtPrice)) * 100).toFixed(0))}
                       </p>
                     </div>
                   </div>
@@ -1191,9 +1224,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
             {/* Variants */}
             <Card>
               <CardHeader>
-                <CardTitle>Variants</CardTitle>
+                <CardTitle>{t('addProduct.variants')}</CardTitle>
                 <CardDescription>
-                  Add variants if this product comes in multiple versions, like different sizes or colors
+                  {t('addProduct.variantsHint')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1205,23 +1238,25 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     disabled={isReadOnly}
                   />
                   <Label htmlFor="hasVariants" className="cursor-pointer font-normal">
-                    This product has multiple options, like different sizes or colors
+                    {t('addProduct.hasMultipleOptions')}
                   </Label>
                 </div>
 
                 {hasVariants && (
-                  <div className="space-y-4 pt-4">
+                  <div className="space-y-5 pt-3">
+                    <div className="space-y-5">
                     {variantOptions.map((option, optionIdx) => (
-                      <div key={optionIdx} className="border border-slate-200 rounded-lg p-4">
-                        <div className="flex items-start gap-4 mb-3">
+                      <div key={optionIdx} className="space-y-3">
+                        <div className="flex items-end gap-3">
                           <div className="flex-1">
-                            <Label>Option name</Label>
+                            <div className="mb-1.5">
+                              <Label className="text-sm font-medium text-slate-800">{t('addProduct.optionName')}</Label>
+                            </div>
                             <Input
-                              placeholder="Size, Color, Material"
+                              placeholder={t('addProduct.optionNamePlaceholder')}
                               value={option.name}
                               onChange={(e) => updateVariantOptionName(optionIdx, e.target.value)}
                               disabled={isReadOnly}
-                              className="mt-2"
                             />
                           </div>
                           {!isReadOnly && variantOptions.length > 1 && (
@@ -1229,64 +1264,70 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                               variant="ghost"
                               size="sm"
                               onClick={() => removeVariantOption(optionIdx)}
-                              className="mt-6"
+                              className="mb-0.5 h-9 w-9 shrink-0 text-slate-400 hover:text-red-600"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
                           )}
                         </div>
 
-                        {/* Option values with individual add/remove */}
-                        <div className="space-y-2">
-                          <Label className="text-sm">Option values</Label>
-                          <p className="text-xs text-slate-500">
-                            Assign a photo to each {option.name.trim() || "value"} — it applies to every matching size/color combination.
+                        <div>
+                          <Label className="text-sm text-slate-600">{t('addProduct.optionValues')}</Label>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {t('addProduct.optionValuesHint').replace(
+                              '{name}',
+                              option.name.trim() || t('addProduct.optionValueFallback')
+                            )}
                           </p>
+                          <div className="mt-2 divide-y divide-dotted divide-slate-400 rounded-lg border-2 border-dotted border-slate-400 bg-white">
                           {option.values.map((value, valueIdx) => {
-                            const assignedImage = variants.find(
-                              (variant) =>
-                                [variant.option1, variant.option2, variant.option3][optionIdx] === value &&
-                                Boolean(variant.image)
-                            )?.image;
+                            const slot = variantOptionSlotIndex(variantOptions, optionIdx);
+                            const assignedImage =
+                              optionValueImages[optionValueImageKey(optionIdx, value)] ||
+                              sharedImageForOptionValue(variants, slot, value);
                             return (
-                            <div key={valueIdx} className="space-y-2 rounded-md border border-slate-100 p-2">
+                            <div key={valueIdx} className="space-y-2 px-3 py-2.5">
                               <div className="flex items-center gap-2">
                                 <Input
-                                  placeholder="Enter value (e.g., Green, Blue, Red)"
+                                  placeholder={t('addProduct.optionValuePlaceholder')}
                                   value={value}
                                   onChange={(e) => updateSingleVariantValue(optionIdx, valueIdx, e.target.value)}
                                   disabled={isReadOnly}
-                                  className="flex-1"
+                                  className="h-9 flex-1 border-dotted border-slate-300 bg-slate-50/80 shadow-none"
                                 />
                                 {!isReadOnly && option.values.length > 1 && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => removeSingleVariantValue(optionIdx, valueIdx)}
+                                    className="h-8 w-8 shrink-0 text-slate-400 hover:text-red-600"
                                   >
-                                    <X className="w-4 h-4" />
+                                    <Trash2 className="w-4 h-4" />
                                   </Button>
                                 )}
                               </div>
-                              {value.trim() && images.length > 0 && (
+                              {value.trim() && images.length > 0 && slot >= 0 && (
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   {images.map((url, imgIdx) => (
                                     <button
                                       key={imgIdx}
                                       type="button"
-                                      title={`Match image to ${value}`}
+                                      title={t('addProduct.matchImageTo').replace('{value}', value)}
                                       onClick={() => {
-                                        if (!isReadOnly) {
-                                          setVariants((prev) =>
-                                            applyImageToOptionValue(prev, optionIdx, value, url)
-                                          );
-                                        }
+                                        if (isReadOnly) return;
+                                        setOptionValueImages((prev) => ({
+                                          ...prev,
+                                          [optionValueImageKey(optionIdx, value)]: url,
+                                        }));
+                                        setVariants((prev) =>
+                                          applyImageToOptionValue(prev, slot, value, url)
+                                        );
                                       }}
                                       disabled={isReadOnly}
-                                      className={`h-9 w-9 overflow-hidden rounded border-2 ${
+                                      className={`h-9 w-9 overflow-hidden rounded-md border border-dotted transition-all ${
                                         assignedImage === url
-                                          ? "border-blue-600 ring-2 ring-blue-200"
-                                          : "border-slate-200 hover:border-slate-400"
+                                          ? "border-solid border-blue-600 ring-2 ring-blue-100"
+                                          : "border-slate-300 hover:border-slate-400"
                                       } ${isReadOnly ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
                                     >
                                       <img src={url} alt="" className="h-full w-full object-cover" />
@@ -1298,28 +1339,29 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                             );
                           })}
                           {!isReadOnly && (
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            <button
+                              type="button"
                               onClick={() => addSingleVariantValue(optionIdx)}
-                              className="w-full mt-2"
+                              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
                             >
-                              <Plus className="w-4 h-4 mr-2" />
-                              Add another value
-                            </Button>
+                              <Plus className="h-4 w-4" />
+                              {t('addProduct.addAnotherValue')}
+                            </button>
                           )}
+                          </div>
                         </div>
                       </div>
                     ))}
+                    </div>
 
                     {!isReadOnly && variantOptions.length < 3 && (
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         onClick={addVariantOption}
-                        className="w-full"
+                        className="w-full border-2 border-dotted border-slate-400 text-slate-600 hover:border-slate-500 hover:bg-slate-50 hover:text-slate-900"
                       >
                         <Plus className="w-4 h-4 mr-2" />
-                        Add another option
+                        {t('addProduct.addAnotherOption')}
                       </Button>
                     )}
 
@@ -1327,32 +1369,35 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
 
                     {/* Variant List */}
                     <div>
-                      <h4 className="font-semibold mb-1">Variant details</h4>
+                      <h4 className="font-semibold mb-1">{t('addProduct.variantDetails')}</h4>
                       <p className="text-xs text-slate-500 mb-3">
-                        {variants.length} combination{variants.length === 1 ? "" : "s"} from the options above
+                        {(variants.length === 1
+                          ? t('addProduct.combinationCount')
+                          : t('addProduct.combinationsCount')
+                        ).replace('{count}', String(variants.length))}
                       </p>
-                      <div className="space-y-2">
+                      <div className="overflow-hidden rounded-lg border-2 border-dotted border-slate-400 divide-y divide-dotted divide-slate-400">
                         {variants.map((variant) => {
                           const variantName = [variant.option1, variant.option2, variant.option3]
                             .filter(Boolean)
                             .join(' / ');
-                          const imageOptionIndex = colorSizeImageOptionIndex;
-                          const imageOptionValue = [variant.option1, variant.option2, variant.option3][imageOptionIndex];
-                          const imageOptionName = colorSizeImageOptionName;
+                          const imageOptionValue =
+                            visualSlot >= 0
+                              ? [variant.option1, variant.option2, variant.option3][visualSlot]
+                              : undefined;
+                          const imageOptionName = visualOptionName;
                           
                           return (
-                            <div key={variant.id} className="border border-slate-200 rounded-lg p-3">
-                              <div className="flex items-center gap-3 mb-3">
-                                <GripVertical className="w-4 h-4 text-slate-400" />
-                                <span className="font-medium text-slate-900">{variantName}</span>
+                            <div key={variant.id} className="bg-white px-4 py-3">
+                              <div className="mb-2 flex items-center gap-2">
+                                <GripVertical className="h-4 w-4 text-slate-300" />
+                                <span className="text-sm font-medium text-slate-900">{variantName}</span>
                               </div>
                               
                               {/* Variant Image Selector */}
                               {images.length > 0 && (
-                                <div className="pl-7 mb-3">
-                                  <Label className="text-xs mb-1.5 block">Variant Image</Label>
-                                  <div className="flex items-start gap-3">
-                                    <div className="flex flex-wrap gap-2">
+                                <div className="mb-3 flex flex-wrap items-center gap-2 pl-6">
+                                    <div className="flex flex-wrap gap-1.5">
                                       {images.map((url, imgIdx) => (
                                         <button
                                           key={imgIdx}
@@ -1363,58 +1408,65 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                             }
                                           }}
                                           disabled={isReadOnly}
-                                          className={`w-14 h-14 rounded border-2 overflow-hidden transition-all ${
+                                          className={`h-10 w-10 overflow-hidden rounded-md border border-dotted transition-all ${
                                             variant.image === url
-                                              ? 'border-blue-600 ring-2 ring-blue-200'
-                                              : 'border-slate-200 hover:border-slate-400'
+                                              ? 'border-solid border-blue-600 ring-2 ring-blue-100'
+                                              : 'border-slate-300 hover:border-slate-400'
                                           } ${isReadOnly ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                                         >
                                           <img
                                             src={url}
                                             alt={`Option ${imgIdx + 1}`}
-                                            className="w-full h-full object-cover"
+                                            className="h-full w-full object-cover"
                                           />
                                         </button>
                                       ))}
                                     </div>
                                     {variant.image && !isReadOnly && (
-                                      <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-1">
                                         {imageOptionValue ? (
                                           <Button
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => {
+                                              if (!variant.image || visualSlot < 0 || !imageOptionValue) return;
+                                              setOptionValueImages((prev) => ({
+                                                ...prev,
+                                                [optionValueImageKey(visualUiIndex, String(imageOptionValue))]:
+                                                  variant.image || "",
+                                              }));
                                               setVariants((prev) =>
                                                 applyImageToOptionValue(
                                                   prev,
-                                                  imageOptionIndex,
+                                                  visualSlot,
                                                   String(imageOptionValue),
                                                   variant.image || ""
                                                 )
                                               );
                                             }}
-                                            className="text-xs h-7 px-2"
+                                            className="h-7 px-2 text-xs text-slate-600"
                                           >
-                                            Apply to all {imageOptionName} {imageOptionValue}
+                                            {t('addProduct.applyToAll')
+                                              .replace('{name}', String(imageOptionName || ''))
+                                              .replace('{value}', String(imageOptionValue))}
                                           </Button>
                                         ) : null}
                                         <Button
                                           variant="ghost"
                                           size="sm"
                                           onClick={() => patchVariant(variant.id, { image: "" })}
-                                          className="text-xs text-red-600 hover:text-red-700 h-7 px-2"
+                                          className="h-7 px-2 text-xs text-red-600 hover:text-red-700"
                                         >
-                                          Clear
+                                          {t('addProduct.clear')}
                                         </Button>
                                       </div>
                                     )}
-                                  </div>
                                 </div>
                               )}
                               
-                              <div className="grid grid-cols-4 gap-3 pl-7">
+                              <div className="grid grid-cols-4 gap-3 pl-6">
                                 <div>
-                                  <Label className="text-xs">Price</Label>
+                                  <Label className="text-xs">{t('addProduct.price')}</Label>
                                   <Input
                                     type="number"
                                     min="0"
@@ -1436,7 +1488,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                   />
                                 </div>
                                 <div>
-                                  <Label className="text-xs">SKU</Label>
+                                  <Label className="text-xs">{t('addProduct.sku')}</Label>
                                   <Input
                                     placeholder="ABC-123"
                                     value={variant.sku || ''}
@@ -1447,7 +1499,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                   {variantSkuErrors[variant.id] && <p className="text-xs text-red-500 mt-1.5">{variantSkuErrors[variant.id]}</p>}
                                 </div>
                                 <div>
-                                  <Label className="text-xs">Quantity</Label>
+                                  <Label className="text-xs">{t('addProduct.quantity')}</Label>
                                   <Input
                                     type="number"
                                     min="0"
@@ -1468,9 +1520,9 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                   />
                                 </div>
                                 <div>
-                                  <Label className="text-xs">Weight</Label>
+                                  <Label className="text-xs">{t('addProduct.weight')}</Label>
                                   <Input
-                                    placeholder="0.0 kg"
+                                    placeholder={t('addProduct.weightPlaceholder')}
                                     value={variant.weight || ''}
                                     onChange={(e) => patchVariant(variant.id, { weight: e.target.value })}
                                     disabled={isReadOnly}
@@ -1492,12 +1544,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
             {!hasVariants && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Inventory</CardTitle>
+                  <CardTitle>{t('addProduct.inventory')}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="sku">SKU (Stock Keeping Unit)</Label>
+                      <Label htmlFor="sku">{t('addProduct.skuFull')}</Label>
                       <Input
                         id="sku"
                         placeholder="ABC-12345"
@@ -1508,13 +1560,13 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                       />
                       <p className="text-xs text-slate-500 mt-1.5">
                         <AlertCircle className="w-3 h-3 inline mr-1" />
-                        SKU must be unique across all products
+                        {t('addProduct.skuHint')}
                       </p>
-                      {isCheckingSku && <p className="text-xs text-slate-500 mt-1.5">Checking SKU...</p>}
+                      {isCheckingSku && <p className="text-xs text-slate-500 mt-1.5">{t('addProduct.checkingSku')}</p>}
                       {skuError && <p className="text-xs text-red-500 mt-1.5">{skuError}</p>}
                     </div>
                     <div>
-                      <Label htmlFor="barcode">Barcode (ISBN, UPC, GTIN, etc.)</Label>
+                      <Label htmlFor="barcode">{t('addProduct.barcode')}</Label>
                       <Input
                         id="barcode"
                         placeholder="123456789012"
@@ -1535,12 +1587,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                         disabled={isReadOnly}
                       />
                       <Label htmlFor="trackQuantity" className="cursor-pointer font-normal">
-                        Track quantity
+                        {t('addProduct.trackQuantity')}
                       </Label>
                     </div>
                     {trackQuantity && (
                       <div>
-                        <Label htmlFor="inventory">Quantity</Label>
+                        <Label htmlFor="inventory">{t('addProduct.quantity')}</Label>
                         <Input
                           id="inventory"
                           type="number"
@@ -1562,7 +1614,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                           className="mt-2"
                         />
                         <p className="text-xs text-slate-500 mt-1.5">
-                          Enter initial stock quantity (positive numbers only)
+                          {t('addProduct.quantityHint')}
                         </p>
                       </div>
                     )}
@@ -1575,7 +1627,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                       disabled={isReadOnly}
                     />
                     <Label htmlFor="continueSellingOutOfStock" className="cursor-pointer font-normal">
-                      Continue selling when out of stock
+                      {t('addProduct.continueSelling')}
                     </Label>
                   </div>
                 </CardContent>
@@ -1585,12 +1637,12 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
             {/* Shipping */}
             <Card>
               <CardHeader>
-                <CardTitle>Shipping</CardTitle>
-                <CardDescription>Configure shipping details for this product</CardDescription>
+                <CardTitle>{t('addProduct.shipping')}</CardTitle>
+                <CardDescription>{t('addProduct.shippingHint')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label htmlFor="weight">Weight</Label>
+                  <Label htmlFor="weight">{t('addProduct.weight')}</Label>
                   <Input
                     id="weight"
                     placeholder="0.0"
@@ -1599,7 +1651,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                     disabled={isReadOnly}
                     className="mt-2"
                   />
-                  <p className="text-xs text-slate-500 mt-1">Used to calculate shipping rates at checkout</p>
+                  <p className="text-xs text-slate-500 mt-1">{t('addProduct.weightHint')}</p>
                 </div>
               </CardContent>
             </Card>
@@ -1656,15 +1708,15 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                 </div>
                 <div>
                   <Label htmlFor="vendor" className="text-sm font-medium text-slate-700 mb-2 block">
-                    {t('addProduct.vendorLabel')} {selectedVendors.length > 0 && <span className="text-slate-500">({selectedVendors.length} selected)</span>}
+                    {t('addProduct.vendorLabel')} {selectedVendors.length > 0 && <span className="text-slate-500">{t('addProduct.selectedCount').replace('{count}', String(selectedVendors.length))}</span>}
                   </Label>
                   {loadingVendors ? (
                     <div className="h-10 border border-slate-300 rounded-md flex items-center justify-center text-sm text-slate-500">
-                      Loading vendors...
+                      {t('addProduct.loadingVendors')}
                     </div>
                   ) : vendors.length === 0 ? (
                     <div className="h-10 border border-slate-300 rounded-md flex items-center justify-center text-sm text-slate-500">
-                      No approved vendors available
+                      {t('addProduct.noVendors')}
                     </div>
                   ) : (
                     <div className="border border-slate-300 rounded-md max-h-48 overflow-y-auto">

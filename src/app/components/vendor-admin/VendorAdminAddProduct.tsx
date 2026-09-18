@@ -23,7 +23,7 @@
  * 5. Categories loaded from /vendor/categories/:vendorId
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Plus, X, Trash2, Upload, Image as ImageIcon, Package, DollarSign, Tag, Barcode, Grid, Hash, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -41,6 +41,7 @@ import { RichTextEditor } from "../RichTextEditor";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { Switch } from "../ui/switch";
 import { invalidateStaffActivitiesCache } from "../../utils/module-cache";
+import { generateProductFormVariants } from "../../utils/productFormVariants";
 
 interface Variant {
   id: string;
@@ -126,6 +127,10 @@ export function VendorAdminAddProduct({
     { name: "", values: [""] },
   ]);
   const [variants, setVariants] = useState<Variant[]>([]);
+  const variantsRef = useRef<Variant[]>([]);
+  const variantOptionsRef = useRef(variantOptions);
+  const skuPrefixRef = useRef(sku);
+  variantsRef.current = variants;
   
   // Initialize variants from initialData when editing
   useEffect(() => {
@@ -136,6 +141,7 @@ export function VendorAdminAddProduct({
         
         if (initialData.variantOptions && initialData.variantOptions.length > 0) {
           setVariantOptions(initialData.variantOptions);
+          variantOptionsRef.current = initialData.variantOptions;
         }
       } else if (initialData.hasVariants) {
         setHasVariants(true);
@@ -207,63 +213,30 @@ export function VendorAdminAddProduct({
   // Auto-generate variants when variant options change
   useEffect(() => {
     if (!hasVariants || variantOptions.length === 0) {
-      setVariants([]);
+      if (variantsRef.current.length > 0) setVariants([]);
+      variantOptionsRef.current = variantOptions;
       return;
     }
 
     const validOptions = variantOptions.filter(opt => opt.values.some(v => v.trim() !== ''));
     
     if (validOptions.length === 0) {
-      setVariants([]);
+      if (variantsRef.current.length > 0) setVariants([]);
+      variantOptionsRef.current = variantOptions;
       return;
     }
 
-    const generateCombinations = (options: { name: string; values: string[] }[]): string[][] => {
-      if (options.length === 0) return [[]];
-      
-      const [first, ...rest] = options;
-      const remainingCombinations = generateCombinations(rest);
-      const combinations: string[][] = [];
-      
-      const validValues = first.values.filter(v => v.trim() !== '');
-      
-      for (const value of validValues) {
-        for (const combination of remainingCombinations) {
-          combinations.push([value, ...combination]);
-        }
-      }
-      
-      return combinations;
-    };
-
-    const combinations = generateCombinations(validOptions);
-    
-    const newVariants: Variant[] = combinations.map((combo, idx) => {
-      const existingVariant = variants.find(v => {
-        if (validOptions.length === 1) return v.option1 === combo[0];
-        if (validOptions.length === 2) return v.option1 === combo[0] && v.option2 === combo[1];
-        if (validOptions.length === 3) return v.option1 === combo[0] && v.option2 === combo[1] && v.option3 === combo[2];
-        return false;
-      });
-
-      if (existingVariant) {
-        return existingVariant;
-      }
-
-      return {
-        id: `variant-${Date.now()}-${idx}`,
-        option1: combo[0] || '',
-        option2: combo[1],
-        option3: combo[2],
-        price: '',
-        sku: '',
-        inventory: 0,
-        weight: '',
-      };
+    const nextVariants = generateProductFormVariants({
+      options: variantOptions,
+      previous: variantsRef.current,
+      previousOptions: variantOptionsRef.current,
+      skuPrefix: sku,
+      previousSkuPrefix: skuPrefixRef.current,
     });
-
-    setVariants(newVariants);
-  }, [variantOptions, hasVariants]);
+    variantOptionsRef.current = variantOptions;
+    skuPrefixRef.current = sku;
+    setVariants(nextVariants);
+  }, [variantOptions, hasVariants, sku]);
 
   const updateVariant = (id: string, field: keyof Variant, value: any) => {
     setVariants(variants.map(v => v.id === id ? { ...v, [field]: value } : v));

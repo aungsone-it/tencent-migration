@@ -250,7 +250,7 @@ export const VALIDATION_RULES = {
 export const IMAGE_CONFIG = {
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
   SUPPORTED_FORMATS: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-  MAX_IMAGES_PER_PRODUCT: 10,
+  MAX_IMAGES_PER_PRODUCT: 40,
   COMPRESSION_QUALITY: 0.8,
   MAX_WIDTH: 1920,
   MAX_HEIGHT: 1920,

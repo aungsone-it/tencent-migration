@@ -13,6 +13,11 @@ import {
   cloudbasePublishableKey,
   getCloudBaseRequestHeaders,
 } from '../../utils/supabase/info';
+import {
+  applyUploadedProductImageMap,
+  collectUniqueInlineProductImages,
+  PRODUCT_IMAGE_DATA_URL_RE,
+} from "./productPayloadImages";
 import type {
   // Product types
   ProductsResponse,
@@ -58,8 +63,6 @@ import type {
 // ============================================
 // PRODUCTS API
 // ============================================
-
-const PRODUCT_IMAGE_DATA_URL_RE = /^data:image\/(png|jpg|jpeg|gif|webp);base64,/i;
 
 function dataUrlToUploadMeta(dataUrl: string): { mime: string; ext: string; bytes: Uint8Array } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -187,12 +190,6 @@ async function uploadDescriptionImageDataUrl(dataUrl: string): Promise<string> {
   return uploadDescriptionImageFile(file);
 }
 
-async function resolveProductImageRef(src: unknown): Promise<unknown> {
-  if (typeof src !== "string" || !src.trim()) return src;
-  if (!PRODUCT_IMAGE_DATA_URL_RE.test(src)) return src;
-  return uploadProductImageDataUrl(src);
-}
-
 /** Replace inline base64 <img> sources in HTML with storage URLs before product save. */
 async function replaceDescriptionInlineImages(description: string): Promise<string> {
   if (!description.includes("data:image/")) return description;
@@ -218,36 +215,26 @@ async function prepareProductPayloadForSave<T extends Partial<Product>>(
 ): Promise<T> {
   const next: Partial<Product> = { ...data };
 
-  if (Array.isArray(next.images) && next.images.length > 0) {
-    const uploaded: string[] = [];
-    for (const img of next.images) {
-      uploaded.push((await resolveProductImageRef(img)) as string);
+  const uniqueInlineImages = collectUniqueInlineProductImages(
+    Array.isArray(next.images) ? next.images : [],
+    Array.isArray(next.variants) ? next.variants : []
+  );
+  if (uniqueInlineImages.length > 0) {
+    const urlMap = new Map<string, string>();
+    for (const dataUrl of uniqueInlineImages) {
+      urlMap.set(dataUrl, await uploadProductImageDataUrl(dataUrl));
     }
-    next.images = uploaded;
+    const remapped = applyUploadedProductImageMap(
+      Array.isArray(next.images) ? next.images : [],
+      Array.isArray(next.variants) ? next.variants : [],
+      urlMap
+    );
+    next.images = remapped.images;
+    next.variants = remapped.variants;
   }
 
   if (typeof next.description === "string" && next.description.includes("data:image/")) {
     next.description = await replaceDescriptionInlineImages(next.description);
-  }
-
-  if (Array.isArray(next.variants) && next.variants.length > 0) {
-    const variants: Product["variants"] = [];
-    for (const variant of next.variants) {
-      if (!variant || typeof variant !== "object") {
-        variants.push(variant);
-        continue;
-      }
-      const v = variant as Record<string, unknown>;
-      if (typeof v.image !== "string" || !PRODUCT_IMAGE_DATA_URL_RE.test(v.image)) {
-        variants.push(variant);
-        continue;
-      }
-      variants.push({
-        ...variant,
-        image: await uploadProductImageDataUrl(v.image),
-      });
-    }
-    next.variants = variants;
   }
 
   return next as T;

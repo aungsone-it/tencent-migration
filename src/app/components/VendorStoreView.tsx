@@ -5909,6 +5909,10 @@ export function VendorStoreView({
       if (imgs.length > 0) images = [...new Set(imgs)] as string[];
     }
     if (images.length === 0) images = selectedProduct.images?.length ? [...selectedProduct.images] : [];
+    const selectedImage = typeof v?.image === "string" && v.image.length > 0 ? v.image : "";
+    if (selectedImage) {
+      images = [selectedImage, ...images.filter((img) => img !== selectedImage)];
+    }
     const price = v != null ? parseNum(v.price, selectedProduct.price) : selectedProduct.price;
     let compareAtPrice: number | undefined = selectedProduct.compareAtPrice;
     if (v != null && v.compareAtPrice != null && v.compareAtPrice !== "") {
@@ -5943,14 +5947,7 @@ export function VendorStoreView({
     if (!selectedProduct?.hasVariants || !selectedProduct.variants?.length) return;
     const v = findMatchingVariant(selectedProduct, vendorVariantSelections);
     if (!v?.image) return;
-    let images: string[] = [];
-    const raw = selectedProduct.variants
-      .map((x: any) => x?.image)
-      .filter((img: any) => typeof img === "string" && img.length > 0);
-    if (raw.length > 0) images = [...new Set(raw)] as string[];
-    else images = selectedProduct.images?.length ? [...selectedProduct.images] : [];
-    const idx = images.indexOf(v.image as string);
-    if (idx >= 0) setVendorProductImageIndex(idx);
+    setVendorProductImageIndex(0);
   }, [selectedProduct, vendorVariantSelections]);
 
   if (showCheckout) {

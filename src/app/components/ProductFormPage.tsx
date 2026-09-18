@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Upload, X, Plus, Calendar as CalendarIcon, ChevronDown, Image as ImageIcon, Sparkles, Loader2, Trash2, GripVertical, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -17,6 +17,17 @@ import { productsApi } from "../../utils/api";
 import { apiCache } from "../utils/cache";
 import { CategorySelect } from "./CategorySelect";
 import { useLanguage } from "../contexts/LanguageContext";
+import { IMAGE_CONFIG } from "../../constants";
+import {
+  applyImageToOptionValue,
+  buildAutoSku,
+  dominantOptionIndex,
+  fillEmptyVariantSkus,
+  findDuplicateVariantSkus,
+  generateProductFormVariants,
+  LIVE_VARIANT_SKU_CHECK_LIMIT,
+  sanitizeVariantOptions,
+} from "../utils/productFormVariants";
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 // Separator Component
@@ -37,6 +48,8 @@ interface Variant {
   weight?: string;
   image?: string;
 }
+
+const MAX_PRODUCT_IMAGES = IMAGE_CONFIG.MAX_IMAGES_PER_PRODUCT;
 
 /** Parse stored/display prices ($, MMK, commas) for validation and save. */
 function parsePriceInput(value: unknown): number {
@@ -125,24 +138,6 @@ function deriveVariantOptionsFromVariants(
     .filter((option) => option.values.length > 0);
 }
 
-function findDuplicateVariantSkus(variantRows: Variant[]): Map<string, string> {
-  const seen = new Map<string, string>();
-  const duplicates = new Map<string, string>();
-  for (const variant of variantRows) {
-    const sku = String(variant.sku || "").trim();
-    if (!sku) continue;
-    const key = sku.toLowerCase();
-    const firstVariantId = seen.get(key);
-    if (firstVariantId) {
-      duplicates.set(firstVariantId, `Duplicate SKU "${sku}" in this product`);
-      duplicates.set(variant.id, `Duplicate SKU "${sku}" in this product`);
-      continue;
-    }
-    seen.set(key, variant.id);
-  }
-  return duplicates;
-}
-
 interface ProductFormPageProps {
   mode: "add" | "edit" | "view";
   initialData?: any;
@@ -195,6 +190,19 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
   ]);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [isInitializing, setIsInitializing] = useState(true); // 🔥 NEW: Track if we're loading initial data
+  const variantsRef = useRef<Variant[]>([]);
+  const variantOptionsRef = useRef(variantOptions);
+  const priceRef = useRef(price);
+  const skuPrefixRef = useRef(sku);
+  variantsRef.current = variants;
+  priceRef.current = price;
+
+  const patchVariant = (id: string, patch: Partial<Variant>) => {
+    setVariants((prev) => prev.map((variant) => (variant.id === id ? { ...variant, ...patch } : variant)));
+  };
+  const colorSizeImageOptionIndex = dominantOptionIndex(variantOptions);
+  const colorSizeImageOptionName =
+    sanitizeVariantOptions(variantOptions)[colorSizeImageOptionIndex]?.name || "this option";
   
   // Initialize variants from initialData when editing
   useEffect(() => {
@@ -237,12 +245,14 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         if (initialData.variantOptions && initialData.variantOptions.length > 0) {
           console.log("📝 Loading variant options:", initialData.variantOptions);
           setVariantOptions(initialData.variantOptions);
+          variantOptionsRef.current = initialData.variantOptions;
           console.log("✅ Set variantOptions state");
         } else {
           const derivedOptions = deriveVariantOptionsFromVariants(initialData.variants);
           if (derivedOptions.length > 0) {
             console.log("📝 Derived variant options from variants:", derivedOptions);
             setVariantOptions(derivedOptions);
+            variantOptionsRef.current = derivedOptions;
           } else {
             console.log("⚠️ No variantOptions found, will not auto-generate");
           }
@@ -327,26 +337,54 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
       duplicateSkus.forEach((message, variantId) => {
         errors[variantId] = message;
       });
-      
-      for (const variant of variants) {
-        if (errors[variant.id]) continue;
-        if (variant.sku && variant.sku.trim()) {
-          try {
-            const result = await productsApi.checkSku(variant.sku, initialData?.id);
-            if (!result.isUnique) {
-              errors[variant.id] = `⚠️ Exists in: ${result.existingProduct?.name || 'another product'}`;
+
+      const uniqueSkus = [
+        ...new Set(
+          variants
+            .filter((variant) => !errors[variant.id] && variant.sku?.trim())
+            .map((variant) => variant.sku.trim())
+        ),
+      ];
+
+      // Per-keystroke remote checks explode at 5×15 (75 SKUs). Local dupes still show;
+      // the save API verifies uniqueness for the full set.
+      if (uniqueSkus.length > 0 && uniqueSkus.length <= LIVE_VARIANT_SKU_CHECK_LIMIT) {
+        const remote = await Promise.all(
+          uniqueSkus.map(async (value) => {
+            try {
+              const result = await productsApi.checkSku(value, initialData?.id);
+              return { value, result };
+            } catch (error) {
+              console.error(`Error checking SKU ${value}:`, error);
+              return null;
             }
-          } catch (error) {
-            console.error(`Error checking SKU for variant ${variant.id}:`, error);
-          }
+          })
+        );
+        const taken = new Map<string, string>();
+        for (const row of remote) {
+          if (!row || row.result.isUnique) continue;
+          taken.set(
+            row.value.toLowerCase(),
+            `⚠️ Exists in: ${row.result.existingProduct?.name || "another product"}`
+          );
+        }
+        for (const variant of variants) {
+          if (errors[variant.id]) continue;
+          const message = taken.get(variant.sku.trim().toLowerCase());
+          if (message) errors[variant.id] = message;
         }
       }
-      
+
       setVariantSkuErrors(errors);
-    }, 600); // Wait 600ms after user stops typing
+    }, 600);
 
     return () => clearTimeout(timeoutId);
-  }, [variants, hasVariants, isReadOnly, initialData?.id]);
+  }, [
+    variants.map((variant) => `${variant.id}:${variant.sku}`).join("|"),
+    hasVariants,
+    isReadOnly,
+    initialData?.id,
+  ]);
 
   // 🔥 Fetch approved vendors on mount
   useEffect(() => {
@@ -457,94 +495,41 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
 
   // Auto-generate variants when variant options change
   useEffect(() => {
-    console.log("🔄 generateVariants useEffect triggered - isInitializing:", isInitializing, "mode:", mode, "hasVariants:", hasVariants);
-    
-    // 🔥 CRITICAL FIX: Don't regenerate variants during initial load in edit mode
-    // This prevents overwriting the loaded variant data with empty defaults
     if (isInitializing && mode === "edit") {
-      console.log("⏸️ Skipping variant generation during initial load");
       return;
     }
-    
+
     if (!hasVariants || variantOptions.length === 0) {
-      console.log("⏸️ Skipping variant generation - hasVariants:", hasVariants, "variantOptions:", variantOptions.length);
-      if (!(mode === "edit" && variants.length > 0)) {
+      if (!(mode === "edit" && variantsRef.current.length > 0) && variantsRef.current.length > 0) {
         setVariants([]);
       }
+      variantOptionsRef.current = variantOptions;
+      skuPrefixRef.current = sku;
       return;
     }
 
-    // Filter out options with empty values
-    const validOptions = variantOptions.filter(opt => opt.values.some(v => v.trim() !== ''));
-    
+    const validOptions = variantOptions.filter((opt) => opt.values.some((v) => v.trim() !== ""));
     if (validOptions.length === 0) {
-      console.log("⏸️ No valid options, clearing variants");
-      if (!(mode === "edit" && variants.length > 0)) {
+      if (!(mode === "edit" && variantsRef.current.length > 0)) {
         setVariants([]);
       }
+      variantOptionsRef.current = variantOptions;
+      skuPrefixRef.current = sku;
       return;
     }
-    
-    console.log("✅ Generating variants from options:", validOptions);
 
-    // Generate all combinations
-    const generateCombinations = (options: { name: string; values: string[] }[]): string[][] => {
-      if (options.length === 0) return [[]];
-      
-      const [first, ...rest] = options;
-      const remainingCombinations = generateCombinations(rest);
-      const combinations: string[][] = [];
-      
-      // Filter out empty values
-      const validValues = first.values.filter(v => v.trim() !== '');
-      
-      for (const value of validValues) {
-        for (const combination of remainingCombinations) {
-          combinations.push([value, ...combination]);
-        }
-      }
-      
-      return combinations;
-    };
-
-    const combinations = generateCombinations(validOptions);
-    
-    // Create variant objects
-    const newVariants: Variant[] = combinations.map((combo, idx) => {
-      // Try to find existing variant with same options to preserve data
-      const existingVariant = variants.find(v => {
-        if (validOptions.length === 1) return v.option1 === combo[0];
-        if (validOptions.length === 2) return v.option1 === combo[0] && v.option2 === combo[1];
-        if (validOptions.length === 3) return v.option1 === combo[0] && v.option2 === combo[1] && v.option3 === combo[2];
-        return false;
-      });
-
-      if (existingVariant) {
-        // Return existing variant to preserve price, SKU, inventory, weight
-        console.log(`✅ Preserving variant data for ${combo.join(' / ')}:`, existingVariant);
-        return {
-          ...existingVariant,
-          price: formatPriceForForm(existingVariant.price) || existingVariant.price,
-        };
-      }
-
-      // Create new variant with empty defaults
-      console.log(`➕ Creating new variant for ${combo.join(' / ')}`);
-      return {
-        id: `variant-${Date.now()}-${idx}`,
-        option1: combo[0] || '',
-        option2: combo[1],
-        option3: combo[2],
-        price: '',
-        sku: '',
-        inventory: 0,
-        weight: '',
-        image: undefined,
-      };
+    const nextVariants = generateProductFormVariants({
+      options: variantOptions,
+      previous: variantsRef.current,
+      previousOptions: variantOptionsRef.current,
+      skuPrefix: sku,
+      previousSkuPrefix: skuPrefixRef.current,
+      defaultPrice: priceRef.current,
     });
-
-    setVariants(newVariants);
-  }, [hasVariants, variantOptions, isInitializing, mode]); // ⚠️ Don't include 'variants' to avoid infinite loop
+    variantOptionsRef.current = variantOptions;
+    skuPrefixRef.current = sku;
+    setVariants(nextVariants);
+  }, [hasVariants, variantOptions, isInitializing, mode, sku]);
 
   const handleProductStatusChange = (newStatus: string) => {
     setStatus(newStatus);
@@ -689,7 +674,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         trackQuantity,
         continueSellingOutOfStock,
         hasVariants,
-        variantOptions: hasVariants ? variantOptions : [],
+        variantOptions: hasVariants ? sanitizeVariantOptions(variantOptions) : [],
         variants: hasVariants ? variantsForSave : [],
         images,
         tags,
@@ -750,11 +735,18 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         
         // Compress locally only — same as description editor. Storage upload happens on Save.
         const dataUrls: string[] = [];
-        for (const file of imageFiles) {
+        const availableSlots = Math.max(0, MAX_PRODUCT_IMAGES - images.length);
+        const filesToProcess = imageFiles.slice(0, availableSlots);
+        if (filesToProcess.length === 0) {
+          toast.error(`Maximum ${MAX_PRODUCT_IMAGES} images per product`);
+          setUploadingImages(false);
+          return;
+        }
+        for (const file of filesToProcess) {
           dataUrls.push(await compressImageToDataURL(file, 500));
         }
 
-        setImages((prev) => [...dataUrls, ...prev]);
+        setImages((prev) => [...dataUrls, ...prev].slice(0, MAX_PRODUCT_IMAGES));
         toast.success(`${dataUrls.length} image(s) added`);
       } catch (error) {
         console.error("Error uploading images:", error);
@@ -778,7 +770,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
     e.stopPropagation();
     
     const files = e.dataTransfer.files;
-    if (files && files.length > 0 && images.length < 10) {
+    if (files && files.length > 0 && images.length < MAX_PRODUCT_IMAGES) {
       setUploadingImages(true);
       toast.info("Compressing images...", { duration: 2000 });
       
@@ -793,7 +785,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
         }
         
         // Limit to available slots
-        const availableSlots = 10 - images.length;
+        const availableSlots = MAX_PRODUCT_IMAGES - images.length;
         const filesToProcess = imageFiles.slice(0, availableSlots);
         
         // Compress locally only — uploads to storage when you Save
@@ -969,7 +961,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
               <CardHeader>
                 <CardTitle>{t('addProduct.media')}</CardTitle>
                 <CardDescription>
-                  Add up to 10 photos. Drag to reorder. First image will be the main product image. Images upload to storage when you save.
+                  Add up to {MAX_PRODUCT_IMAGES} photos. Assign them to colors or sizes in Variants. First image is the cover. Images upload to storage when you save.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -997,8 +989,8 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                           </span>
                           <span className="text-sm text-slate-500"> or drag and drop</span>
                           <p className="mt-1 text-xs text-slate-500">
-                            PNG, JPG, GIF up to 10MB ({10 - images.length}{" "}
-                            {10 - images.length === 1 ? "slot" : "slots"} remaining)
+                            PNG, JPG, GIF up to 10MB ({MAX_PRODUCT_IMAGES - images.length}{" "}
+                            {MAX_PRODUCT_IMAGES - images.length === 1 ? "slot" : "slots"} remaining)
                           </p>
                         </div>
                       </label>
@@ -1010,7 +1002,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                       accept="image/*"
                       onChange={handleFileUpload}
                       className="sr-only"
-                      disabled={images.length >= 10 || uploadingImages}
+                      disabled={images.length >= MAX_PRODUCT_IMAGES || uploadingImages}
                     />
                   </div>
                 )}
@@ -1230,6 +1222,31 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
 
                 {hasVariants && (
                   <div className="space-y-4 pt-4">
+                    <div>
+                      <Label htmlFor="variant-sku-prefix">SKU prefix</Label>
+                      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Input
+                          id="variant-sku-prefix"
+                          placeholder="e.g. SHIRT"
+                          value={sku}
+                          onChange={(e) => setSku(e.target.value)}
+                          disabled={isReadOnly}
+                        />
+                        {!isReadOnly && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setVariants((prev) => fillEmptyVariantSkus(prev, sku))}
+                          >
+                            Fill empty SKUs
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1.5">
+                        New combinations get SKUs like {buildAutoSku(sku, ["Red", "S"]) || "RED-S"}. Existing SKUs stay unless they are empty.
+                      </p>
+                    </div>
+
                     {variantOptions.map((option, optionIdx) => (
                       <div key={optionIdx} className="border border-slate-200 rounded-lg p-4">
                         <div className="flex items-start gap-4 mb-3">
@@ -1258,26 +1275,64 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                         {/* Option values with individual add/remove */}
                         <div className="space-y-2">
                           <Label className="text-sm">Option values</Label>
-                          {option.values.map((value, valueIdx) => (
-                            <div key={valueIdx} className="flex items-center gap-2">
-                              <Input
-                                placeholder="Enter value (e.g., Green, Blue, Red)"
-                                value={value}
-                                onChange={(e) => updateSingleVariantValue(optionIdx, valueIdx, e.target.value)}
-                                disabled={isReadOnly}
-                                className="flex-1"
-                              />
-                              {!isReadOnly && option.values.length > 1 && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => removeSingleVariantValue(optionIdx, valueIdx)}
-                                >
-                                  <X className="w-4 h-4" />
-                                </Button>
+                          <p className="text-xs text-slate-500">
+                            Assign a photo to each {option.name.trim() || "value"} — it applies to every matching size/color combination.
+                          </p>
+                          {option.values.map((value, valueIdx) => {
+                            const assignedImage = variants.find(
+                              (variant) =>
+                                [variant.option1, variant.option2, variant.option3][optionIdx] === value &&
+                                Boolean(variant.image)
+                            )?.image;
+                            return (
+                            <div key={valueIdx} className="space-y-2 rounded-md border border-slate-100 p-2">
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  placeholder="Enter value (e.g., Green, Blue, Red)"
+                                  value={value}
+                                  onChange={(e) => updateSingleVariantValue(optionIdx, valueIdx, e.target.value)}
+                                  disabled={isReadOnly}
+                                  className="flex-1"
+                                />
+                                {!isReadOnly && option.values.length > 1 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeSingleVariantValue(optionIdx, valueIdx)}
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
+                              {value.trim() && images.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {images.map((url, imgIdx) => (
+                                    <button
+                                      key={imgIdx}
+                                      type="button"
+                                      title={`Match image to ${value}`}
+                                      onClick={() => {
+                                        if (!isReadOnly) {
+                                          setVariants((prev) =>
+                                            applyImageToOptionValue(prev, optionIdx, value, url)
+                                          );
+                                        }
+                                      }}
+                                      disabled={isReadOnly}
+                                      className={`h-9 w-9 overflow-hidden rounded border-2 ${
+                                        assignedImage === url
+                                          ? "border-blue-600 ring-2 ring-blue-200"
+                                          : "border-slate-200 hover:border-slate-400"
+                                      } ${isReadOnly ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                                    >
+                                      <img src={url} alt="" className="h-full w-full object-cover" />
+                                    </button>
+                                  ))}
+                                </div>
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                           {!isReadOnly && (
                             <Button
                               variant="outline"
@@ -1308,13 +1363,18 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
 
                     {/* Variant List */}
                     <div>
-                      <h4 className="font-semibold mb-3">Variant details</h4>
+                      <h4 className="font-semibold mb-1">Variant details</h4>
+                      <p className="text-xs text-slate-500 mb-3">
+                        {variants.length} combination{variants.length === 1 ? "" : "s"} from the options above
+                      </p>
                       <div className="space-y-2">
-                        {variants.map((variant, idx) => {
-                          // Build variant display name
+                        {variants.map((variant) => {
                           const variantName = [variant.option1, variant.option2, variant.option3]
                             .filter(Boolean)
                             .join(' / ');
+                          const imageOptionIndex = colorSizeImageOptionIndex;
+                          const imageOptionValue = [variant.option1, variant.option2, variant.option3][imageOptionIndex];
+                          const imageOptionName = colorSizeImageOptionName;
                           
                           return (
                             <div key={variant.id} className="border border-slate-200 rounded-lg p-3">
@@ -1335,9 +1395,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                           type="button"
                                           onClick={() => {
                                             if (!isReadOnly) {
-                                              const updated = [...variants];
-                                              updated[idx].image = url;
-                                              setVariants(updated);
+                                              patchVariant(variant.id, { image: url });
                                             }
                                           }}
                                           disabled={isReadOnly}
@@ -1356,18 +1414,35 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                       ))}
                                     </div>
                                     {variant.image && !isReadOnly && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          const updated = [...variants];
-                                          updated[idx].image = '';
-                                          setVariants(updated);
-                                        }}
-                                        className="text-xs text-red-600 hover:text-red-700 h-7 px-2"
-                                      >
-                                        Clear
-                                      </Button>
+                                      <div className="flex flex-col gap-1">
+                                        {imageOptionValue ? (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                              setVariants((prev) =>
+                                                applyImageToOptionValue(
+                                                  prev,
+                                                  imageOptionIndex,
+                                                  String(imageOptionValue),
+                                                  variant.image || ""
+                                                )
+                                              );
+                                            }}
+                                            className="text-xs h-7 px-2"
+                                          >
+                                            Apply to all {imageOptionName} {imageOptionValue}
+                                          </Button>
+                                        ) : null}
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => patchVariant(variant.id, { image: "" })}
+                                          className="text-xs text-red-600 hover:text-red-700 h-7 px-2"
+                                        >
+                                          Clear
+                                        </Button>
+                                      </div>
                                     )}
                                   </div>
                                 </div>
@@ -1383,10 +1458,8 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                     placeholder="0.00"
                                     value={parsePriceForDisplay(variant.price)}
                                     onChange={(e) => {
-                                      const updated = [...variants];
                                       const value = parseFloat(e.target.value) || 0;
-                                      updated[idx].price = Math.max(0, value).toString();
-                                      setVariants(updated);
+                                      patchVariant(variant.id, { price: Math.max(0, value).toString() });
                                     }}
                                     onKeyDown={(e) => {
                                       // Prevent minus key and 'e' (exponential notation)
@@ -1403,11 +1476,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                   <Input
                                     placeholder="ABC-123"
                                     value={variant.sku || ''}
-                                    onChange={(e) => {
-                                      const updated = [...variants];
-                                      updated[idx].sku = e.target.value;
-                                      setVariants(updated);
-                                    }}
+                                    onChange={(e) => patchVariant(variant.id, { sku: e.target.value })}
                                     disabled={isReadOnly}
                                     className="mt-1 h-9"
                                   />
@@ -1421,11 +1490,8 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                     placeholder="0"
                                     value={variant.inventory ?? 0}
                                     onChange={(e) => {
-                                      const updated = [...variants];
                                       const value = parseInt(e.target.value) || 0;
-                                      // Only allow positive numbers (0 or greater)
-                                      updated[idx].inventory = Math.max(0, value);
-                                      setVariants(updated);
+                                      patchVariant(variant.id, { inventory: Math.max(0, value) });
                                     }}
                                     onKeyDown={(e) => {
                                       // Prevent minus key and 'e' (exponential notation)
@@ -1442,11 +1508,7 @@ export function ProductFormPage({ mode, initialData, onSave, onCancel }: Product
                                   <Input
                                     placeholder="0.0 kg"
                                     value={variant.weight || ''}
-                                    onChange={(e) => {
-                                      const updated = [...variants];
-                                      updated[idx].weight = e.target.value;
-                                      setVariants(updated);
-                                    }}
+                                    onChange={(e) => patchVariant(variant.id, { weight: e.target.value })}
                                     disabled={isReadOnly}
                                     className="mt-1 h-9"
                                   />

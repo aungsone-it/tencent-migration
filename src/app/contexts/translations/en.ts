@@ -948,6 +948,8 @@ export const enTranslations: Record<string, string> = {
     'dashboard.customers': 'Customers',
     'dashboard.products': 'Products',
     'dashboard.fromLastMonth': 'from last month',
+    'dashboard.vsPreviousPeriod': 'vs previous period',
+    'dashboard.changeAllTime': 'All-time totals',
     'dashboard.salesOverview': 'Sales Overview',
     'dashboard.salesOverviewDesc': 'Monthly sales and orders for the global date range (header). Last 7 months when global is All time.',
     'dashboard.topProducts': 'Top Products',

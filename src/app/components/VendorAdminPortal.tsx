@@ -52,6 +52,7 @@ import { API_BASE_URL } from "../../utils/api-client";
 import { applyVendorStoreLogoFavicon, resetDocumentFavicon } from "../utils/documentFavicon";
 import { isRenderableImageSrc, pickStoreLogo } from "../utils/renderableImageSrc";
 import { UserProfile } from "./UserProfile";
+import { CreatorCredit } from "./CreatorCredit";
 import { useVendorAuth, type VendorUser } from "../contexts/VendorAuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { ADMIN_NOTIFICATIONS_UPDATED_EVENT, normalizeAdminInboxNotification, type AdminInboxNotification } from "../utils/adminNotificationsRealtime";
@@ -933,10 +934,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
 
         {/* Footer - Created by */}
         <div className="px-6 py-4 border-t border-slate-200">
-          <p className="text-xs text-slate-400 text-center">
-            {t("footer.createdBy")} <span className="text-slate-600 font-medium">Aung Pyae Sone</span><br />
-            <span className="text-slate-400">{t("footer.role")}</span>
-          </p>
+          <CreatorCredit />
         </div>
       </aside>
 

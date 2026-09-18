@@ -915,6 +915,8 @@ export const zhTranslations: Record<string, string> = {
     'dashboard.customers': '客户',
     'dashboard.products': '产品',
     'dashboard.fromLastMonth': '上个月',
+    'dashboard.vsPreviousPeriod': '相较上一周期',
+    'dashboard.changeAllTime': '全部时间合计',
     'dashboard.salesOverview': '销售概览',
     'dashboard.salesOverviewDesc': '全局日期范围（顶部筛选）内的月度销售与订单。全局为「全部时间」时显示最近 7 个月。',
     'dashboard.topProducts': '热门产品',

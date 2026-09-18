@@ -7,7 +7,7 @@ import { Badge } from "./ui/badge";
 import { AdminDateRangeFilterPopover } from "./AdminDateRangeFilterPopover";
 import { useLanguage } from "../contexts/LanguageContext";
 import { devLog } from "../utils/devLog";
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import {
   ComposedChart,
@@ -24,11 +24,17 @@ import type { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import {
   getCachedAdminDashboardStats,
+  getCachedAdminOrdersPage,
+  getCachedAdminCustomersPage,
+  getCachedAdminProductsPage,
+  invalidateAdminDashboardStatsCaches,
   moduleCache,
   adminDashboardStatsCacheKey,
   encodeAdminDashboardDateFilter,
   type AdminDashboardFilters,
 } from "../utils/module-cache";
+import { adminOrdersUpdatedStorageKey } from "../utils/adminOrdersRealtime";
+import { CUSTOMERS_DATA_UPDATED_EVENT } from "../utils/customersRealtime";
 const defaultStats = {
   totalRevenue: 0,
   totalOrders: 0,
@@ -102,51 +108,95 @@ export function Dashboard() {
     [pageApiFilter]
   );
 
-  useEffect(() => {
-    fetchDashboardStats();
-  }, [pageApiFilter]);
-  
-  const applyDashboardPayload = (data: Record<string, unknown>) => {
-    if (data.cached) {
-      devLog(
-        `⚡ Dashboard loaded from SERVER CACHE (age: ${data.cacheAge}s) - ZERO database queries!`
-      );
-    } else {
-      devLog(`🔄 Dashboard loaded from DATABASE - Fresh data fetched`);
-    }
-    setStats(normalizeDashboardStatsPayload(data));
-  };
+  const orderDateFromParam = pageDateRange?.from ? format(pageDateRange.from, "yyyy-MM-dd") : "";
+  const orderDateToParam = pageDateRange?.to
+    ? format(pageDateRange.to, "yyyy-MM-dd")
+    : orderDateFromParam;
 
-  const fetchDashboardStats = async (forceRefresh = false) => {
-    let showLoadingTimer: NodeJS.Timeout | null = null;
-    showLoadingTimer = setTimeout(() => {
-      setLoading(true);
-    }, 300);
+  const fetchDashboardStats = useCallback(
+    async (forceRefresh = false) => {
+      let showLoadingTimer: ReturnType<typeof setTimeout> | null = null;
+      showLoadingTimer = setTimeout(() => {
+        setLoading(true);
+      }, 300);
 
-    const cacheKey = adminDashboardStatsCacheKey(filterPayload);
+      try {
+        if (forceRefresh) {
+          invalidateAdminDashboardStatsCaches();
+        }
 
-    if (!forceRefresh) {
-      const peeked = moduleCache.peek<Record<string, unknown>>(cacheKey);
-      if (peeked != null && typeof peeked === "object") {
-        applyDashboardPayload(peeked);
-        if (showLoadingTimer) clearTimeout(showLoadingTimer);
+        const [dash, ordersPage, customersPage, productsPage] = await Promise.all([
+          getCachedAdminDashboardStats(filterPayload, true),
+          getCachedAdminOrdersPage(
+            {
+              page: 1,
+              pageSize: 1,
+              status: "all",
+              payment: "all",
+              vendor: "all",
+              dateFrom: orderDateFromParam,
+              dateTo: orderDateToParam,
+              sort: "newest",
+            },
+            true
+          ),
+          getCachedAdminCustomersPage(
+            { page: 1, pageSize: 1, status: "all", tier: "all", segment: "all" },
+            true
+          ),
+          getCachedAdminProductsPage(
+            { page: 1, pageSize: 1, tab: "all", status: "all", sort: "newest" },
+            true
+          ),
+        ]);
+
+        if (dash.cached) {
+          devLog(
+            `⚡ Dashboard charts loaded from SERVER CACHE (age: ${dash.cacheAge}s)`
+          );
+        }
+
+        const chartStats = normalizeDashboardStatsPayload(dash);
+        setStats({
+          ...chartStats,
+          totalRevenue: Number(ordersPage.aggregates?.filteredTotalRevenue ?? 0),
+          totalOrders: Number(ordersPage.total ?? 0),
+          totalCustomers: Number(customersPage.stats?.total ?? customersPage.total ?? 0),
+          totalProducts: Number(productsPage.counts?.all ?? productsPage.total ?? 0),
+        });
+      } catch (error) {
+        console.error("Error fetching dashboard stats:", error);
+      } finally {
+        if (showLoadingTimer) {
+          clearTimeout(showLoadingTimer);
+        }
         setLoading(false);
-        return;
       }
-    }
+    },
+    [filterPayload, orderDateFromParam, orderDateToParam]
+  );
 
-    try {
-      const data = await getCachedAdminDashboardStats(filterPayload, forceRefresh);
-      applyDashboardPayload(data);
-    } catch (error) {
-      console.error("Error fetching dashboard stats:", error);
-    } finally {
-      if (showLoadingTimer) {
-        clearTimeout(showLoadingTimer);
-      }
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    void fetchDashboardStats(true);
+  }, [fetchDashboardStats]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void fetchDashboardStats(true);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== adminOrdersUpdatedStorageKey()) return;
+      refresh();
+    };
+    window.addEventListener("adminOrdersUpdated", refresh);
+    window.addEventListener(CUSTOMERS_DATA_UPDATED_EVENT, refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("adminOrdersUpdated", refresh);
+      window.removeEventListener(CUSTOMERS_DATA_UPDATED_EVENT, refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [fetchDashboardStats]);
   
   // Format number with commas
   const formatNumber = (num: number) => {
@@ -164,10 +214,15 @@ export function Dashboard() {
     );
   };
   
-  // Format percentage change
+  const isAllTime = pageApiFilter === "All time";
   const formatChange = (change: number) => {
+    if (isAllTime) return t("dashboard.changeAllTime");
     const sign = change >= 0 ? "+" : "";
-    return `${sign}${change.toFixed(1)}% ${t('dashboard.fromLastMonth')}`;
+    return `${sign}${change.toFixed(1)}% ${t("dashboard.vsPreviousPeriod")}`;
+  };
+  const changeType = (change: number): "positive" | "negative" | "neutral" => {
+    if (isAllTime || change === 0) return "neutral";
+    return change > 0 ? "positive" : "negative";
   };
 
   const salesChartData = useMemo(() => {
@@ -199,6 +254,8 @@ export function Dashboard() {
           open={pageDatePickerOpen}
           onOpenChange={setPageDatePickerOpen}
           align="end"
+          presentation="section-modal"
+          showPresets
         >
           <Button
             variant="outline"
@@ -220,38 +277,42 @@ export function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 stagger-children">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <StatCard
           title={t('dashboard.totalRevenue')}
           value={loading ? "..." : formatCurrency(stats.totalRevenue)}
           change={loading ? "..." : formatChange(stats.revenueChange)}
-          changeType={stats.revenueChange >= 0 ? "positive" : "negative"}
+          changeType={changeType(stats.revenueChange)}
           icon={DollarSign}
           iconBgColor="bg-gradient-to-br from-green-400 to-green-600"
+          onClick={() => navigate("/admin/finances")}
         />
         <StatCard
           title={t('dashboard.orders')}
           value={loading ? "..." : formatNumber(stats.totalOrders)}
           change={loading ? "..." : formatChange(stats.ordersChange)}
-          changeType={stats.ordersChange >= 0 ? "positive" : "negative"}
+          changeType={changeType(stats.ordersChange)}
           icon={ShoppingCart}
           iconBgColor="bg-gradient-to-br from-blue-400 to-blue-600"
+          onClick={() => navigate("/admin/orders")}
         />
         <StatCard
           title={t('dashboard.customers')}
           value={loading ? "..." : formatNumber(stats.totalCustomers)}
           change={loading ? "..." : formatChange(stats.customersChange)}
-          changeType={stats.customersChange >= 0 ? "positive" : "negative"}
+          changeType={changeType(stats.customersChange)}
           icon={Users}
           iconBgColor="bg-gradient-to-br from-purple-400 to-purple-600"
+          onClick={() => navigate("/admin/customers")}
         />
         <StatCard
           title={t('dashboard.products')}
           value={loading ? "..." : formatNumber(stats.totalProducts)}
           change={loading ? "..." : formatChange(stats.productsChange)}
-          changeType={stats.productsChange >= 0 ? "positive" : "negative"}
+          changeType={changeType(stats.productsChange)}
           icon={Package}
           iconBgColor="bg-gradient-to-br from-orange-400 to-orange-600"
+          onClick={() => navigate("/admin/products")}
         />
       </div>
 

@@ -423,7 +423,7 @@ export function SideNav({
       </nav>
 
       {/* Creator Credit */}
-      <div className="p-4 border-t border-slate-200">
+      <div className="relative z-20 overflow-visible px-4 pt-4 pb-5">
         <CreatorCredit compact user={currentUser} />
       </div>
     </aside>

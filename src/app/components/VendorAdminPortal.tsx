@@ -933,7 +933,7 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
         </nav>
 
         {/* Footer - Created by */}
-        <div className="px-6 py-4 border-t border-slate-200">
+        <div className="relative z-20 overflow-visible px-6 pt-4 pb-5">
           <CreatorCredit />
         </div>
       </aside>

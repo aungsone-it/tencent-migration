@@ -79,9 +79,11 @@ import {
   canonicalizeOrderNumber,
   compareOrdersBySerial,
   consumeOrderNumberReservation,
+  ensureOrderNumberAssignableForCreate,
   noteOrderNumberUsed,
   rejectOrderDraft,
   resolveAllocatedOrderCreatedAt,
+  touchOrderNumberReservation,
 } from "./order_number.ts";
 import { compactVendorKey, resolveCanonicalVendorId } from "./vendor_id_resolve.ts";
 import {
@@ -6764,6 +6766,17 @@ app.post("/make-server-16010b6f/orders", async (c) => {
       requestedOrderNumber = await allocateNextOrderNumber();
       body.orderNumber = requestedOrderNumber;
     } else {
+      const assignable = await ensureOrderNumberAssignableForCreate(requestedOrderNumber, {
+        paymentMethod: body?.paymentMethod,
+        paymentStatus: body?.paymentStatus,
+      });
+      if (!assignable.ok) {
+        return c.json(
+          { error: assignable.error, message: assignable.message },
+          assignable.error === "paid_draft_pending_recovery" ? 409 : 400,
+        );
+      }
+      await touchOrderNumberReservation(requestedOrderNumber);
       await noteOrderNumberUsed(requestedOrderNumber);
     }
 

@@ -1,4 +1,4 @@
-import { fetchNextOrderNumber } from "./orderNumber";
+import { fetchNextOrderNumber, parseOrderSerial } from "./orderNumber";
 import { resolveVendorPathSlug } from "./vendorStorePaths";
 import { resolveKpayUnifiedReturnOrigin } from "./vendorCheckoutPaths";
 import {
@@ -361,7 +361,27 @@ function readProviderErrorDetails(data: Record<string, any>): {
 }
 
 export async function buildMerchantOrderId(): Promise<string> {
+  const pending = readPendingMerchantOrderId();
+  if (pending) return pending;
   return fetchNextOrderNumber();
+}
+
+/** Reuse in-flight checkout serial from localStorage when still valid (avoids burning NOS ids on KBZ retries). */
+export function readPendingMerchantOrderId(method?: "pwa" | "qr"): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(KPAY_PWA_PENDING_STORAGE_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw) as { merchantOrderId?: unknown; kpayMethod?: unknown };
+    if (method) {
+      const pendingMethod = String(parsed?.kpayMethod || "").trim().toLowerCase();
+      if (pendingMethod !== method) return "";
+    }
+    const id = String(parsed?.merchantOrderId || "").trim();
+    return parseOrderSerial(id) > 0 ? id : "";
+  } catch {
+    return "";
+  }
 }
 
 export async function createKPayQrSession(params: CreateKPayQrParams): Promise<KPaySession> {

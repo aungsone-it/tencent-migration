@@ -36,6 +36,7 @@ import { invalidateCustomerOrdersCache } from "../utils/module-cache";
 import {
   type KPaySession,
   buildMerchantOrderId,
+  readPendingMerchantOrderId,
   buildCheckoutSummaryPath,
   buildPwaCallbackInfo,
   clearKPayPwaPendingStorage,
@@ -2320,7 +2321,11 @@ export function Checkout({
         return;
       }
       setKpayPwaLoading(true);
-      const merchantOrderId = await buildMerchantOrderId();
+      const existingPwaOrderId = readPendingMerchantOrderId("pwa");
+      const merchantOrderId =
+        parseOrderSerial(existingPwaOrderId) > 0
+          ? existingPwaOrderId
+          : await buildMerchantOrderId();
       const originPath =
         typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       const storefrontOrigin =
@@ -2804,6 +2809,9 @@ export function Checkout({
       paymentMethod === "KPay" && latestKpaySession?.merchantOrderId
         ? latestKpaySession.merchantOrderId
         : "";
+    if (!orderNum) {
+      orderNum = readPendingMerchantOrderId();
+    }
     if (!orderNum) {
       try {
         orderNum = await fetchNextOrderNumber();

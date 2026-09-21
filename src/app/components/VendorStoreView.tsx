@@ -196,6 +196,7 @@ import { buildVendorStorefrontDocumentTitle } from "../utils/vendorStorefrontDoc
 import {
   buildVendorStoreHomePath,
   buildVendorStoreCheckoutPath,
+  joinStorefrontPath,
   normalizeCheckoutStoragePath,
   resolveVendorStoreLinkSlug,
   resolveVendorPathSlug,
@@ -771,8 +772,8 @@ function isVendorCheckoutOrSummaryPath(pathname: string, storeBase: string): boo
   if (
     pathname === "/checkout" ||
     pathname === "/summary" ||
-    pathname === `${storeBase}/checkout` ||
-    pathname === `${storeBase}/summary`
+    pathname === joinStorefrontPath(storeBase, "checkout") ||
+    pathname === joinStorefrontPath(storeBase, "summary")
   ) {
     return true;
   }
@@ -1154,10 +1155,9 @@ export function VendorStoreView({
 
   const categoryPathForName = useCallback(
     (categoryName: string, categoryId?: string) => {
-      const base = storeBase || "";
       const seg = vendorCategoryPathSegment(categoryName, categoryId);
-      if (!seg) return base || "/";
-      return `${base}/${encodeURIComponent(seg)}`;
+      if (!seg) return storeBase || "/";
+      return joinStorefrontPath(storeBase, encodeURIComponent(seg));
     },
     [storeBase]
   );
@@ -1191,13 +1191,12 @@ export function VendorStoreView({
         navigateStoreHome();
         return;
       }
-      const root = storeBase || "";
       const pathMap: Record<Exclude<VendorAccountViewMode, "storefront">, string> = {
-        "view-profile": `${root}/profile`,
-        "edit-profile": `${root}/profile/edit`,
-        "order-history": `${root}/profile/orders`,
-        "shipping-addresses": `${root}/profile/addresses`,
-        "security-settings": `${root}/profile/security`,
+        "view-profile": joinStorefrontPath(storeBase, "profile"),
+        "edit-profile": joinStorefrontPath(storeBase, "profile", "edit"),
+        "order-history": joinStorefrontPath(storeBase, "profile", "orders"),
+        "shipping-addresses": joinStorefrontPath(storeBase, "profile", "addresses"),
+        "security-settings": joinStorefrontPath(storeBase, "profile", "security"),
       };
       navigate(pathMap[mode]);
     },
@@ -1501,7 +1500,7 @@ export function VendorStoreView({
   );
 
   const uncategorizedTabPath = useMemo(
-    () => `${storeBase}/${encodeURIComponent(VENDOR_STORE_UNCATEGORIZED_SLUG)}`,
+    () => joinStorefrontPath(storeBase, encodeURIComponent(VENDOR_STORE_UNCATEGORIZED_SLUG)),
     [storeBase]
   );
 
@@ -1683,7 +1682,7 @@ export function VendorStoreView({
     (product: Product) => {
       saveVendorBrowseScrollPosition(String(product.id || "").trim() || undefined);
       const segment = buildVendorProductUrlSegment(product);
-      navigate(`${storeBase}/product/${encodeURIComponent(segment)}`, {
+      navigate(joinStorefrontPath(storeBase, "product", encodeURIComponent(segment)), {
         state: { vendorProduct: product },
       });
     },
@@ -1950,7 +1949,7 @@ export function VendorStoreView({
       setAuthMode("login");
       return;
     }
-    navigate(`${storeBase}/saved`);
+    navigate(joinStorefrontPath(storeBase, "saved"));
   }, [user, navigate, storeBase]);
 
   const vendorSubnavTabs = useMemo((): VendorSubnavTab[] => {
@@ -3407,7 +3406,7 @@ export function VendorStoreView({
                   <Package className="w-4 h-4 mr-2" />
                   {t("storefront.account.viewOrders")}
                 </Button>
-                <Button variant="outline" className="justify-start" onClick={() => navigate(`${storeBase}/saved`)}>
+                <Button variant="outline" className="justify-start" onClick={() => navigate(joinStorefrontPath(storeBase, "saved"))}>
                   <Heart className="w-4 h-4 mr-2" />
                   {t("storefront.account.myWishlist")}
                 </Button>
@@ -3653,7 +3652,14 @@ export function VendorStoreView({
                         variant="outline"
                         className="w-full sm:w-auto"
                         onClick={() =>
-                          navigate(`${storeBase}/profile/orders/${encodeURIComponent(String(order.id))}`)
+                          navigate(
+                            joinStorefrontPath(
+                              storeBase,
+                              "profile",
+                              "orders",
+                              encodeURIComponent(String(order.id)),
+                            ),
+                          )
                         }
                       >
                         <Eye className="w-4 h-4 mr-2" />

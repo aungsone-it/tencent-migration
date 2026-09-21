@@ -20,6 +20,7 @@ import {
   persistKpayOriginFromReturnSearch,
 } from "../utils/vendorCheckoutPaths";
 import { notifyAdminOrdersUpdated } from "../utils/adminOrdersRealtime";
+import { formatOrderNumberDisplay } from "../utils/orderNumber";
 import { readSubscriptionPwaPending } from "../utils/subscriptionPwa";
 
 type ReturnState =
@@ -290,7 +291,9 @@ export function KPayReturnPage() {
           {merchantOrderId && (
             <div className="flex items-center justify-between gap-3">
               <span className="font-medium text-slate-500">Order ID</span>
-              <span className="font-mono text-slate-800">{merchantOrderId}</span>
+              <span className="font-mono text-slate-800">
+                {formatOrderNumberDisplay(merchantOrderId)}
+              </span>
             </div>
           )}
           {prepayIdFromUrl && (

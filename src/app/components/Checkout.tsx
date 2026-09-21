@@ -480,6 +480,91 @@ function summaryPaymentMethodLabel(method: CheckoutPaymentMethod, t: (key: strin
   return t("checkout.card");
 }
 
+function summaryPathWithOrderId(basePath: string, orderId: string): string {
+  const id = String(orderId || "").trim();
+  if (!id) return basePath;
+  const path = (basePath.split("?")[0] || "").replace(/\/+$/, "") || "/";
+  const params = new URLSearchParams(basePath.includes("?") ? basePath.split("?")[1] : "");
+  params.set("orderNumber", id);
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+function orderRecordToSummarySnapshot(o: Record<string, unknown>): CheckoutSummarySnapshot | null {
+  const itemsFromOrder = Array.isArray(o.items)
+    ? o.items.map((it: any, idx: number) => ({
+        id: String(it?.id ?? it?.productId ?? idx),
+        sku: String(it?.sku ?? it?.name ?? "Item"),
+        quantity: Number(it?.quantity ?? 1) || 1,
+        price: Number(it?.price ?? 0) || 0,
+        image: typeof it?.image === "string" ? it.image : "",
+      }))
+    : [];
+  if (!itemsFromOrder.length) return null;
+
+  const orderNumber = String(o.orderNumber ?? o.id ?? "").trim();
+  if (!orderNumber) return null;
+
+  const shipping = {
+    fullName: String(o.customerName ?? o.customer ?? ""),
+    email: String(o.email ?? ""),
+    phone: String(o.phone ?? ""),
+    address: String(o.address ?? ""),
+    city: String(o.city ?? ""),
+    state: String(o.state ?? ""),
+    zipCode: String(o.zipCode ?? ""),
+    country: String(o.country ?? ""),
+  };
+
+  return {
+    orderNumber,
+    items: itemsFromOrder,
+    total: Number(o.total ?? 0) || 0,
+    orderNote: String(o.notes ?? ""),
+    coupon:
+      typeof o.couponCode === "string" && o.couponCode.trim()
+        ? { campaign: { code: o.couponCode } }
+        : null,
+    discount: Number(o.discount ?? 0) || 0,
+    shippingFee: Number(o.shippingFee ?? o.shippingCost ?? o.shipping ?? 0) || 0,
+    deliveryPartnerName: String(o.deliveryPartnerName ?? o.deliveryService ?? "").trim(),
+    shippingInfo: shipping,
+    paymentMethod: normalizeCheckoutPaymentMethod(o.paymentMethod),
+    savedAt: new Date().toISOString(),
+  };
+}
+
+function applySummarySnapshotToCheckoutState(
+  snapshot: CheckoutSummarySnapshot,
+  setters: {
+    setOrderNumber: (value: string) => void;
+    setConfirmedItems: (value: CheckoutSummarySnapshot["items"]) => void;
+    setConfirmedTotal: (value: number) => void;
+    setConfirmedOrderNote: (value: string) => void;
+    setConfirmedCoupon: (value: CheckoutSummarySnapshot["coupon"]) => void;
+    setConfirmedDiscount: (value: number) => void;
+    setConfirmedShippingFee: (value: number) => void;
+    setConfirmedDeliveryPartnerName: (value: string) => void;
+    setShippingInfo: (value: CheckoutSummarySnapshot["shippingInfo"]) => void;
+    setPaymentMethod: (value: CheckoutPaymentMethod) => void;
+  },
+): void {
+  setters.setOrderNumber(snapshot.orderNumber);
+  setters.setConfirmedItems(snapshot.items);
+  setters.setConfirmedTotal(Number(snapshot.total) || 0);
+  setters.setConfirmedOrderNote(snapshot.orderNote || "");
+  setters.setConfirmedCoupon(snapshot.coupon || null);
+  setters.setConfirmedDiscount(Number(snapshot.discount) || 0);
+  setters.setConfirmedShippingFee(
+    Number(snapshot.shippingFee ?? snapshot.shippingCost ?? 0) || 0,
+  );
+  setters.setConfirmedDeliveryPartnerName(String(snapshot.deliveryPartnerName || "").trim());
+  if (snapshot.shippingInfo) {
+    setters.setShippingInfo(snapshot.shippingInfo);
+  }
+  setters.setPaymentMethod(normalizeCheckoutPaymentMethod(snapshot.paymentMethod));
+}
+
 async function waitForKPayPaidSession(
   merchantOrderId: string,
   maxAttempts = 12,
@@ -1763,33 +1848,104 @@ export function Checkout({
         ? readCheckoutSummarySnapshot(summarySnapshotStorageKey)
         : readCheckoutSummarySnapshot(summarySnapshotStorageKey) ||
           readCheckoutSummarySnapshot(CHECKOUT_LATEST_SUMMARY_KEY);
-      if (!snapshot) return;
-      if (expectedOrderId && String(snapshot.orderNumber || "").trim() !== expectedOrderId) {
+      if (!snapshot) {
+        if (!isPwaSummarySession && !summaryQueryOrderId) {
+          setSummaryResolving(false);
+        }
         return;
       }
-      setOrderNumber(snapshot.orderNumber);
-      setConfirmedItems(snapshot.items);
-      setConfirmedTotal(Number(snapshot.total) || 0);
-      setConfirmedOrderNote(snapshot.orderNote || "");
-      setConfirmedCoupon(snapshot.coupon || null);
-      setConfirmedDiscount(Number(snapshot.discount) || 0);
-      setConfirmedShippingFee(
-        Number(snapshot.shippingFee ?? snapshot.shippingCost ?? 0) || 0
-      );
-      setConfirmedDeliveryPartnerName(String(snapshot.deliveryPartnerName || "").trim());
-      setShippingInfo(snapshot.shippingInfo || shippingInfo);
-      setPaymentMethod(normalizeCheckoutPaymentMethod(snapshot.paymentMethod));
+      if (expectedOrderId && String(snapshot.orderNumber || "").trim() !== expectedOrderId) {
+        if (!isPwaSummarySession && !summaryQueryOrderId) {
+          setSummaryResolving(false);
+        }
+        return;
+      }
+      applySummarySnapshotToCheckoutState(snapshot, {
+        setOrderNumber,
+        setConfirmedItems,
+        setConfirmedTotal,
+        setConfirmedOrderNote,
+        setConfirmedCoupon,
+        setConfirmedDiscount,
+        setConfirmedShippingFee,
+        setConfirmedDeliveryPartnerName,
+        setShippingInfo,
+        setPaymentMethod,
+      });
       if (isPwaSummarySession) {
         setLoading(false);
         return;
       }
       setStep("success");
+      setSummaryResolving(false);
       setLoading(false);
     } catch {
-      // ignore corrupted snapshot and fall back to normal checkout
+      if (!isPwaSummarySession && !summaryQueryOrderId) {
+        setSummaryResolving(false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, summarySnapshotStorageKey, summaryQueryOrderId, pwaPendingContext, isPwaSummarySession]);
+
+  // COD / QR summary refresh: hydrate from ?orderNumber= when localStorage snapshot is missing.
+  useEffect(() => {
+    if (!onSummaryRoute || isPwaSummarySession || step !== "checkout") return;
+    const orderId = summaryQueryOrderId;
+    if (!orderId) return;
+
+    let cancelled = false;
+    setSummaryResolving(true);
+
+    void (async () => {
+      try {
+        const response = await fetchOrderByMerchantOrderId(orderId);
+        if (cancelled) return;
+        if (!response.ok) {
+          setSummaryResolving(false);
+          return;
+        }
+        const data = (await response.json()) as { order?: Record<string, unknown> };
+        const snapshot = data?.order ? orderRecordToSummarySnapshot(data.order) : null;
+        if (!snapshot || cancelled) {
+          setSummaryResolving(false);
+          return;
+        }
+        applySummarySnapshotToCheckoutState(snapshot, {
+          setOrderNumber,
+          setConfirmedItems,
+          setConfirmedTotal,
+          setConfirmedOrderNote,
+          setConfirmedCoupon,
+          setConfirmedDiscount,
+          setConfirmedShippingFee,
+          setConfirmedDeliveryPartnerName,
+          setShippingInfo,
+          setPaymentMethod,
+        });
+        try {
+          localStorage.setItem(summarySnapshotStorageKey, JSON.stringify(snapshot));
+          localStorage.setItem(CHECKOUT_LATEST_SUMMARY_KEY, JSON.stringify(snapshot));
+        } catch {
+          /* non-fatal */
+        }
+        setStep("success");
+      } catch {
+        if (!cancelled) setSummaryResolving(false);
+      } finally {
+        if (!cancelled) setSummaryResolving(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    onSummaryRoute,
+    isPwaSummarySession,
+    step,
+    summaryQueryOrderId,
+    summarySnapshotStorageKey,
+  ]);
 
   useEffect(() => {
     pwaOrderPersistedRef.current = false;
@@ -2657,8 +2813,13 @@ export function Checkout({
           persistKpaySummaryStorefrontOrigin(checkoutStorefrontHomeUrl);
         }
         setStep("success");
-        if (location.pathname !== summaryPath) {
-          navigate(summaryPath, { replace: true });
+        const targetSummary = summaryPathWithOrderId(summaryPath, placedOrderNumber);
+        if (`${location.pathname}${location.search}` !== targetSummary) {
+          navigate(targetSummary, { replace: true });
+        }
+        if (!buyNowOverride?.items?.length) {
+          clearCart();
+          writeAppliedCouponToStorage(null);
         }
       } catch (error) {
         console.warn("QR checkout restore failed:", error);
@@ -2683,10 +2844,14 @@ export function Checkout({
     checkoutStorefrontHomeUrl,
     summaryPath,
     location.pathname,
+    location.search,
     navigate,
+    buyNowOverride?.items?.length,
+    clearCart,
   ]);
 
   const showSummaryLoading = onSummaryRoute && step === "checkout" && summaryResolving;
+  const showSummaryMissing = onSummaryRoute && step === "checkout" && !summaryResolving;
 
   // After a QR is issued, payment completion is written to KV by the public `kpay-webhook`
   // (and optionally refreshed via `queryorder` in `getKPayStatus`). We still subscribe to
@@ -2795,14 +2960,15 @@ export function Checkout({
       return;
     }
 
-    // 🔥 SAVE items and total BEFORE clearing cart
-    setConfirmedItems(checkoutItems);
-    setConfirmedTotal(finalTotal);
-    setConfirmedShippingFee(shippingFee);
-    setConfirmedDeliveryPartnerName(logisticsQuote?.partner.name || "");
-    setConfirmedOrderNote(orderNote);
-    setConfirmedCoupon(appliedCoupon);
-    setConfirmedDiscount(discountAmount);
+    const applyConfirmedCheckoutSnapshot = () => {
+      setConfirmedItems(checkoutItems);
+      setConfirmedTotal(finalTotal);
+      setConfirmedShippingFee(shippingFee);
+      setConfirmedDeliveryPartnerName(logisticsQuote?.partner.name || "");
+      setConfirmedOrderNote(orderNote);
+      setConfirmedCoupon(appliedCoupon);
+      setConfirmedDiscount(discountAmount);
+    };
 
     // Allocate serial order number (NOS-00001, NOS-00002, …) before create when possible.
     let orderNum =
@@ -3003,6 +3169,7 @@ export function Checkout({
 
       notifyAdminOrdersUpdated("storefront-checkout-order-created");
 
+      applyConfirmedCheckoutSnapshot();
       setOrderNumber(resolvedOrderNumber);
       placedOrderNumber = resolvedOrderNumber;
       // COD / QR placed here. Drop any leftover PWA draft so /summary stays this order.
@@ -3105,6 +3272,7 @@ export function Checkout({
     }
 
     if (orderAlreadyRegistered) {
+      applyConfirmedCheckoutSnapshot();
       setOrderNumber(placedOrderNumber);
     }
 
@@ -3138,8 +3306,9 @@ export function Checkout({
     if (checkoutStorefrontHomeUrl) {
       persistKpaySummaryStorefrontOrigin(checkoutStorefrontHomeUrl);
     }
-    if (location.pathname !== summaryPath) {
-      navigate(summaryPath, { replace: true });
+    const targetSummary = summaryPathWithOrderId(summaryPath, placedOrderNumber);
+    if (`${location.pathname}${location.search}` !== targetSummary) {
+      navigate(targetSummary, { replace: true });
     }
     
     // Clear cart after successful order (cart checkout only — Buy Now never touched the cart)
@@ -3159,6 +3328,24 @@ export function Checkout({
         <div className="text-center space-y-3">
           <Loader2 className="mx-auto h-10 w-10 animate-spin text-slate-600" />
           <p className="text-sm text-slate-600">Loading latest order summary...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (showSummaryMissing) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-lg">
+          <AlertTriangle className="mx-auto h-10 w-10 text-amber-500" strokeWidth={2} />
+          <h2 className="mt-4 text-lg font-semibold text-slate-900">{t("checkout.orderNotFound")}</h2>
+          <p className="mt-2 text-sm text-slate-600">{t("checkout.orderNotFoundHint")}</p>
+          <Button
+            className="mt-6 h-11 w-full rounded-lg bg-[#1a1d29] text-sm font-medium text-white hover:bg-slate-900"
+            onClick={handleContinueShopping}
+          >
+            {t("checkout.continueShopping")}
+          </Button>
         </div>
       </div>
     );
@@ -3756,7 +3943,9 @@ export function Checkout({
                         {kpaySession?.merchantOrderId && (
                           <div className="flex justify-between border-b border-slate-200 py-1">
                             <span className="text-slate-600">{t("checkout.merchantOrderId")}</span>
-                            <span className="font-mono font-semibold text-slate-900">{kpaySession.merchantOrderId}</span>
+                            <span className="font-mono font-semibold text-slate-900">
+                              {formatOrderNumberDisplay(kpaySession.merchantOrderId)}
+                            </span>
                           </div>
                         )}
                         <div className="flex justify-between border-b border-slate-200 py-1">

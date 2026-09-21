@@ -5,6 +5,9 @@ export const ORDER_SERIAL_COUNTER_KEY = "order_serial_counter";
 const ORDER_SERIAL_RESERVATION_PREFIX = "order_serial_reservation:";
 export const ORDER_SERIAL_REJECTED_PREFIX = "order_serial_rejected:";
 
+/** Do not reuse gap serials below this — legacy pre-895 abandons stay retired. */
+export const ORDER_SERIAL_GAP_REUSE_FLOOR = 895;
+
 /**
  * @deprecated Legacy cutoff — unpaid abandons are always eligible for reuse now.
  * Kept exported so older deploy notes / scripts do not break on import.
@@ -123,8 +126,9 @@ async function ensureOrderSerialCounterInitialized(): Promise<number> {
   if (Number.isFinite(current) && current > 0) return current;
 
   const bootstrapped = await scanMaxExistingSerial();
-  await kv.set(ORDER_SERIAL_COUNTER_KEY, bootstrapped);
-  return bootstrapped;
+  const effective = Math.max(bootstrapped, ORDER_SERIAL_GAP_REUSE_FLOOR - 1);
+  await kv.set(ORDER_SERIAL_COUNTER_KEY, effective);
+  return effective;
 }
 
 /** Canonical order number before persisting (drops legacy MOS-/ORD- wrappers). */
@@ -160,30 +164,31 @@ export async function isOrderNumberAdminRejected(orderNumber: unknown): Promise<
 export async function isOrderNumberReusable(orderNumber: unknown): Promise<boolean> {
   const num = canonicalizeOrderNumber(orderNumber);
   if (!num) return false;
+  const serial = parseSerialFromOrderNumber(num);
+  if (serial > 0 && serial < ORDER_SERIAL_GAP_REUSE_FLOOR) return false;
   if (await isOrderNumberAdminRejected(num)) return false;
   if (await hasPersistedOrder(num)) return false;
 
   const txn = (await kv.get(`kpay_txn:${num}`)) as Record<string, unknown> | null;
   if (kpayTxnIsPaid(txn)) return false;
 
-  // Counter hole with no reservation / KBZ keys — fill immediately.
-  if (!(await hasAllocationArtifacts(num))) return true;
+  if (!(await hasAllocationArtifacts(num))) return false;
 
-  // Stale unpaid KBZ session — reuse; in-flight KBZ QR/PWA — wait until timeout.
+  // Stale unpaid KBZ session — reuse for the same checkout retry; in-flight — wait until timeout.
   if (await unpaidKpaySessionActive(num)) return false;
 
   return true;
 }
 
-/** Highest serial referenced by counter, reservations, or KBZ session keys. */
-async function allocationScanCeiling(): Promise<number> {
-  const counter = await ensureOrderSerialCounterInitialized();
-  let ceiling = counter;
+/** Keep counter aligned with persisted orders and in-flight reservations (no backward jumps). */
+async function syncOrderSerialCounter(): Promise<number> {
+  await ensureOrderSerialCounterInitialized();
+  const maxFromOrders = await scanMaxExistingSerial();
+  let maxFromAllocations = maxFromOrders;
   const scanPrefixes = [
     ORDER_SERIAL_RESERVATION_PREFIX,
     "kpay_txn:",
     "kpay_pwa_draft:",
-    ORDER_SERIAL_REJECTED_PREFIX,
   ];
   try {
     for (const prefix of scanPrefixes) {
@@ -191,38 +196,23 @@ async function allocationScanCeiling(): Promise<number> {
       for (const row of rows) {
         const suffix = String(row.key || "").slice(prefix.length);
         const serial = parseSerialFromOrderNumber(suffix);
-        if (serial > ceiling) ceiling = serial;
+        if (serial > maxFromAllocations) maxFromAllocations = serial;
       }
     }
   } catch {
-    /* non-fatal — fall back to counter */
+    /* non-fatal */
   }
-  return ceiling;
-}
-
-/** Claim the lowest reusable serial and refresh its reservation timestamp. */
-async function claimLowestReusableOrderNumber(): Promise<string | null> {
-  const ceiling = await allocationScanCeiling();
-  for (let serial = 1; serial <= ceiling; serial++) {
-    const orderNumber = formatSerialOrderNumber(serial);
-    if (!(await isOrderNumberReusable(orderNumber))) continue;
-
-    await kv.del(`kpay_txn:${orderNumber}`);
-    await kv.del(`kpay_pwa_draft:${orderNumber}`);
-
-    const reservationKey = `${ORDER_SERIAL_RESERVATION_PREFIX}${orderNumber}`;
-    const reservedAt = new Date().toISOString();
-    const payload = { reservedAt, reused: true };
-    const existing = await kv.get(reservationKey);
-    if (!existing) {
-      const claimed = await kv.setIfAbsent(reservationKey, payload);
-      if (claimed) return orderNumber;
-      continue;
-    }
-    await kv.set(reservationKey, payload);
-    return orderNumber;
+  const current = Number(await kv.get(ORDER_SERIAL_COUNTER_KEY)) || 0;
+  const synced = Math.max(
+    current,
+    maxFromOrders,
+    maxFromAllocations,
+    ORDER_SERIAL_GAP_REUSE_FLOOR - 1,
+  );
+  if (synced !== current) {
+    await kv.set(ORDER_SERIAL_COUNTER_KEY, synced);
   }
-  return null;
+  return synced;
 }
 
 async function reserveOrderNumber(orderNumber: string, reused = false): Promise<void> {
@@ -276,7 +266,7 @@ export async function rejectOrderDraft(orderNumber: unknown): Promise<{ ok: bool
 export async function noteOrderNumberUsed(orderNumber: unknown): Promise<void> {
   const serial = parseSerialFromOrderNumber(orderNumber);
   if (serial <= 0) return;
-  const current = await ensureOrderSerialCounterInitialized();
+  const current = await syncOrderSerialCounter();
   if (serial > current) {
     await kv.set(ORDER_SERIAL_COUNTER_KEY, serial);
   }
@@ -294,7 +284,8 @@ export async function touchOrderNumberReservation(orderNumber: unknown): Promise
   if (!num) return;
   const existing = await kv.get(`${ORDER_SERIAL_RESERVATION_PREFIX}${num}`);
   if (existing) return;
-  if (await isOrderNumberReusable(num)) {
+  // Only refresh reservations for the same in-flight checkout — never resurrect old gap serials.
+  if ((await hasAllocationArtifacts(num)) && (await isOrderNumberReusable(num))) {
     await reserveOrderNumber(num, true);
   }
 }
@@ -308,12 +299,46 @@ export async function ensureOrderNumberAssignableForCreate(
   if (!num) {
     return { ok: false, error: "invalid_order_number", message: "Invalid order number" };
   }
+  const serial = parseSerialFromOrderNumber(num);
+  if (
+    serial > 0 &&
+    serial < ORDER_SERIAL_GAP_REUSE_FLOOR &&
+    !(await hasPersistedOrder(num))
+  ) {
+    const txn = (await kv.get(`kpay_txn:${num}`)) as Record<string, unknown> | null;
+    if (!kpayTxnIsPaid(txn)) {
+      return {
+        ok: false,
+        error: "order_number_retired",
+        message: `Order numbers below NOS-${String(ORDER_SERIAL_GAP_REUSE_FLOOR).padStart(5, "0")} are no longer assigned`,
+      };
+    }
+  }
   if (await isOrderNumberAdminRejected(num)) {
     return {
       ok: false,
       error: "order_number_rejected",
       message: "This order number was rejected and cannot be reused",
     };
+  }
+
+  const current = await syncOrderSerialCounter();
+  const inFlight = await hasAllocationArtifacts(num);
+  if (serial > 0 && !(await hasPersistedOrder(num))) {
+    if (serial > current + 1 && !inFlight) {
+      return {
+        ok: false,
+        error: "order_number_out_of_sequence",
+        message: `Next order number must follow NOS-${String(Math.max(current + 1, ORDER_SERIAL_GAP_REUSE_FLOOR)).padStart(5, "0")}`,
+      };
+    }
+    if (serial < current + 1 && !inFlight) {
+      return {
+        ok: false,
+        error: "order_number_retired",
+        message: `Order numbers below NOS-${String(current + 1).padStart(5, "0")} are no longer assigned`,
+      };
+    }
   }
 
   const txn = (await kv.get(`kpay_txn:${num}`)) as Record<string, unknown> | null;
@@ -336,35 +361,27 @@ export async function ensureOrderNumberAssignableForCreate(
   return { ok: true };
 }
 
-/** Allocate the next serial order number (NOS-00001, NOS-00002, …). Reuses stale unpaid abandons; paid KBZ drafts stay blocked. */
+/**
+ * Allocate the next serial strictly in sequence (NOS-00895, NOS-00896, …).
+ * No gap backfill — only the immediate next serial; stale in-flight checkout retries reuse the same id.
+ */
 export async function allocateNextOrderNumber(): Promise<string> {
-  await ensureOrderSerialCounterInitialized();
-
-  const reused = await claimLowestReusableOrderNumber();
-  if (reused) {
-    const serial = parseSerialFromOrderNumber(reused);
-    const current = Number(await kv.get(ORDER_SERIAL_COUNTER_KEY)) || 0;
-    if (serial > current) {
-      await kv.set(ORDER_SERIAL_COUNTER_KEY, serial);
-    }
-    return reused;
-  }
-
   for (let attempt = 0; attempt < 25; attempt++) {
-    const current = Number(await kv.get(ORDER_SERIAL_COUNTER_KEY)) || 0;
-    const nextSerial = current + 1;
+    const current = await syncOrderSerialCounter();
+    const nextSerial = Math.max(current + 1, ORDER_SERIAL_GAP_REUSE_FLOOR);
     const orderNumber = formatSerialOrderNumber(nextSerial);
 
     const reserved = await kv.setIfAbsent(`${ORDER_SERIAL_RESERVATION_PREFIX}${orderNumber}`, {
       reservedAt: new Date().toISOString(),
     });
     if (!reserved) {
-      // Reservation exists — reuse when stale/unpaid instead of skipping to a higher serial.
+      // Same checkout retry — reclaim stale reservation instead of jumping ahead.
       if (await isOrderNumberReusable(orderNumber)) {
         await prepareOrderNumberForReuse(orderNumber);
-        await kv.set(ORDER_SERIAL_COUNTER_KEY, Math.max(current, nextSerial));
+        await kv.set(ORDER_SERIAL_COUNTER_KEY, nextSerial);
         return orderNumber;
       }
+      // Blocked (admin-rejected / active KBZ) — advance past this serial only.
       await kv.set(ORDER_SERIAL_COUNTER_KEY, nextSerial);
       continue;
     }

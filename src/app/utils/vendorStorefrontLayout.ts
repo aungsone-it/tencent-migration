@@ -11,6 +11,9 @@ export const VENDOR_MOBILE_CHAT_OFFSET =
   "calc(5.5rem + 0.625rem + 2.5rem + 0.625rem + env(safe-area-inset-bottom, 0px))";
 
 export function isVendorStorefrontProductDetailPath(pathname: string): boolean {
-  if (pathname.startsWith("/product/")) return true;
-  return /^\/vendor\/[^/]+\/product\/[^/]+/.test(pathname);
+  const p = pathname.replace(/\/+$/, "") || "/";
+  if (/^\/product\/[^/]+/.test(p)) return true;
+  if (/^\/vendor\/[^/]+\/product\/[^/]+/.test(p)) return true;
+  if (/^\/vendor-[^/]+\/product\/[^/]+/.test(p)) return true;
+  return false;
 }

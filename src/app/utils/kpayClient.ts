@@ -1,4 +1,8 @@
-import { fetchNextOrderNumber, parseOrderSerial } from "./orderNumber";
+import {
+  fetchNextOrderNumber,
+  ORDER_SERIAL_GAP_REUSE_FLOOR,
+  parseOrderSerial,
+} from "./orderNumber";
 import { resolveVendorPathSlug } from "./vendorStorePaths";
 import { resolveKpayUnifiedReturnOrigin } from "./vendorCheckoutPaths";
 import {
@@ -378,7 +382,9 @@ export function readPendingMerchantOrderId(method?: "pwa" | "qr"): string {
       if (pendingMethod !== method) return "";
     }
     const id = String(parsed?.merchantOrderId || "").trim();
-    return parseOrderSerial(id) > 0 ? id : "";
+    const serial = parseOrderSerial(id);
+    if (serial <= 0 || serial < ORDER_SERIAL_GAP_REUSE_FLOOR) return "";
+    return id;
   } catch {
     return "";
   }

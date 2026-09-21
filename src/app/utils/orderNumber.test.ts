@@ -8,11 +8,16 @@ import {
   isPrefixedOrderNumber,
   normalizeOrderNumberSearch,
   ORDER_NUMBER_PREFIX,
+  ORDER_SERIAL_GAP_REUSE_FLOOR,
   orderNumberSearchTokens,
   parseOrderSerial,
 } from "./orderNumber";
 
 describe("orderNumber", () => {
+  it("keeps gap reuse floor at 895 so legacy serials stay retired", () => {
+    expect(ORDER_SERIAL_GAP_REUSE_FLOOR).toBe(895);
+  });
+
   it("formats serial order numbers with zero padding", () => {
     expect(formatSerialOrderNumber(1)).toBe("NOS-00001");
     expect(formatSerialOrderNumber(999)).toBe("NOS-00999");
@@ -28,6 +33,7 @@ describe("orderNumber", () => {
     expect(formatOrderNumberDisplay("MOS-0042")).toBe("NOS-00042");
     expect(formatOrderNumberDisplay("ORD-1000")).toBe("NOS-01000");
     expect(formatOrderNumberDisplay("MOS-MRFDNEWI")).toBe("MOS-MRFDNEWI");
+    expect(formatOrderNumberDisplay("NOS - 00001")).toBe("NOS-00001");
   });
 
   it("formats invoice barcode using display format", () => {

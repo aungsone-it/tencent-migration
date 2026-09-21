@@ -37,6 +37,10 @@ import {
   readCachedVendorBrandingBySlug,
   readCachedVendorProductName,
 } from "../utils/vendorStorefrontBrandingCache";
+import {
+  isVendorStorefrontProductPath,
+  isVendorStorefrontSavedPath,
+} from "../utils/vendorStorefrontRoutePaths";
 import { AuthProvider } from "../contexts/AuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { CartProvider } from "../components/CartContext";
@@ -433,6 +437,15 @@ export function VendorStorefrontPage() {
 
   const categorySlug = useMemo(() => {
     if (!resolvedStoreName) return null;
+    if (
+      isVendorStorefrontProductPath(location.pathname) ||
+      isVendorStorefrontSavedPath(location.pathname) ||
+      vendorStore?.tail[0] === "profile" ||
+      vendorStore?.tail[0] === "checkout" ||
+      vendorStore?.tail[0] === "summary"
+    ) {
+      return null;
+    }
     const fromParams =
       typeof params.categorySlug === "string" && params.categorySlug.trim()
         ? decodeURIComponent(params.categorySlug.trim())
@@ -441,7 +454,7 @@ export function VendorStorefrontPage() {
       return fromParams;
     }
     return vendorCategorySlugFromPathname(location.pathname, resolvedStoreName);
-  }, [resolvedStoreName, location.pathname, params.categorySlug]);
+  }, [resolvedStoreName, location.pathname, params.categorySlug, vendorStore?.tail]);
 
   const hostRootStorePathsNav = !!(subdomainSlug || customHostSlug);
 

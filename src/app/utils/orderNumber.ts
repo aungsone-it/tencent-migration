@@ -1,6 +1,8 @@
 import { cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from "../../../utils/supabase/info";
 
 export const ORDER_NUMBER_PREFIX = "NOS";
+/** Match backend ORDER_SERIAL_GAP_REUSE_FLOOR — legacy serials below this are never reused. */
+export const ORDER_SERIAL_GAP_REUSE_FLOOR = 895;
 const LEGACY_ORDER_PREFIXES = ["ORD", "MOS", "NOS"] as const;
 const ORDER_PREFIX_PATTERN = /^(ORD|MOS|NOS)-/i;
 
@@ -110,7 +112,10 @@ export function extractOrderCode(orderNumber: string): string {
 
 /** UI + invoice display for order numbers. */
 export function formatOrderNumberDisplay(orderNumber: string): string {
-  let raw = String(orderNumber || "").trim().replace(/^#/, "");
+  let raw = String(orderNumber || "")
+    .trim()
+    .replace(/^#/, "")
+    .replace(/\s+/g, "");
   if (!raw) return "";
 
   // Unwrap stacked prefixes saved by legacy flows (e.g. MOS-NOS-00001 → NOS-00001).

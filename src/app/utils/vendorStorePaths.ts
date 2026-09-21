@@ -136,7 +136,9 @@ export function buildVendorStoreHomePath(params: {
   const slug = resolveVendorPathSlug(params.pathSlug);
   if (!slug) return "/";
   const enc = encodeURIComponent(slug);
-  return params.useVendorDashPrefix ? `/vendor-${enc}` : `/vendor/${enc}`;
+  // Always emit `/vendor/:slug` — `vendor-` URLs are legacy and lack dedicated routes.
+  void params.useVendorDashPrefix;
+  return `/vendor/${enc}`;
 }
 
 /** Join storefront paths without producing `//segment` when base is `/`. */

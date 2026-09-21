@@ -121,6 +121,8 @@ export const myTranslations: Record<string, string> = {
     'checkout.couponApplied': 'ကူပွန် အသုံးပြုထားသည်',
     'checkout.paymentMethod': 'ငွေပေးချေမှုနည်းလမ်း',
     'checkout.orderNote': 'အော်ဒါမှတ်ချက်',
+    'checkout.orderNotFound': 'အော်ဒါ မတွေ့ပါ',
+    'checkout.orderNotFoundHint': 'ဤအော်ဒါအကျဉ်းချုပ် မဖွင့်နိုင်ပါ။ လင့်ခ် မပြည့်စုံနိုင်ပါ သို့မဟုတ် သက်တမ်းကုန်သွားနိုင်ပါသည်။',
     'checkout.shippingInformation': 'ပို့ဆောင်ရေး အချက်အလက်',
     'checkout.phone': 'ဖုန်း',
     'checkout.email': 'အီးမေးလ်',

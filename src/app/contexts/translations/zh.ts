@@ -292,6 +292,8 @@ export const zhTranslations: Record<string, string> = {
     'checkout.couponApplied': '已使用优惠券',
     'checkout.paymentMethod': '支付方式',
     'checkout.orderNote': '订单备注',
+    'checkout.orderNotFound': '未找到订单',
+    'checkout.orderNotFoundHint': '无法加载此订单摘要。链接可能不完整或已过期。',
     'checkout.shippingInformation': '配送信息',
     'checkout.phone': '电话',
     'checkout.email': '邮箱',

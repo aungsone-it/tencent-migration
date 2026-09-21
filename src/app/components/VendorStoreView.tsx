@@ -202,6 +202,10 @@ import {
   pathVendorStoreSlugFromPathname,
   isDefaultTechnicalVendorStoreSlug,
 } from "../utils/vendorStorePaths";
+import {
+  extractVendorStorefrontProductSlug,
+  isVendorStorefrontProductPath,
+} from "../utils/vendorStorefrontRoutePaths";
 import { supabase } from "../contexts/AuthContext";
 import {
   VENDOR_STORE_UNCATEGORIZED_FILTER,
@@ -651,6 +655,11 @@ function resolveVendorProductFromSlug(products: Product[], decoded: string): Pro
       Array.isArray(p.variants) &&
       p.variants.some((v: any) => variantSkuMatchesPathSegment(v?.sku, dec))
   );
+}
+
+function productMatchesUrlSlug(product: Product | null | undefined, decoded: string): boolean {
+  if (!product || !decoded.trim()) return false;
+  return Boolean(resolveVendorProductFromSlug([product], decoded));
 }
 
 /** Browse mode: small pages + load more. Search mode: max edge page size so live filter + server q cover the catalog. */
@@ -1166,28 +1175,14 @@ export function VendorStoreView({
   }, [savedPage, normalizedCategorySlugFromRoute]);
 
   /** Prefer pathname over useParams so async product load cannot reopen detail after user navigated away. */
-  const productSlugFromPath = useMemo(() => {
-    const fromDashBase =
-      storeBase &&
-      storeBase.startsWith("/vendor-") &&
-      location.pathname.startsWith(`${storeBase}/product/`)
-        ? location.pathname.slice(`${storeBase}/product/`.length).split("/")[0]
-        : "";
-    if (fromDashBase) return fromDashBase;
-    const m =
-      matchPath({ path: "/vendor/:storeName/product/:productSlug", end: true }, location.pathname) ??
-      matchPath({ path: "/vendor-:storeName/product/:productSlug", end: true }, location.pathname) ??
-      matchPath({ path: "/product/:productSlug", end: true }, location.pathname);
-    return typeof m?.params?.productSlug === "string" ? m.params.productSlug : undefined;
-  }, [location.pathname, storeBase]);
+  const productSlugFromPath = useMemo(
+    () => extractVendorStorefrontProductSlug(location.pathname, storeBase),
+    [location.pathname, storeBase],
+  );
 
   const isVendorProductDetailPath = useMemo(
-    () =>
-      (storeBase.startsWith("/vendor-") && location.pathname.startsWith(`${storeBase}/product/`)) ||
-      matchPath({ path: "/vendor/:storeName/product/:productSlug", end: true }, location.pathname) != null ||
-      matchPath({ path: "/vendor-:storeName/product/:productSlug", end: true }, location.pathname) != null ||
-      matchPath({ path: "/product/:productSlug", end: true }, location.pathname) != null,
-    [location.pathname, storeBase]
+    () => isVendorStorefrontProductPath(location.pathname),
+    [location.pathname],
   );
 
   const goToProfileMode = useCallback(
@@ -4882,11 +4877,7 @@ export function VendorStoreView({
 
   // Sync product detail from URL + catalog before paint — avoids grid/skeleton flash when opening a card.
   useLayoutEffect(() => {
-    const stillOnProduct =
-      matchPath({ path: "/vendor/:storeName/product/:productSlug", end: true }, location.pathname) ??
-      matchPath({ path: "/vendor-:storeName/product/:productSlug", end: true }, location.pathname) ??
-      matchPath({ path: "/product/:productSlug", end: true }, location.pathname);
-    if (!stillOnProduct) {
+    if (!isVendorProductDetailPath) {
       if (wasOnVendorProductRouteRef.current) {
         wasOnVendorProductRouteRef.current = false;
         restoreVendorBrowseCatalogSliceForRoute();
@@ -4911,11 +4902,13 @@ export function VendorStoreView({
       setSelectedProduct(fromCatalog);
       return;
     }
+    if (productMatchesUrlSlug(selectedProduct, decoded)) {
+      return;
+    }
     const navState = location.state as { vendorProduct?: Product } | null | undefined;
     const fromNav = navState?.vendorProduct;
     if (fromNav?.id) {
-      // Prefer strict match; fall back to segment/sku/id equality (encoding & case differ on some hosts).
-      if (resolveVendorProductFromSlug([fromNav], decoded)) {
+      if (productMatchesUrlSlug(fromNav, decoded)) {
         setSelectedProduct(fromNav);
         return;
       }
@@ -4931,11 +4924,15 @@ export function VendorStoreView({
         return;
       }
     }
-    startTransition(() => setSelectedProduct(null));
+    if (selectedProduct && !productMatchesUrlSlug(selectedProduct, decoded)) {
+      startTransition(() => setSelectedProduct(null));
+    }
   }, [
+    isVendorProductDetailPath,
     productSlugFromPath,
     initialProductSlug,
     products,
+    selectedProduct,
     location.pathname,
     location.state,
     restoreVendorBrowseCatalogSliceForRoute,
@@ -4960,16 +4957,12 @@ export function VendorStoreView({
   }, [productSlugFromPath, initialProductSlug, savedPage, location.pathname]);
 
   useEffect(() => {
-    if (savedPage) return;
+    if (savedPage || !isVendorProductDetailPath) return;
     const slug = productSlugFromPath ?? initialProductSlug;
     if (!slug) return;
     const decoded = safeDecodePathSegment(slug);
     if (!decoded) return;
-    const stillOnProduct =
-      matchPath({ path: "/vendor/:storeName/product/:productSlug", end: true }, location.pathname) ??
-      matchPath({ path: "/vendor-:storeName/product/:productSlug", end: true }, location.pathname) ??
-      matchPath({ path: "/product/:productSlug", end: true }, location.pathname);
-    if (!stillOnProduct) return;
+    if (productMatchesUrlSlug(selectedProduct, decoded)) return;
 
     let cancelled = false;
     void (async () => {
@@ -4992,7 +4985,10 @@ export function VendorStoreView({
           /* catalog row only */
         }
 
-        setSelectedProduct(detail);
+        if (cancelled) return;
+        setSelectedProduct((prev) =>
+          prev && prev.id === detail.id ? { ...prev, ...detail } : detail,
+        );
         setProducts((prev) => {
           const idx = prev.findIndex((x) => x.id === detail.id);
           if (idx === -1) return [...prev, detail];
@@ -5000,14 +4996,22 @@ export function VendorStoreView({
           next[idx] = { ...next[idx], ...detail };
           return next;
         });
-      } catch {
-        /* ignore */
+      } catch (error) {
+        console.warn("Vendor product detail fetch failed:", error);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [savedPage, productSlugFromPath, initialProductSlug, products, vendorId, location.pathname]);
+  }, [
+    savedPage,
+    isVendorProductDetailPath,
+    productSlugFromPath,
+    initialProductSlug,
+    selectedProduct,
+    vendorId,
+    location.pathname,
+  ]);
 
   const handleAddToCart = (product: Product, overrides?: VendorAddToCartOverrides): boolean => {
     try {

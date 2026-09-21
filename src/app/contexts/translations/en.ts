@@ -314,6 +314,8 @@ export const enTranslations: Record<string, string> = {
     'checkout.couponApplied': 'Coupon Applied',
     'checkout.paymentMethod': 'Payment method',
     'checkout.orderNote': 'Order Note',
+    'checkout.orderNotFound': 'Order not found',
+    'checkout.orderNotFoundHint': 'We could not load this order summary. It may have expired or the link is incomplete.',
     'checkout.shippingInformation': 'Shipping information',
     'checkout.phone': 'Phone',
     'checkout.email': 'Email',

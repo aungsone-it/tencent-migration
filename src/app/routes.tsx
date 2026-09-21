@@ -32,6 +32,7 @@ import {
   VendorHostCategoryRoute,
 } from "./components/VendorHostOrMarketplaceRoutes";
 import { LegacyStoreRedirect } from "./components/LegacyStoreRedirect";
+import { VendorDashPrefixRedirect } from "./components/VendorDashPrefixRedirect";
 import { isBarePlatformApexHost, isMarketplaceApexHost } from "./utils/platformApexHost";
 import { VendorStorefrontPage } from "./pages/vendorStorefrontPageLazy";
 
@@ -433,6 +434,10 @@ export const appRouteObjects: RouteObject[] = [
           {
             path: "vendor/:storeName/privacy-policy",
             element: <StorefrontPolicyPage type="privacy" />,
+          },
+          {
+            path: "vendor-:storeName/*",
+            element: <VendorDashPrefixRedirect />,
           },
           {
             path: "vendor/:storeName/:categorySlug",

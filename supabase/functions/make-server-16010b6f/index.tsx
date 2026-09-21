@@ -5627,7 +5627,7 @@ async function reconcileReadModelOrdersPage(
     if (!lookup) continue;
     const resolved = await resolveOrderStorage(lookup);
     if (resolved) {
-      kept.push({ ...row, ...adminListShippingPatchFromOrder(resolved.record as Record<string, unknown>) });
+      kept.push({ ...row, ...adminListKvOverlayFromOrder(resolved.record as Record<string, unknown>) });
       continue;
     }
     removed += 1;
@@ -5983,9 +5983,24 @@ function mapOrderToAdminListRow(order: any) {
   };
 }
 
-function adminListShippingPatchFromOrder(order: Record<string, unknown>): Record<string, unknown> {
+/** KV is write source-of-truth — overlay status + shipping onto SQL read-model list rows. */
+function adminListKvOverlayFromOrder(order: Record<string, unknown>): Record<string, unknown> {
   const shipping = normalizeOrderShippingFields(order);
+  const refundStatus =
+    order.refundStatus ??
+    (order.kpay &&
+    typeof order.kpay === "object" &&
+    (order.kpay as Record<string, unknown>).refund &&
+    typeof (order.kpay as Record<string, unknown>).refund === "object"
+      ? ((order.kpay as Record<string, unknown>).refund as Record<string, unknown>).status
+      : undefined);
   return {
+    ...(String(order.status || "").trim() ? { status: order.status } : {}),
+    ...(String(order.paymentStatus || "").trim() ? { paymentStatus: order.paymentStatus } : {}),
+    ...(String(order.shippingStatus || "").trim() ? { shippingStatus: order.shippingStatus } : {}),
+    ...(order.updatedAt ? { updatedAt: order.updatedAt } : {}),
+    ...(order.inventoryDeducted !== undefined ? { inventoryDeducted: order.inventoryDeducted } : {}),
+    ...(String(refundStatus || "").trim() ? { refundStatus } : {}),
     address: shipping.address,
     city: shipping.city,
     state: shipping.state,

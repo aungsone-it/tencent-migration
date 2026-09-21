@@ -166,6 +166,61 @@ function resolveOrderMutationId(order: Pick<OrderItem, "id" | "orderNumber">): s
   return String(order.orderNumber || order.id || "").trim();
 }
 
+type StatusBreakdown = {
+  pending?: number;
+  processing?: number;
+  fulfilled?: number;
+  cancelled?: number;
+};
+
+function adjustStatusBreakdown(breakdown: StatusBreakdown, from: string, to: string): StatusBreakdown {
+  if (from === to) return breakdown;
+  const next = { ...breakdown };
+  const drop = (bucket: keyof StatusBreakdown) => {
+    next[bucket] = Math.max(0, (next[bucket] ?? 0) - 1);
+  };
+  const add = (bucket: keyof StatusBreakdown) => {
+    next[bucket] = (next[bucket] ?? 0) + 1;
+  };
+  if (from === "pending") drop("pending");
+  else if (from === "processing" || from === "ready-to-ship") drop("processing");
+  else if (from === "fulfilled") drop("fulfilled");
+  else if (from === "cancelled") drop("cancelled");
+  if (to === "pending") add("pending");
+  else if (to === "processing" || to === "ready-to-ship") add("processing");
+  else if (to === "fulfilled") add("fulfilled");
+  else if (to === "cancelled") add("cancelled");
+  return next;
+}
+
+function buildOrderStatusOptimisticPatch(
+  order: OrderItem,
+  newStatus: OrderStatus,
+): Pick<OrderItem, "status" | "paymentStatus" | "shippingStatus"> {
+  if (newStatus === "cancelled") {
+    return {
+      status: newStatus,
+      paymentStatus:
+        order.paymentStatus === "refunded" ? "refunded" : ("pending_refund" as PaymentStatus),
+      shippingStatus: "cancelled" as ShippingStatus,
+    };
+  }
+  const paymentKey = normalizePaymentBadgeStatus(order.paymentStatus);
+  const shippingKey = normalizeShippingBadgeStatus(order.shippingStatus);
+  const leavingCancelled =
+    normalizeOrderListStatus(order.status) === "cancelled" ||
+    paymentKey === "pending-refund" ||
+    shippingKey === "cancelled";
+  if (leavingCancelled) {
+    return {
+      status: newStatus,
+      paymentStatus: order.paymentStatus === "refunded" ? "refunded" : ("unpaid" as PaymentStatus),
+      shippingStatus: "pending" as ShippingStatus,
+    };
+  }
+  return { status: newStatus };
+}
+
 async function deleteOrderRow(
   order: Pick<OrderItem, "id" | "orderNumber">,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -274,6 +329,7 @@ type PendingOrderStatusDraft = {
 // Keeps just-updated statuses stable across fast section switches/remounts.
 const pendingOrderStatusDrafts = new Map<string, PendingOrderStatusDraft>();
 const PENDING_ORDER_STATUS_TTL_MS = 90_000;
+const PENDING_STATUS_SESSION_KEY = "admin-order-status-drafts-v1";
 
 function prunePendingStatusDrafts(): void {
   const now = Date.now();
@@ -282,8 +338,42 @@ function prunePendingStatusDrafts(): void {
   }
 }
 
+function loadPendingStatusDraftsFromSession(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = sessionStorage.getItem(PENDING_STATUS_SESSION_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Array<[string, PendingOrderStatusDraft]>;
+    if (!Array.isArray(parsed)) return;
+    const now = Date.now();
+    for (const [key, draft] of parsed) {
+      if (!key || !draft || now - Number(draft.at || 0) > PENDING_ORDER_STATUS_TTL_MS) continue;
+      pendingOrderStatusDrafts.set(key, draft);
+    }
+  } catch {
+    /* ignore corrupt session snapshot */
+  }
+}
+
+function savePendingStatusDraftsToSession(): void {
+  if (typeof window === "undefined") return;
+  try {
+    prunePendingStatusDrafts();
+    sessionStorage.setItem(
+      PENDING_STATUS_SESSION_KEY,
+      JSON.stringify([...pendingOrderStatusDrafts.entries()]),
+    );
+  } catch {
+    /* non-fatal */
+  }
+}
+
+loadPendingStatusDraftsFromSession();
+
 function getPendingDraftForRow(row: OrderItem): PendingOrderStatusDraft | undefined {
+  const rowKey = getOrderListRowKey(row);
   return (
+    pendingOrderStatusDrafts.get(rowKey) ??
     pendingOrderStatusDrafts.get(row.id) ??
     pendingOrderStatusDrafts.get(row.orderNumber) ??
     undefined
@@ -298,12 +388,18 @@ function rememberPendingStatusDraft(
   pendingOrderStatusDrafts.set(orderId, draft);
   const num = String(orderNumber || "").trim();
   if (num && num !== orderId) pendingOrderStatusDrafts.set(num, draft);
+  const rowKey = num ? num.toLowerCase() : String(orderId || "").trim().toLowerCase();
+  if (rowKey) pendingOrderStatusDrafts.set(rowKey, draft);
+  savePendingStatusDraftsToSession();
 }
 
 function forgetPendingStatusDraft(orderId: string, orderNumber?: string): void {
   pendingOrderStatusDrafts.delete(orderId);
   const num = String(orderNumber || "").trim();
   if (num) pendingOrderStatusDrafts.delete(num);
+  if (num) pendingOrderStatusDrafts.delete(num.toLowerCase());
+  pendingOrderStatusDrafts.delete(String(orderId || "").trim().toLowerCase());
+  savePendingStatusDraftsToSession();
 }
 
 function applyPendingStatusDrafts(rows: OrderItem[]): OrderItem[] {
@@ -1078,6 +1174,12 @@ export function Orders({
   };
 
   const handleBulkStatusUpdate = () => {
+    const firstSelected = selectedOrders[0]
+      ? findOrderByRowKey(orders, selectedOrders[0])
+      : undefined;
+    if (firstSelected) {
+      setBulkStatus(normalizeAdminOrderStatusForBadge(firstSelected.status) as OrderStatus);
+    }
     setIsStatusDialogOpen(true);
   };
 
@@ -1104,96 +1206,242 @@ export function Orders({
   };
 
   const saveBulkStatusUpdate = async () => {
-    // OPTIMISTIC UPDATE - Update all selected orders immediately!
+    const selectedRowKeys = [...selectedOrders];
+    if (selectedRowKeys.length === 0) return;
+
     const previousOrders = [...orders];
-    
-    setOrders(prevOrders =>
-      prevOrders.map(order =>
-        selectedOrders.includes(getOrderListRowKey(order)) ? { ...order, status: bulkStatus } : order
-      )
+    const previousAggregates = ordersAggregates;
+    const selectedRows = selectedRowKeys
+      .map((rowKey) => findOrderByRowKey(previousOrders, rowKey))
+      .filter((row): row is OrderItem => row != null);
+
+    if (selectedRows.length === 0) {
+      toast.error("Could not find selected orders");
+      return;
+    }
+
+    setOrders((prevOrders) =>
+      prevOrders.map((order) => {
+        if (!selectedRowKeys.includes(getOrderListRowKey(order))) return order;
+        return { ...order, ...buildOrderStatusOptimisticPatch(order, bulkStatus) };
+      }),
     );
 
-    const orderIds = selectedOrders
-      .map((rowKey) => {
-        const row = findOrderByRowKey(previousOrders, rowKey);
-        return row ? resolveOrderMutationId(row) : rowKey;
-      })
-      .filter(Boolean);
-    patchAdminOrdersCacheStatuses(orderIds.map((id) => ({ orderId: id, status: bulkStatus })));
-    
-    // Close dialog and clear selection immediately
-    setIsStatusDialogOpen(false);
-    const selectedRowKeys = [...selectedOrders];
-    const updatedCount = selectedRowKeys.length;
-    setSelectedOrders([]);
-    for (const rowKey of selectedRowKeys) {
-      const row = previousOrders.find((o) => orderMatchesRowKey(o, rowKey));
-      const mutationId = row ? resolveOrderMutationId(row) : rowKey;
-      pendingOrderStatusDrafts.set(mutationId, { status: bulkStatus, at: Date.now() });
-    }
-    clearOrderSaveState(selectedRowKeys);
+    setOrdersAggregates((agg) => {
+      if (!agg?.statusBreakdown) return agg;
+      let breakdown = { ...agg.statusBreakdown };
+      for (const row of selectedRows) {
+        breakdown = adjustStatusBreakdown(
+          breakdown,
+          normalizeOrderListStatus(row.status),
+          normalizeOrderListStatus(bulkStatus),
+        );
+      }
+      return { ...agg, statusBreakdown: breakdown };
+    });
 
-    toast.success(`${updatedCount} order${updatedCount === 1 ? "" : "s"} updated to ${bulkStatus}`);
+    patchAdminOrdersCacheStatuses(
+      selectedRows.map((row) => ({
+        orderId: resolveOrderMutationId(row),
+        orderNumber: row.orderNumber,
+        ...buildOrderStatusOptimisticPatch(row, bulkStatus),
+      })),
+    );
+
+    setIsStatusDialogOpen(false);
+    setSelectedOrders([]);
+
+    for (const row of selectedRows) {
+      const patch = buildOrderStatusOptimisticPatch(row, bulkStatus);
+      rememberPendingStatusDraft(resolveOrderMutationId(row), row.orderNumber, {
+        status: bulkStatus,
+        at: Date.now(),
+        ...(patch.paymentStatus ? { paymentStatus: patch.paymentStatus } : {}),
+        ...(patch.shippingStatus ? { shippingStatus: patch.shippingStatus } : {}),
+      });
+    }
+
+    markOrderSaving(selectedRowKeys);
+    const updatedCount = selectedRows.length;
+    const isBulkCancel = bulkStatus === "cancelled";
+    if (isBulkCancel) {
+      toast.message(`${updatedCount} order${updatedCount === 1 ? "" : "s"} cancelled`, {
+        duration: 2500,
+        description: "Refund confirmation may take a moment on KPay orders.",
+      });
+    } else {
+      toast.success(`${updatedCount} order${updatedCount === 1 ? "" : "s"} updated to ${bulkStatus}`);
+    }
     onOrderUpdate?.();
 
-    // Instant inventory / Products + Inventory pages — mirror stock before network completes
-    for (const rowKey of selectedRowKeys) {
-      const o = findOrderByRowKey(previousOrders, rowKey);
-      if (o) {
-        syncAdminInventoryCacheAfterOrderStatusChange(toInventorySyncSnapshot(o), bulkStatus, {
-          skipDispatch: true,
-        });
-      }
+    for (const row of selectedRows) {
+      syncAdminInventoryCacheAfterOrderStatusChange(toInventorySyncSnapshot(row), bulkStatus, {
+        skipDispatch: true,
+      });
     }
     dispatchAdminProductsCachePatched();
 
-    // Sync with server in background (UI already reflects the new status)
     void (async () => {
-    try {
-      await Promise.all(
-        orderIds.map((mutationId) => ordersApi.update(mutationId, { status: bulkStatus })),
-      );
-      console.log(`✅ ${updatedCount} orders synced to server: ${bulkStatus}`);
-      for (const orderId of orderIds) {
-        void broadcastOrderStatusUpdate({
-          orderId,
-          status: bulkStatus,
-          updatedAt: new Date().toISOString(),
+      try {
+        const results = await Promise.all(
+          selectedRows.map((row) =>
+            ordersApi.update(resolveOrderMutationId(row), { status: bulkStatus }),
+          ),
+        );
+
+        const failedLabels: string[] = [];
+        const serverPatches: Array<{
+          orderId: string;
+          orderNumber?: string;
+          status: OrderStatus;
+          paymentStatus?: PaymentStatus;
+          shippingStatus?: ShippingStatus;
+        }> = [];
+
+        selectedRows.forEach((row, idx) => {
+          const result = results[idx] as {
+            success?: boolean;
+            error?: string;
+            order?: Record<string, unknown>;
+          };
+          if (result?.success === false || result?.error) {
+            failedLabels.push(row.orderNumber || row.id);
+            return;
+          }
+          const srv = result?.order;
+          const patch = buildOrderStatusOptimisticPatch(row, bulkStatus);
+          serverPatches.push({
+            orderId: resolveOrderMutationId(row),
+            orderNumber: row.orderNumber,
+            status: bulkStatus,
+            paymentStatus:
+              (srv?.paymentStatus as PaymentStatus | undefined) ?? patch.paymentStatus,
+            shippingStatus:
+              (srv?.shippingStatus as ShippingStatus | undefined) ?? patch.shippingStatus,
+          });
         });
-      }
-      const bulkSnapshots = selectedRowKeys
-        .map((rowKey) => findOrderByRowKey(previousOrders, rowKey))
-        .filter((row): row is (typeof previousOrders)[number] => row != null)
-        .map((row) => toInventorySyncSnapshot(row));
-      void reconcileInventoryAfterBulkOrderStatusSave(bulkSnapshots).catch((e) =>
-        console.warn("[inventory] Bulk reconcile failed:", e)
-      );
-    } catch (error) {
-      // Roll back on error
-      console.error("❌ Failed to bulk update orders:", error);
-      const detail =
-        error instanceof ApiError
-          ? error.message
-          : error instanceof Error
+
+        if (failedLabels.length > 0) {
+          throw new Error(`Failed to update: ${failedLabels.join(", ")}`);
+        }
+
+        console.log(`✅ ${updatedCount} orders synced to server: ${bulkStatus}`);
+
+        if (serverPatches.length > 0) {
+          patchAdminOrdersCacheStatuses(serverPatches);
+        }
+
+        if (ordersSurfaceActiveRef.current) {
+          setOrders((prev) =>
+            prev.map((order) => {
+              const rowKey = getOrderListRowKey(order);
+              const idx = selectedRowKeys.indexOf(rowKey);
+              if (idx < 0) return order;
+              const result = results[idx] as {
+                order?: Record<string, unknown>;
+              };
+              const srv = result?.order;
+              if (!srv) return order;
+              const mapped = mapApiOrdersToOrderItems([
+                {
+                  ...srv,
+                  id: order.id,
+                  orderNumber: order.orderNumber,
+                  status: bulkStatus,
+                },
+              ])[0];
+              const merged = mapped ? { ...order, ...mapped, status: bulkStatus } : order;
+              rememberPendingStatusDraft(resolveOrderMutationId(order), order.orderNumber, {
+                status: bulkStatus,
+                at: Date.now(),
+                paymentStatus: merged.paymentStatus,
+                shippingStatus: merged.shippingStatus,
+              });
+              return merged;
+            }),
+          );
+        }
+
+        for (const row of selectedRows) {
+          void broadcastOrderStatusUpdate({
+            orderId: resolveOrderMutationId(row),
+            status: bulkStatus,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        if (isBulkCancel) {
+          for (const row of selectedRows) {
+            if (!isKPayPaidOrderLike(row)) continue;
+            const orderId = resolveOrderMutationId(row);
+            pollKPayRefundAfterCancel({
+              orderId,
+              orderNumber: row.orderNumber,
+              shouldContinue: () => ordersSurfaceActiveRef.current,
+              onSuccess: (orderData) => {
+                setOrders((prev) =>
+                  prev.map((o) => {
+                    if (getOrderListRowKey(o) !== getOrderListRowKey(row)) return o;
+                    const mapped = mapApiOrdersToOrderItems([
+                      { ...orderData, id: o.id, orderNumber: o.orderNumber, status: "cancelled" },
+                    ])[0];
+                    const merged = mapped ? { ...o, ...mapped, status: "cancelled" } : o;
+                    rememberPendingStatusDraft(orderId, row.orderNumber, {
+                      status: "cancelled",
+                      at: Date.now(),
+                      paymentStatus: merged.paymentStatus,
+                      shippingStatus: merged.shippingStatus,
+                    });
+                    return merged;
+                  }),
+                );
+              },
+            });
+          }
+        }
+
+        markOrderSaved(selectedRowKeys);
+        void reconcileInventoryAfterBulkOrderStatusSave(
+          selectedRows.map((row) => toInventorySyncSnapshot(row)),
+        ).catch((e) => console.warn("[inventory] Bulk reconcile failed:", e));
+        void loadOrdersRef.current(true, { silent: true });
+      } catch (error) {
+        console.error("❌ Failed to bulk update orders:", error);
+        const detail =
+          error instanceof ApiError
             ? error.message
-            : "Unknown error";
-      if (ordersSurfaceActiveRef.current) {
-        setOrders(previousOrders);
-        void refetchAdminProductsInventoryCaches();
-        toast.error("Failed to save changes. Updates reverted.", {
-          description: detail,
-          duration: 8000,
-        });
-      } else {
-        toast.error("Bulk order save may have partially failed", {
-          description: `${detail}. Open Orders and refresh to confirm.`,
-          duration: 10000,
-        });
+            : error instanceof Error
+              ? error.message
+              : "Unknown error";
+        if (ordersSurfaceActiveRef.current) {
+          setOrders(previousOrders);
+          setOrdersAggregates(previousAggregates);
+          patchAdminOrdersCacheStatuses(
+            selectedRows.map((row) => ({
+              orderId: resolveOrderMutationId(row),
+              orderNumber: row.orderNumber,
+              status: row.status,
+              paymentStatus: row.paymentStatus,
+              shippingStatus: row.shippingStatus,
+            })),
+          );
+          void refetchAdminProductsInventoryCaches();
+          toast.error("Failed to save changes. Updates reverted.", {
+            description: detail,
+            duration: 8000,
+          });
+        } else {
+          toast.error("Bulk order save may have partially failed", {
+            description: `${detail}. Open Orders and refresh to confirm.`,
+            duration: 10000,
+          });
+        }
+        for (const row of selectedRows) {
+          forgetPendingStatusDraft(resolveOrderMutationId(row), row.orderNumber);
+        }
+        clearOrderSaveState(selectedRowKeys);
+        onOrderUpdate?.();
       }
-      for (const id of orderIds) pendingOrderStatusDrafts.delete(id);
-      clearOrderSaveState(orderIds);
-      onOrderUpdate?.();
-    }
     })();
   };
 
@@ -1208,73 +1456,38 @@ export function Orders({
     // OPTIMISTIC UPDATE - Update UI immediately!
     const previousOrders = [...orders];
     
+    const statusPatch = orderBeingUpdated
+      ? buildOrderStatusOptimisticPatch(orderBeingUpdated, newStatus)
+      : { status: newStatus };
+
     setOrders(prevOrders =>
       prevOrders.map(order =>
-        orderMatchesRowKey(order, rowKey)
-          ? {
-              ...order,
-              status: newStatus,
-              ...(isNowCancelled
-                ? {
-                    paymentStatus:
-                      order.paymentStatus === "refunded" ? "refunded" : ("pending_refund" as PaymentStatus),
-                    shippingStatus: "cancelled" as ShippingStatus,
-                  }
-                : {}),
-            }
-          : order
+        orderMatchesRowKey(order, rowKey) ? { ...order, ...statusPatch } : order
       )
     );
     setOrdersAggregates((agg) => {
       if (!agg?.statusBreakdown || !orderBeingUpdated) return agg;
-      const from = normalizeOrderListStatus(orderBeingUpdated.status);
-      const to = normalizeOrderListStatus(newStatus);
-      if (from === to) return agg;
-      const breakdown = { ...agg.statusBreakdown };
-      const drop = (bucket: keyof typeof breakdown) => {
-        breakdown[bucket] = Math.max(0, (breakdown[bucket] ?? 0) - 1);
+      return {
+        ...agg,
+        statusBreakdown: adjustStatusBreakdown(
+          agg.statusBreakdown,
+          normalizeOrderListStatus(orderBeingUpdated.status),
+          normalizeOrderListStatus(newStatus),
+        ),
       };
-      const add = (bucket: keyof typeof breakdown) => {
-        breakdown[bucket] = (breakdown[bucket] ?? 0) + 1;
-      };
-      if (from === "pending") drop("pending");
-      else if (from === "processing" || from === "ready-to-ship") drop("processing");
-      else if (from === "fulfilled") drop("fulfilled");
-      else if (from === "cancelled") drop("cancelled");
-      if (to === "pending") add("pending");
-      else if (to === "processing" || to === "ready-to-ship") add("processing");
-      else if (to === "fulfilled") add("fulfilled");
-      else if (to === "cancelled") add("cancelled");
-      return { ...agg, statusBreakdown: breakdown };
     });
     patchAdminOrdersCacheStatuses([
       {
         orderId,
         orderNumber: orderBeingUpdated?.orderNumber,
-        status: newStatus,
-        ...(isNowCancelled
-          ? {
-              paymentStatus:
-                orderBeingUpdated?.paymentStatus === "refunded"
-                  ? "refunded"
-                  : ("pending_refund" as PaymentStatus),
-              shippingStatus: "cancelled" as ShippingStatus,
-            }
-          : {}),
+        ...statusPatch,
       },
     ]);
     rememberPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber, {
       status: newStatus,
       at: Date.now(),
-      ...(isNowCancelled
-        ? {
-            paymentStatus:
-              orderBeingUpdated?.paymentStatus === "refunded"
-                ? "refunded"
-                : ("pending_refund" as PaymentStatus),
-            shippingStatus: "cancelled" as ShippingStatus,
-          }
-        : {}),
+      ...(statusPatch.paymentStatus ? { paymentStatus: statusPatch.paymentStatus } : {}),
+      ...(statusPatch.shippingStatus ? { shippingStatus: statusPatch.shippingStatus } : {}),
     });
     clearOrderSaveState([rowKey]);
 
@@ -1338,7 +1551,7 @@ export function Orders({
           })
         );
       }
-      markOrderSaved([orderId]);
+      markOrderSaved([rowKey]);
       if (wasNotCancelled && isNowCancelled) {
         if (result?.refundPending) {
           toast.message("Order cancelled", {
@@ -1404,6 +1617,7 @@ export function Orders({
           )
         );
       }
+      void loadOrdersRef.current(true, { silent: true });
     } catch (error) {
       // Roll back on error
       console.error("❌ Failed to update order status:", error);
@@ -1436,7 +1650,7 @@ export function Orders({
         });
       }
       forgetPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber);
-      clearOrderSaveState([orderId]);
+      clearOrderSaveState([rowKey]);
       onOrderUpdate?.();
     }
     })();
@@ -2290,9 +2504,9 @@ export function Orders({
               <SelectContent>
                 <SelectItem value="pending">{t("orders.pending")}</SelectItem>
                 <SelectItem value="processing">{t("orders.processing")}</SelectItem>
+                <SelectItem value="ready-to-ship">{t("orders.readyToShip")}</SelectItem>
                 <SelectItem value="fulfilled">{t("orders.fulfilled")}</SelectItem>
                 <SelectItem value="cancelled">{t("orders.cancelled")}</SelectItem>
-                <SelectItem value="ready-to-ship">{t("orders.readyToShip")}</SelectItem>
               </SelectContent>
             </Select>
           </div>

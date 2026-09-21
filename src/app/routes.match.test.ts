@@ -12,6 +12,8 @@ describe("route matching", () => {
       "/admin/products",
       "/vendor/foo/admin",
       "/vendor/foo/admin/orders",
+      "/vendor/nexa/product/sku-123",
+      "/product/sku-123",
     ] as const;
     for (const pathname of cases) {
       const m = matchRoutes(appRouteObjects, pathname);

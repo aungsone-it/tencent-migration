@@ -306,6 +306,17 @@ Open `https://www.nexa-mm.com/admin` and sign in with your staff account. Left m
 
 > **Note:** Legacy **Marketing** URLs redirect to **Promo Setting**. · **说明：** 旧 **Marketing** 路由重定向至 **促销设置**。
 
+**Home dashboard / 首页概览**
+
+- Four cards show **Revenue**, **Orders**, **Customers**, and **Products** — totals match the Orders, Customers, and Products list pages · 四张卡片显示**收入**、**订单**、**顾客**、**商品** — 数字与对应列表页一致
+- Click a card to open that section (Finances, Orders, Customers, Products) · 点击卡片进入对应模块
+- Use the **date filter** for a custom range; “All time” shows all-time totals · 使用**日期筛选**自定义范围；“全部时间”显示累计总数
+- Charts and trends on Home come from a separate analytics API · 首页图表与趋势来自独立分析接口
+
+**Sidebar footer / 侧栏页脚**
+
+- Hover **Created by Aung Pyae Sone** at the bottom of the sidebar to see the signature portrait animation · 鼠标悬停侧栏底部 **Created by Aung Pyae Sone** 可查看签名头像动画
+
 ### 4.2 Admin user roles / 管理员角色
 
 | Role 角色 | Access 权限 |

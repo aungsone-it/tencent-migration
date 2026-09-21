@@ -318,7 +318,34 @@ Files: `Checkout.tsx`, `freeShipping.ts`, `kpayClient.ts`, `supabase/functions/.
 
 ---
 
-## Slide 11 — Flow: Admin Orders
+## Slide 11 — Flow: Admin Home Dashboard
+
+```
+Admin opens Home (/admin)
+        │
+        ├─► GET /dashboard/stats → charts, trends, top products, recent orders
+        │
+        └─► Parallel list APIs (page=1, pageSize=1):
+              • Orders  → filteredTotalRevenue, total
+              • Customers → stats.total
+              • Products → counts.all
+        │
+        ▼
+Four KPI cards use list API totals (match Orders/Customers/Products pages)
+Charts use /dashboard/stats payload
+        │
+        ▼
+Global date filter → order dateFrom/dateTo on list fetch; dashboard stats filter
+        │
+        ▼
+Click KPI card → navigate to /admin/finances | orders | customers | products
+```
+
+Files: `Dashboard.tsx`, `StatCard.tsx`, `AdminDateRangeFilterPopover.tsx`, `module-cache.ts`
+
+---
+
+## Slide 12 — Flow: Admin Orders
 
 ```
 Admin opens Orders tab
@@ -357,7 +384,7 @@ Files: `Orders.tsx`, `OrderRealtimeBridge.tsx`, `adminOrdersRealtime.ts`, `order
 
 ---
 
-## Slide 12 — Realtime: Pulse Poll, Not Payloads
+## Slide 13 — Realtime: Pulse Poll, Not Payloads
 
 TencentDB/CloudBase does **not** expose Supabase-style `postgres_changes` WebSockets. Admin tabs poll small counters instead.
 
@@ -392,7 +419,7 @@ Pulse tables (read by `/realtime/pulses`):
 
 ---
 
-## Slide 13 — Optimistic UI (Allowed Exception)
+## Slide 14 — Optimistic UI (Allowed Exception)
 
 Optimistic updates are **UX sugar**, not business logic.
 
@@ -418,7 +445,7 @@ Pattern:
 
 ---
 
-## Slide 14 — Image Uploads
+## Slide 15 — Image Uploads
 
 ```
 Admin selects image
@@ -445,7 +472,7 @@ Client displays via resolveCloudBaseMediaUrl().
 
 ---
 
-## Slide 15 — Auth Model
+## Slide 16 — Auth Model
 
 | Actor | Auth mechanism | Client storage |
 |-------|----------------|----------------|
@@ -477,7 +504,7 @@ Files: `AuthContext.tsx`, `VendorAuthContext.tsx`, `auth_routes.tsx`, `tencent_s
 
 ---
 
-## Slide 15b — Deploy version watcher
+## Slide 16b — Deploy version watcher
 
 ```
 EdgeOne deploy → new dist/version.json { buildId }
@@ -499,7 +526,7 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 
 ---
 
-## Slide 16 — File Map (Client)
+## Slide 17 — File Map (Client)
 
 | File | Role in thin client |
 |------|---------------------|
@@ -525,13 +552,16 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 | `src/app/utils/couponEligibility.ts` | Shared coupon rules (checkout + cart drawer) |
 | `src/app/components/CartDrawer.tsx` | Cart + coupon apply (Burmese labels in `my.ts`) |
 | `src/app/components/BackToTop.tsx` | White/black themed scroll-to-top FAB |
+| `src/app/components/CreatorCredit.tsx` | Admin sidebar footer — hover signature portrait |
+| `src/app/components/Dashboard.tsx` | Admin Home — hybrid KPI cards + charts |
+| `src/app/components/ProductFormPage.tsx` | Add/edit product — admin UI i18n EN/中文 |
 | `src/app/utils/kpayClient.ts` | KPay API wrapper → server |
 | `utils/tencent/cloudbase.ts` | Env config resolution |
 | `src/constants/index.ts` | Timeouts, polling guardrails |
 
 ---
 
-## Slide 17 — File Map (Server)
+## Slide 18 — File Map (Server)
 
 | File | Role |
 |------|------|
@@ -550,7 +580,7 @@ Files: `deployVersion.ts`, `vite.config.ts`, `public/_headers`
 
 ---
 
-## Slide 18 — API Quick Reference
+## Slide 19 — API Quick Reference
 
 Base: `$VITE_CLOUDBASE_API_BASE_URL` → typically `…/v1/functions/make-server-16010b6f`
 
@@ -570,7 +600,7 @@ Full route map: [CODE_REVIEW_AND_ROUTING.md](./CODE_REVIEW_AND_ROUTING.md)
 
 ---
 
-## Slide 19 — Polling Exceptions
+## Slide 20 — Polling Exceptions
 
 Prefer event-driven invalidation. Polling is a **last resort**.
 
@@ -583,7 +613,7 @@ Prefer event-driven invalidation. Polling is a **last resort**.
 
 Do **not** add new polling loops without reviewing CloudBase invocation limits.
 
-## Slide 20 — Decision Tree: Where Does This Logic Go?
+## Slide 21 — Decision Tree: Where Does This Logic Go?
 
 ```
 New feature or bug fix
@@ -620,7 +650,7 @@ Examples:
 
 ---
 
-## Slide 21 — Common Mistakes to Avoid
+## Slide 22 — Common Mistakes to Avoid
 
 | Mistake | Why it breaks thin client |
 |---------|---------------------------|
@@ -635,7 +665,7 @@ Examples:
 
 ---
 
-## Slide 22 — Verification Checklist
+## Slide 23 — Verification Checklist
 
 After any client-side data change, verify:
 
@@ -652,7 +682,7 @@ After any client-side data change, verify:
 
 ---
 
-## Slide 23 — Glossary
+## Slide 24 — Glossary
 
 | Term | Meaning |
 |------|---------|
@@ -670,7 +700,7 @@ After any client-side data change, verify:
 
 ---
 
-## Slide 24 — Summary
+## Slide 25 — Summary
 
 > **The NEXA frontend is a stateless presentation layer.**
 
@@ -682,4 +712,4 @@ When in doubt: put logic on the server, not in the browser.
 
 ---
 
-*Last updated: September 2026 · NEXA Platform / Tencent migration*
+*Last updated: September 2026 (CreatorCredit, Dashboard KPI hybrid sourcing, product form admin i18n) · NEXA Platform / Tencent migration*

@@ -13,7 +13,9 @@ This version is intentionally short and non-technical.
 1. Open `https://www.nexa-mm.com/admin`.
 2. Sign in with your staff account.
 3. Use the left menu for **Home**, **Product** (Products, Categories, Inventory), **Orders**, **Vendor**, **Promo Setting**, **Chat**, **Customers**, **Subscriptions** (Plans, Subscribers), **Finances**, **Logistics**, and **Settings**.
-4. If you cannot see a section, your role likely does not have permission — see **Admin user roles** below.
+4. **Home** shows revenue, orders, customers, and products totals (same numbers as those list pages). Click a card to jump to that section. Use the date filter for a custom range.
+5. Sidebar footer: hover **Created by Aung Pyae Sone** to see the signature portrait animation.
+6. If you cannot see a section, your role likely does not have permission — see **Admin user roles** below.
 
 > Legacy **Marketing** URLs redirect to **Promo Setting**.
 

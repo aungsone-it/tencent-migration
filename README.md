@@ -22,7 +22,10 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 | **Order export** | Super-admin **Export** downloads **`.xls`** (Excel HTML), not CSV — columns include **Region**, **Seller ID**, **logistic**, delivery date; multi-item orders use **merged cells** for order-level fields; phone as Excel text formula |
 | **Orders toolbar** | Bulk **Delete** hidden (`SHOW_ORDERS_DELETE_BUTTON=false`; handler retained) |
 | **Promo / cart** | **Promo Setting** reactivated in admin nav (`/admin/marketing`); cart drawer coupon with Burmese labels (**တွန်းလှည်း**, **ကျသင့်ငွေ**); shared **`couponEligibility.ts`** for checkout + cart |
-| **UI polish** | SideNav footer: **Created by Aung Pyae Sone** / Software Architect; **Back-to-top** FAB — white/black hover theme |
+| **Admin Home dashboard** | Four KPI cards sourced from **Orders / Customers / Products list APIs** (matches list-page totals); charts/trends from `GET /dashboard/stats`; global date filter; cards navigate to Finances/Orders/Customers/Products |
+| **CreatorCredit footer** | Super-admin + vendor-admin sidebar footer: hover/focus fades static credit and reveals **signature portrait** (orbital rings, gold aura, profile photo when logged-in user matches creator) — `CreatorCredit.tsx` |
+| **Product form i18n** | Admin add/edit product UI labels in **English / 中文** via `addProduct.*` keys (`ProductFormPage.tsx`); product **data** remains single-locale fields |
+| **UI polish** | SideNav footer credit; **Back-to-top** FAB — white/black hover theme |
 | **Backend** | Order create **awaits** `syncOrderReadModel` + `bumpOrderPulse`; coupon validate returns generic errors only (no “available codes” leak) |
 | **Chat emoji picker** | Native Unicode emoji in **FloatingChat** (storefront) and **admin Chat** — see [docs/CHAT.md](docs/CHAT.md) |
 | **Guest phone modal** | After a guest’s **first successful chat message**, FloatingChat prompts for Myanmar phone (`+959…` / `09…`) |
@@ -131,7 +134,8 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 
 ### Super Admin
 
-- Dashboard, products, categories, inventory, orders, customers, chat, **Promo Setting**, finances, settings
+- **Dashboard (Home):** hybrid KPI cards (list APIs) + charts from `/dashboard/stats`; clickable stat cards; global date range filter
+- Products, categories, inventory, orders, customers, chat, **Promo Setting**, finances, settings
 - **Staff roles:** store-owner, administrator, data-entry, warehouse, **customer-services** — sidebar and write access via `superAdminRolePermissions.ts` (customer-services: orders/chat/promo write; catalog/logistics read-only)
 - **Orders:** paginated SQL read model; serial **`NOS-00001`** format; **Seller ID** on detail/invoice/export; KBZPay **orphaned draft recovery**; realtime list refresh via **2s pulse poll** + debounced silent refetch; **Export** → `.xls` with merged multi-SKU rows; bulk Delete hidden in toolbar
 - **Settings → Users** (store owner): staff creation with **temp password copy dialog**; user list reconciled on `GET /auth/users`

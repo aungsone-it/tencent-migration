@@ -61,4 +61,4 @@ These files are kept for history but **should not** be used for deployment or ar
 
 When in doubt, verify against `src/app/routes.tsx`, `src/app/utils/superAdminRolePermissions.ts`, and [docs/ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKEND.md).
 
-**September 2026 doc topics:** staff roles (`customer-services`, Promo Setting for data-entry), order `.xls` export, HTTP pulse poll realtime, cart coupon — see [README.md](../README.md) § Recent Updates (September 2026).
+**September 2026 doc topics:** staff roles (`customer-services`, Promo Setting for data-entry), order `.xls` export, HTTP pulse poll realtime, cart coupon, **CreatorCredit** hover signature, **Dashboard** hybrid KPI sourcing, **product form admin i18n** — see [README.md](../README.md) § Recent Updates (September 2026).

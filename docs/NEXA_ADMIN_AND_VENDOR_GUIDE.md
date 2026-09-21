@@ -36,7 +36,7 @@ Customers shop on **one vendor at a time**:
 
 ### Core areas
 
-- Dashboard/home
+- **Dashboard / Home** — see [Dashboard analytics](#dashboard-analytics-home) below
 - Products, categories, inventory (platform-wide catalog — super admin creates/edits; vendors select only)
 - Orders (includes **KBZPay draft recovery** panel)
 - Vendors (**Review applications** — new sellers are approved here; there is no “Add vendor” button)
@@ -48,6 +48,24 @@ Customers shop on **one vendor at a time**:
 - Logistics
 
 > Legacy `/admin/marketing` URLs still route to **Promo Setting**.
+
+### Dashboard analytics (Home)
+
+Super-admin **Home** (`/admin`) combines two data sources:
+
+| UI section | Data source | Notes |
+|------------|-------------|-------|
+| **Four KPI cards** (Revenue, Orders, Customers, Products) | List APIs in parallel | Revenue → `ordersPage.aggregates.filteredTotalRevenue`; Orders → `ordersPage.total`; Customers → `customersPage.stats.total`; Products → `productsPage.counts.all` — **same totals as Orders / Customers / Products list pages** |
+| **Charts, trends, top products, recent orders** | `GET /dashboard/stats` | Cached via `getCachedAdminDashboardStats()` |
+| **Date filter** | `AdminDateRangeFilterPopover` | Applies to KPI cards and charts; when **All time**, change labels show “All-time totals” |
+
+**Interactions:**
+
+- KPI cards are **clickable** → Finances, Orders, Customers, Products
+- Refreshes on order/customer mutations and cross-tab storage events (`adminOrdersUpdated`)
+- Vendor-admin dashboard uses a **different model** — client-side analytics from cached vendor orders/products (`VendorAdminDashboard.tsx`)
+
+Implementation: `src/app/components/Dashboard.tsx`, `src/app/utils/module-cache.ts`.
 
 ### Settings tabs
 
@@ -256,8 +274,19 @@ Customers and prospects visiting the marketplace apex see:
 
 ### UI credits
 
-- Super-admin **SideNav** footer: **Created by Aung Pyae Sone** / Software Architect.
+- **CreatorCredit** (`src/app/components/CreatorCredit.tsx`) — shared footer in super-admin **SideNav** and vendor-admin sidebar:
+  - **Idle:** “Created by **Aung Pyae Sone**” + **Software Architect** (gray, same tone as “Created by”)
+  - **Hover / focus:** static credit **fades out**; **signature portrait** fades in (circular photo, gold orbital rings, soft aura, light sheen, diamond mark top-right)
+  - Uses logged-in user’s profile photo when name matches creator; fallback monogram **APS**
+  - Super-admin passes `user={currentUser}`; vendor-admin uses default (no profile photo)
+  - Animations in `src/styles/theme.css` (`creator-signature-*`, `creator-orbit-*`)
 - **Back-to-top** FAB: white background, slate text; hover inverts to black background / white icon (`BackToTop.tsx`).
+
+### Product form (admin UI language)
+
+- Add/edit product form (`ProductFormPage.tsx`) uses **`useLanguage()`** + `addProduct.*` keys in `en.ts` / `zh.ts`
+- Switching admin language (EN / 中文) toggles **form labels, buttons, validation messages** — not separate EN/ZH product title/description fields
+- Product **specifications** (label/value pairs) supported on the same form
 
 ## 5) Operational checks
 

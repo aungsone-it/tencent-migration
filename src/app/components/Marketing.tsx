@@ -37,6 +37,7 @@ import {
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { AdminDateRangeFilterPopover } from "./AdminDateRangeFilterPopover";
+import { AdminMmkAmount } from "./AdminMmkAmount";
 
 // 🚀 MODULE-LEVEL CACHE: Persists across component unmount/remount
 let cachedCampaigns: any[] = [];
@@ -755,7 +756,9 @@ export function Marketing() {
     return matchesSearch && matchesStatus && matchesType && matchesCreator && matchesDateRange;
   });
 
-  const totalRevenue = campaigns.reduce((sum, c) => sum + (c.revenue || 0), 0);
+  const totalRevenue = Math.round(
+    campaigns.reduce((sum, c) => sum + (Number(c.revenue) || 0), 0),
+  );
   const activeCampaigns = campaigns.filter(c => c.status === "active").length;
   const totalConversions = campaigns.reduce((sum, c) => sum + (c.conversions || 0), 0);
   const totalClicks = campaigns.reduce((sum, c) => sum + (c.clicks || 0), 0);
@@ -1214,9 +1217,9 @@ export function Marketing() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-600 mb-1">{t('marketing.totalRevenue')}</p>
-              <p className="text-2xl font-semibold text-slate-900">
-                {totalRevenue} MMK
-              </p>
+              <div className="min-w-0 pr-2">
+                <AdminMmkAmount value={totalRevenue} />
+              </div>
               <div className="flex items-center gap-1 mt-2">
                 <TrendingUp className="w-4 h-4 text-green-600" />
                 <span className="text-sm text-green-600 font-medium">+18.3%</span>
@@ -1540,7 +1543,7 @@ export function Marketing() {
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 mb-1">Revenue</p>
-                        <p className="text-sm font-semibold text-emerald-600">{(campaign.revenue || 0).toLocaleString()} MMK</p>
+                        <AdminMmkAmount value={campaign.revenue || 0} size="sm" tone="emerald" />
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 mb-1">Clicks</p>
@@ -2014,7 +2017,7 @@ export function Marketing() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold text-green-600">{campaign.revenue} MMK</p>
+                        <AdminMmkAmount value={campaign.revenue || 0} size="sm" tone="green" />
                         <p className="text-xs text-slate-500">{campaign.conversions} conversions</p>
                       </div>
                     </div>
@@ -2122,7 +2125,7 @@ export function Marketing() {
                   {selectedCampaign.revenue !== undefined && (
                     <Card className="p-4">
                       <p className="text-sm text-slate-500 mb-1">Revenue Generated</p>
-                      <p className="text-2xl font-bold text-green-600">${selectedCampaign.revenue.toLocaleString()}</p>
+                      <AdminMmkAmount value={selectedCampaign.revenue} tone="green" />
                     </Card>
                   )}
                   {selectedCampaign.clicks !== undefined && (

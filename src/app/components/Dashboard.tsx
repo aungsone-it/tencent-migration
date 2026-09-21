@@ -1,13 +1,14 @@
 // Dashboard Component - Main dashboard view
 import { DollarSign, ShoppingCart, Users, Package, TrendingUp, Calendar } from "lucide-react";
 import { StatCard } from "./StatCard";
+import { AdminMmkAmount } from "./AdminMmkAmount";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { AdminDateRangeFilterPopover } from "./AdminDateRangeFilterPopover";
 import { useLanguage } from "../contexts/LanguageContext";
 import { devLog } from "../utils/devLog";
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router";
 import {
   ComposedChart,
@@ -203,17 +204,6 @@ export function Dashboard() {
     return new Intl.NumberFormat().format(Math.round(num));
   };
   
-  // Format currency - Myanmar Kyat (MMK)
-  const formatCurrency = (num: number | null | undefined): ReactNode => {
-    const amount = num === null || num === undefined || isNaN(num) ? 0 : num;
-    return (
-      <span className="inline-flex items-baseline gap-1">
-        <span>{amount.toLocaleString()}</span>
-        <span className="text-[0.4rem] font-semibold uppercase tracking-wide text-slate-500">MMK</span>
-      </span>
-    );
-  };
-  
   const isAllTime = pageApiFilter === "All time";
   const formatChange = (change: number) => {
     if (isAllTime) return t("dashboard.changeAllTime");
@@ -280,7 +270,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <StatCard
           title={t('dashboard.totalRevenue')}
-          value={loading ? "..." : formatCurrency(stats.totalRevenue)}
+          value={loading ? "..." : <AdminMmkAmount value={stats.totalRevenue} />}
           change={loading ? "..." : formatChange(stats.revenueChange)}
           changeType={changeType(stats.revenueChange)}
           icon={DollarSign}
@@ -448,7 +438,7 @@ export function Dashboard() {
                     <p className="text-sm text-slate-500">{product.sales} {t('dashboard.sales')}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-base font-semibold text-slate-900">{formatCurrency(product.revenue)}</p>
+                    <AdminMmkAmount value={product.revenue} size="md" />
                   </div>
                 </div>
               ))}
@@ -494,7 +484,9 @@ export function Dashboard() {
                     <td className="py-4 px-4 text-sm font-medium text-slate-900">{order.id}</td>
                     <td className="py-4 px-4 text-sm text-slate-700">{typeof order.customer === 'string' ? order.customer : (order.customer?.fullName || order.customer?.name || 'Guest Customer')}</td>
                     <td className="py-4 px-4 text-sm text-slate-700">{order.product}</td>
-                    <td className="py-4 px-4 text-sm font-semibold text-slate-900">{formatCurrency(order.amount)}</td>
+                    <td className="py-4 px-4">
+                      <AdminMmkAmount value={order.amount} size="sm" />
+                    </td>
                     <td className="py-4 px-4">
                       <Badge 
                         variant={

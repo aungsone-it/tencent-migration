@@ -70,6 +70,7 @@ import { useAdminOrdersResyncOnVisible } from "../hooks/useAdminOrdersResyncOnVi
 import { PwaOrphanedOrdersRecovery } from "./PwaOrphanedOrdersRecovery";
 import { useAdminPortalDebouncedSearch } from "../utils/adminProductSearch";
 import { compareOrdersBySerial, formatOrderNumberDisplay } from "../utils/orderNumber";
+import { AdminMmkAmount } from "./AdminMmkAmount";
 import {
   refreshAdminInventoryAfterOrderStatusPut,
   syncAdminInventoryCacheAfterOrderStatusChange,
@@ -1740,9 +1741,9 @@ export function Orders({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-600 mb-1">{t('orders.totalRevenue')}</p>
-              <p className="text-2xl font-semibold text-slate-900">
-                {totalRevenue.toLocaleString()} Ks
-              </p>
+              <div className="min-w-0 pr-2">
+                <AdminMmkAmount value={totalRevenue} />
+              </div>
               <div className="flex items-center gap-1 mt-2">
                 <TrendingUp className="w-4 h-4 text-green-600" />
                 <span className="text-sm text-green-600 font-medium">+12.5%</span>
@@ -2067,7 +2068,9 @@ export function Orders({
                         </div>
                       </td>
                       <td className="py-3 px-4 text-sm text-slate-600">{order.vendor || "SECURE Store"}</td>
-                      <td className="py-3 px-4 text-sm font-semibold text-slate-900">{order.total.toLocaleString()} MMK</td>
+                      <td className="py-3 px-4">
+                        <AdminMmkAmount value={order.total} size="sm" />
+                      </td>
                       <td className="py-3 px-4">
                         <div className="flex flex-col gap-1">
                           {getStatusBadge(order.status, t)}

@@ -172,6 +172,18 @@ Implementation: `order_number.ts` — KV counter `order_serial_counter`, reserva
 
 **Admin order export:** Super-admin Orders toolbar exports **`.xls`** (Excel HTML via `buildOrderExportSpreadsheetHtml`) with merged cells for multi-item orders. See `src/app/utils/orderExportCsv.ts`.
 
+**Admin orders list — date filter & pagination:**
+
+| Layer | Behavior |
+|-------|----------|
+| UI **Date** column | UTC calendar day from `createdAt` (`mapApiOrderToOrderItem` / `resolveOrderListCalendarDate`) |
+| Query params | `dateFrom`, `dateTo` as `yyyy-MM-dd` (single-day filter sets both to the same day) |
+| Edge filter | `filterSortOrdersAdmin` → `orderMatchesAdminDateRange` — inclusive string compare on calendar day; **filter entire set, then slice** for `page` / `pageSize` |
+| SQL read model | `rpc_admin_orders_page` uses `app_order_list_calendar_day(raw, source_created_at, …)` — migration `20260922140000_admin_orders_date_filter_calendar_day.sql` |
+| Cache key | `adminOrdersPageCacheKey` includes `dateFrom` / `dateTo` so pages do not cross-contaminate |
+
+**Important:** Do not filter on raw `order.date` alone — legacy rows may store a business date that differs from the UTC day shown in the list. Filter and display must both derive from `createdAt`.
+
 **Vendor commission wallet & KBZPay withdrawal** (vendor session required — `x-vendor-session`):
 
 | Method | Route | Purpose |

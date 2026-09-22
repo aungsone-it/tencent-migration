@@ -149,6 +149,7 @@ Details and scale limits: [ARCHITECTURE_AND_BACKEND.md](./ARCHITECTURE_AND_BACKE
 - **SideNav:** **Promo Setting** in admin menu; **`CreatorCredit`** footer (hover signature portrait).
 - **Dashboard (`Dashboard.tsx`):** KPI cards from list APIs (orders/customers/products); charts from `/dashboard/stats`; clickable stat cards; global date filter.
 - **Product form (`ProductFormPage.tsx`):** admin UI i18n EN/中文 via `addProduct.*` keys (product data stays single-locale).
+- **Orders list:** `Orders.tsx` — date filter sends `dateFrom`/`dateTo`; server filters by UTC calendar day from `createdAt` (`orderMatchesAdminDateRange`) before pagination; cache key includes date params.
 - **Orders export:** `Orders.tsx` → `.xls` download via `orderExportCsv.ts` (Excel HTML, merged multi-SKU rows).
 - **Vendor admin list (`Vendor.tsx`):** no Add Vendor button; horizontal table scroll uses `scrollbar-thin-x` (4px, inset track).
 - **Landing vendors:** `fetchLandingVendorsCached()` → `GET /vendors`; active vendors sorted client-side by `totalRevenue` descending.

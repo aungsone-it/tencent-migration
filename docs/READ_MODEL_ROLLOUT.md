@@ -25,6 +25,8 @@ The values must match. Monitoring endpoints reject requests without `x-admin-ope
    npm run db:push
    ```
 
+   **Admin orders date filter:** apply `20260922140000_admin_orders_date_filter_calendar_day.sql` so `rpc_admin_orders_page` filters by UTC calendar day (`app_order_list_calendar_day`) — must match the Edge function’s `orderMatchesAdminDateRange` logic.
+
 2. Deploy Cloud Functions (console upload or CLI):
 
    ```bash

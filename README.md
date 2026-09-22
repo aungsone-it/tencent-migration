@@ -137,7 +137,7 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 - **Dashboard (Home):** hybrid KPI cards (list APIs) + charts from `/dashboard/stats`; clickable stat cards; global date range filter
 - Products, categories, inventory, orders, customers, chat, **Promo Setting**, finances, settings
 - **Staff roles:** store-owner, administrator, data-entry, warehouse, **customer-services** — sidebar and write access via `superAdminRolePermissions.ts` (customer-services: orders/chat/promo write; catalog/logistics read-only)
-- **Orders:** paginated SQL read model; serial **`NOS-00001`** format; **Seller ID** on detail/invoice/export; KBZPay **orphaned draft recovery**; realtime list refresh via **2s pulse poll** + debounced silent refetch; **Export** → `.xls` with merged multi-SKU rows; bulk Delete hidden in toolbar
+- **Orders:** paginated SQL read model; serial **`NOS-00001`** format; **date filter** by UTC calendar day (`createdAt`, matches Date column) with strict post-filter pagination (no backfill on later pages); **Seller ID** on detail/invoice/export; KBZPay **orphaned draft recovery**; realtime list refresh via **2s pulse poll** + debounced silent refetch; **Export** → `.xls` with merged multi-SKU rows; bulk Delete hidden in toolbar
 - **Settings → Users** (store owner): staff creation with **temp password copy dialog**; user list reconciled on `GET /auth/users`
 - **Chat:** customer inbox at `/admin/chat` — emoji + image in composer; guest phone and display codes in conversation list — see [docs/CHAT.md](docs/CHAT.md)
 - Vendor management (**Review applications** only), promotions, collaborator flows

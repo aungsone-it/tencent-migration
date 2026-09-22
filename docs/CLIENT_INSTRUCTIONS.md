@@ -60,8 +60,8 @@ The main site shows platform information, a **vendor logo carousel** (click to o
 
 **To buy something / 如何购买：**
 
-1. Open a vendor’s store link (e.g. `https://gogo.nexa-mm.com/`) **or** click a vendor logo on the homepage carousel.
-2. 打开商家店铺链接（如 `https://gogo.nexa-mm.com/`），**或**点击首页轮播中的商家 Logo。
+1. Open a vendor’s store link — **subdomain** (e.g. `https://gogo.nexa-mm.com/`), a vendor’s own **custom domain** (e.g. `https://shop.yourbrand.com/`), **or** click a vendor logo on the homepage carousel (opens custom domain first when verified).
+2. 打开商家店铺链接 — **子域名**（如 `https://gogo.nexa-mm.com/`）、商家**自定义域名**（如 `https://shop.yourbrand.com/`），**或**点击首页轮播中的商家 Logo（已验证时优先打开自定义域名）。
 
 Each store sells **only its own products**.
 
@@ -78,6 +78,10 @@ Each store sells **only its own products**.
 | Vendor subdomain 商家子域名 | `https://gogo.nexa-mm.com/` |
 | Custom domain 自定义域名 | `https://yourstore.com/` |
 | Main site carousel 主站轮播 | Click a vendor logo · 点击商家 Logo |
+
+**Custom domain** is the same store as the NEXA subdomain — only the web address changes (your brand URL). Checkout, cart, chat, and payments work the same on both URLs.
+
+**自定义域名**与 NEXA 子域名是同一店铺 — 只是网址不同（您的品牌域名）。结账、购物车、聊天与支付在两种地址上完全相同。
 
 On the store you can browse products, search, switch **English / Burmese**, contact the store (**Dial** or **Viber**), and use the **chat bubble** (bottom-right).
 
@@ -175,7 +179,8 @@ Storefronts: **English** and **Burmese**. Admin dashboards: **English** and **Ch
 
 | URL | Purpose 用途 |
 |-----|--------------|
-| `https://yourstore.nexa-mm.com/` | Customer shop · 顾客店铺 |
+| `https://yourstore.nexa-mm.com/` | Customer shop (NEXA subdomain) · 顾客店铺（NEXA 子域名） |
+| `https://shop.yourbrand.com/` | Customer shop (custom domain, after DNS + verify) · 顾客店铺（自定义域名，DNS 与验证完成后） |
 | `https://yourstore.nexa-mm.com/admin` | Vendor dashboard · 商家后台 |
 | `https://www.nexa-mm.com/vendor/your-store-slug/admin` | Path-based admin (alternative) · 路径式后台（备选） |
 
@@ -283,12 +288,45 @@ Update order status through the lifecycle: **Pending** → **Processing** → **
 - **COD:** prepare and collect cash on delivery · **货到付款：** 备货并收货款
 - **KBZPay:** verify payment before shipping · **KBZPay：** 确认到账后再发货
 - **KBZPay draft recovery:** if a customer paid via KBZPay PWA but no order was created, use the amber recovery panel on **Orders** · **KBZPay 草稿恢复：** 若顾客已付但无订单，在**订单**页使用琥珀色恢复面板
+- **Date filter:** pick a single day or range — the list shows **only** orders whose **Date** column falls in that range. The last page may have fewer rows than “per page”; it will **not** fill with orders from other dates · **日期筛选：** 选择单日或范围 — 列表**仅**显示 **Date** 列落在该范围内的订单。最后一页可少于每页行数；**不会**用其他日期的订单补满
 
-### 3.8 Settings and sharing / 设置与推广
+### 3.8 Custom domain (your own URL) / 自定义域名（自有网址）
 
-Configure logo, banner, phone, subdomain, custom domain, terms, and social links. Share **your store URL**, not the main site product list. Use **preview / open store** in admin to verify catalog, categories, checkout, and scroll restore.
+Vendors can serve their storefront on a hostname they own (e.g. `shop.example.com` or `www.yourstore.com`) instead of only `yourstore.nexa-mm.com`. Configure under **Settings → Custom domain** in vendor admin.
 
-配置 Logo、横幅、电话、子域名、自定义域名、条款与社交链接。分享**本店链接**，而非主站商品列表。在后台使用**预览/打开店铺**验证目录、分类、结账与滚动恢复。
+商家可在自有主机名上提供店铺（如 `shop.example.com` 或 `www.yourstore.com`），而不限于 `yourstore.nexa-mm.com`。在商家后台 **Settings → Custom domain** 中配置。
+
+**Why use it / 用途**
+
+- Share a branded link with customers (social, packaging, ads) · 向顾客分享品牌链接
+- Same catalog, checkout, and admin — only the public URL changes · 目录、结账与后台不变
+- When verified, the main-site vendor carousel opens your custom domain first · 验证后主站轮播优先打开自定义域名
+
+**Setup steps (vendor admin) / 设置步骤**
+
+1. Open **Settings** → **Custom domain** · 打开 **Settings** → **Custom domain**
+2. Enter your **hostname** (e.g. `shop.example.com`). `www` and apex (`example.com`) are different DNS records · 输入**主机名**；`www` 与根域名是不同记录
+3. In **Tencent EdgeOne Makers → Domains**, add the same hostname and copy EdgeOne’s **CNAME** · 在 EdgeOne 添加相同主机名并复制 **CNAME**
+4. At your DNS provider, point that hostname to EdgeOne’s CNAME target (not a parking page); wait for propagation · DNS 指向 EdgeOne CNAME，等待生效
+5. Click **Save instructions** — copy optional **TXT** records and CNAME target shown · 点击 **Save instructions**，复制 **TXT** 与 CNAME
+6. Click **Test URL** — should open `https://your-host/.well-known/migoo-verify.txt` on this store · 点击 **Test URL** 验证 well-known 文件
+7. When HTTPS loads your store, click **Verify** · HTTPS 正常后点击 **Verify**
+
+**After verification / 验证完成后**
+
+- Share `https://your-custom-domain/`; NEXA subdomain remains a backup · 分享自定义域名；子域名仍可用
+- Keep DNS on EdgeOne — update CNAME if a parking page returns · 保持 DNS 指向 EdgeOne
+- **Remove domain** only to disconnect the hostname from this store · 解绑时使用 **Remove domain**
+
+**Note:** Platform apex domains (e.g. `nexa-mm.com`) cannot be vendor custom domains. One hostname = one store.
+
+**说明：** 平台主域名不能用作商家自定义域名。一个主机名只能绑定一家店铺。
+
+### 3.9 Settings and sharing / 设置与推广
+
+Configure logo, banner, phone, subdomain preview, terms, and social links under **Settings**. After custom domain is verified, share that branded URL (or your NEXA subdomain). Do not send customers to the main site product list. Use **preview / open store** in admin to verify catalog, categories, checkout, and scroll restore.
+
+在 **Settings** 中配置 Logo、横幅、电话、子域名预览、条款与社交链接。自定义域名验证通过后，分享品牌网址（或 NEXA 子域名）。勿将顾客导向主站商品列表。使用**预览/打开店铺**验证目录、分类、结账与滚动恢复。
 
 ---
 
@@ -371,12 +409,6 @@ When creating or editing a vendor:
 4. **Vendor → Review applications** · **商家 → 审核入驻申请**
 5. **Settings → Activities** audit log · **设置 → 活动** 审计日志
 
-### 4.8 Orders export / 订单导出
-
-Super-admin **Orders** toolbar **Export** downloads **`.xls`** (opens in Excel/WPS) — not CSV. Includes **Seller ID**, **Region**, logistics partner, delivery date; multi-item orders show one row per SKU with merged order-level cells.
-
-超级管理员 **Orders** 工具栏 **Export** 下载 **`.xls`**（可用 Excel/WPS 打开）— 非 CSV。包含 **Seller ID**、**Region**、物流伙伴、送达日期；多商品订单按 SKU 分行，订单级字段合并单元格。
-
 ### 4.7 Settings / 设置
 
 | Tab | Purpose 用途 |
@@ -388,6 +420,19 @@ Super-admin **Orders** toolbar **Export** downloads **`.xls`** (opens in Excel/W
 There is no separate **Appearance** tab; branding is under **General**.
 
 没有单独的 **Appearance** 标签；品牌设置在 **General** 中。
+
+### 4.8 Orders list — date filter & pagination / 订单列表 — 日期筛选与分页
+
+- **Date filter** matches the **Date** column (UTC day from order `createdAt`), not a separate stored `date` field · **日期筛选**与 **Date** 列一致（订单 `createdAt` 的 UTC 日），而非单独的 `date` 字段
+- Changing the filter resets to **page 1** · 更改筛选会回到**第 1 页**
+- **Per page** (10 / 15 / 20 / 50): only orders matching the filter are counted; page 2+ never shows older dates to “fill” the page · **每页**条数：只统计符合筛选的订单；第 2 页及之后**不会**用其他日期订单凑满一页
+- Header total and page count reflect the filtered set only · 标题总数与页码仅反映筛选结果
+
+### 4.9 Orders export / 订单导出
+
+Super-admin **Orders** toolbar **Export** downloads **`.xls`** (opens in Excel/WPS) — not CSV. Includes **Seller ID**, **Region**, logistics partner, delivery date; multi-item orders show one row per SKU with merged order-level cells.
+
+超级管理员 **Orders** 工具栏 **Export** 下载 **`.xls`**（可用 Excel/WPS 打开）— 非 CSV。包含 **Seller ID**、**Region**、物流伙伴、送达日期；多商品订单按 SKU 分行，订单级字段合并单元格。
 
 ---
 

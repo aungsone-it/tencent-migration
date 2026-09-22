@@ -58,7 +58,7 @@ Platform staff at `https://www.nexa-mm.com/admin` have one of **five roles**. Th
 5. **Products → Select Product** — pick from the **platform catalog** (read-only price/stock). **Products → Categories** — create store tabs and assign selected products.
 6. **Free shipping** (if enabled for your store): mark products or whole categories on **Products** / **Categories** — see [FREE_SHIPPING.md](./FREE_SHIPPING.md).
 7. **Finances** — view earnings and withdraw commission to your **KBZPay wallet** when balance is available. Enter your KBZPay phone (`09…`), click **Verify wallet**, then **Withdraw now**. Platform commission is **0% by default** unless the admin set a rate for your store or specific products. You must be signed in; if withdrawal fails with “session expired”, sign out and sign in again.
-8. **Orders** — update status; use **KBZPay draft recovery** if customer paid but no order exists.
+8. **Orders** — use the **date filter** to show only orders for that day/range (matches the Date column); update status; use **KBZPay draft recovery** if customer paid but no order exists.
 9. **Subscriptions** — Plans and Subscribers (if enabled).
 10. Your **customer-facing shop** is at your subdomain or custom domain (e.g. `https://gogo.nexa-mm.com/`), not at `https://www.nexa-mm.com/products`.
 11. Use preview/open-store in admin to verify catalog, categories, checkout, and **scroll restore** (open a product, go back — you should return to the same place in the list).

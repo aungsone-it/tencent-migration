@@ -124,6 +124,7 @@ Canonical assignable roles (frontend `superAdminRolePermissions.ts`, backend `CA
 ### Orders
 
 - Paginated list backed by SQL read model (`rpc_admin_orders_page`) with KV fallback
+- **Date filter:** toolbar date range filters by the **Date column** (UTC calendar day from `createdAt`). Pagination is applied **after** filtering — later pages never backfill with orders from other dates. Helpers: `resolveOrderListCalendarDate`, `orderMatchesAdminDateRange` in `orderNumber.ts`; SQL: `app_order_list_calendar_day` (migration `20260922140000_admin_orders_date_filter_calendar_day.sql`).
 - **Order numbers:** serial format **`NOS-00001`**, **`NOS-00002`**, … (allocated via `GET /orders/next-number` at checkout)
 - **Seller ID:** required customer field at vendor checkout; visible on order detail (above notes) and print invoice under customer phone
 - **Print invoice Tel:** customer phone shown in local **`09…`** format (international `+959…` normalized on the label)

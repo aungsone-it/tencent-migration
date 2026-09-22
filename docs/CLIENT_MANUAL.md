@@ -351,10 +351,14 @@ Files: `Dashboard.tsx`, `StatCard.tsx`, `AdminDateRangeFilterPopover.tsx`, `modu
 Admin opens Orders tab
         │
         ▼
-GET /orders → rpc_admin_orders_page (SQL read model)
-        │      fallback: KV prefix scan
+Optional date filter → dateFrom/dateTo (yyyy-MM-dd) on GET /orders
+        │   Filter uses UTC calendar day from createdAt (same as Date column)
+        │   Filter first, then paginate — page 2+ never includes other dates
         ▼
-module-cache.ts stores paginated result
+GET /orders → rpc_admin_orders_page (SQL read model)
+        │      fallback: KV prefix scan + filterSortOrdersAdmin (JS)
+        ▼
+module-cache.ts stores paginated result (cache key includes dateFrom/dateTo)
         │
         ▼
 Staff changes status → optimistic patch in cache + UI

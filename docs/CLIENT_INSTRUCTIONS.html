@@ -196,7 +196,7 @@
   <p class="en"><strong>To buy something:</strong></p>
   <p class="zh"><strong>如何购买：</strong></p>
   <ol>
-    <li><span class="en">Open a vendor's store link (e.g. <code>https://gogo.nexa-mm.com/</code>) <strong>or</strong> click a vendor logo on the homepage carousel.</span><span class="zh">打开商家店铺链接（如 <code>https://gogo.nexa-mm.com/</code>），<strong>或</strong>点击首页轮播中的商家 Logo。</span></li>
+    <li><span class="en">Open a vendor's store link — <strong>subdomain</strong> (e.g. <code>https://gogo.nexa-mm.com/</code>), a vendor's own <strong>custom domain</strong> (e.g. <code>https://shop.yourbrand.com/</code>), <strong>or</strong> click a vendor logo on the homepage carousel (opens custom domain first when verified).</span><span class="zh">打开商家店铺链接 — <strong>子域名</strong>（如 <code>https://gogo.nexa-mm.com/</code>）、商家<strong>自定义域名</strong>（如 <code>https://shop.yourbrand.com/</code>），<strong>或</strong>点击首页轮播中的商家 Logo（已验证时优先打开自定义域名）。</span></li>
   </ol>
   <p class="en">Each store sells <strong>only its own products</strong>.</p>
   <p class="zh">每家店<strong>只销售本店商品</strong>。</p>
@@ -215,6 +215,8 @@
       <tr><td><span class="en">Main site carousel</span><span class="zh">主站轮播</span></td><td><span class="en">Click a vendor logo</span><span class="zh">点击商家 Logo</span></td></tr>
     </tbody>
   </table>
+  <p class="en"><strong>Custom domain</strong> is the same store as the NEXA subdomain — only the web address changes (your brand URL). Checkout, cart, chat, and payments work the same on both URLs.</p>
+  <p class="zh"><strong>自定义域名</strong>与 NEXA 子域名是同一店铺 — 只是网址不同（您的品牌域名）。结账、购物车、聊天与支付在两种地址上完全相同。</p>
   <p class="en">On the store you can browse products, search, switch <strong>English / Burmese</strong>, contact the store (<strong>Dial</strong> or <strong>Viber</strong>), and use the <strong>chat bubble</strong> (bottom-right).</p>
   <p class="zh">在店铺内可浏览商品、搜索、切换<strong>英语/缅甸语</strong>、通过<strong>电话或 Viber</strong> 联系商家，并使用右下角<strong>聊天按钮</strong>。</p>
 
@@ -303,7 +305,8 @@
   <table>
     <thead><tr><th>URL</th><th><span class="en">Purpose</span><span class="zh">用途</span></th></tr></thead>
     <tbody>
-      <tr><td><code>https://yourstore.nexa-mm.com/</code></td><td><span class="en">Customer shop</span><span class="zh">顾客店铺</span></td></tr>
+      <tr><td><code>https://yourstore.nexa-mm.com/</code></td><td><span class="en">Customer shop (NEXA subdomain)</span><span class="zh">顾客店铺（NEXA 子域名）</span></td></tr>
+      <tr><td><code>https://shop.yourbrand.com/</code></td><td><span class="en">Customer shop (custom domain, after DNS + verify)</span><span class="zh">顾客店铺（自定义域名，DNS 与验证完成后）</span></td></tr>
       <tr><td><code>https://yourstore.nexa-mm.com/admin</code></td><td><span class="en">Vendor dashboard</span><span class="zh">商家后台</span></td></tr>
       <tr><td><code>https://www.nexa-mm.com/vendor/your-store-slug/admin</code></td><td><span class="en">Path-based admin (alternative)</span><span class="zh">路径式后台（备选）</span></td></tr>
     </tbody>
@@ -401,10 +404,45 @@
   <h3><span class="en">Orders</span><span class="zh">订单</span></h3>
   <p class="en">Update status: <strong>Pending</strong> → <strong>Processing</strong> → <strong>Ready to ship</strong> → <strong>Fulfilled</strong> (shipping may show Shipped / Delivered). <strong>COD:</strong> prepare and collect cash. <strong>KBZPay:</strong> verify payment before shipping. Use the <strong>KBZPay draft recovery</strong> panel if a customer paid but no order was created.</p>
   <p class="zh">更新状态：<strong>待处理</strong> → <strong>处理中</strong> → <strong>待发货</strong> → <strong>已完成</strong>。<strong>货到付款：</strong>备货并收货款。<strong>KBZPay：</strong>确认到账后再发货。若顾客已付但无订单，使用 <strong>KBZPay 草稿恢复</strong> 面板。</p>
+  <ul>
+    <li><span class="en"><strong>Date filter:</strong> pick a single day or range — the list shows <strong>only</strong> orders whose <strong>Date</strong> column falls in that range. The last page may have fewer rows than “per page”; it will <strong>not</strong> fill with orders from other dates.</span><span class="zh"><strong>日期筛选：</strong>选择单日或范围 — 列表<strong>仅</strong>显示 <strong>Date</strong> 列落在该范围内的订单。最后一页可少于每页行数；<strong>不会</strong>用其他日期的订单补满。</span></li>
+  </ul>
+
+  <h3><span class="en">Custom domain (your own URL)</span><span class="zh">自定义域名（自有网址）</span></h3>
+  <p class="en">Vendors can serve their storefront on a hostname they own (e.g. <code>shop.example.com</code> or <code>www.yourstore.com</code>) instead of only <code>yourstore.nexa-mm.com</code>. Configure this under <strong>Settings → Custom domain</strong> in vendor admin.</p>
+  <p class="zh">商家可在自有主机名上提供店铺（如 <code>shop.example.com</code> 或 <code>www.yourstore.com</code>），而不限于 <code>yourstore.nexa-mm.com</code>。在商家后台 <strong>Settings → Custom domain</strong> 中配置。</p>
+
+  <h4><span class="en">Why use it</span><span class="zh">用途</span></h4>
+  <ul>
+    <li><span class="en">Share a branded link with customers (social, packaging, ads).</span><span class="zh">向顾客分享品牌链接（社交、包装、广告）。</span></li>
+    <li><span class="en">Same catalog, checkout, and admin — only the public URL changes.</span><span class="zh">目录、结账与后台不变 — 仅公开网址改变。</span></li>
+    <li><span class="en">When verified, the main-site vendor carousel opens your custom domain first.</span><span class="zh">验证通过后，主站商家轮播会优先打开您的自定义域名。</span></li>
+  </ul>
+
+  <h4><span class="en">Setup steps (vendor admin)</span><span class="zh">设置步骤（商家后台）</span></h4>
+  <ol>
+    <li><span class="en">Open <strong>Settings</strong> → scroll to <strong>Custom domain</strong>.</span><span class="zh">打开 <strong>Settings</strong> → 找到 <strong>Custom domain</strong>。</span></li>
+    <li><span class="en">Enter your <strong>hostname</strong> (e.g. <code>shop.example.com</code>). Use the exact host customers will type — <code>www</code> and apex (<code>example.com</code>) are different records.</span><span class="zh">输入<strong>主机名</strong>（如 <code>shop.example.com</code>）。须与顾客访问的地址完全一致 — <code>www</code> 与根域名（<code>example.com</code>）是不同记录。</span></li>
+    <li><span class="en">In <strong>Tencent EdgeOne Makers → Domains</strong>, add the same hostname and copy the <strong>CNAME</strong> EdgeOne assigns for it.</span><span class="zh">在 <strong>Tencent EdgeOne Makers → Domains</strong> 中添加相同主机名，并复制 EdgeOne 分配的 <strong>CNAME</strong>。</span></li>
+    <li><span class="en">At your DNS provider (Hostinger, Cloudflare, etc.), create a <strong>CNAME</strong> for that hostname pointing to EdgeOne’s target — not a parking page. Wait for DNS to propagate (often 5–60 minutes).</span><span class="zh">在 DNS 服务商处为该主机名创建指向 EdgeOne 目标的 <strong>CNAME</strong> — 勿指向停放页。等待 DNS 生效（通常 5–60 分钟）。</span></li>
+    <li><span class="en">Click <strong>Save instructions</strong> — the panel shows optional <strong>TXT</strong> ownership records and the CNAME target to copy.</span><span class="zh">点击 <strong>Save instructions</strong> — 面板会显示可选的 <strong>TXT</strong> 所有权记录及可复制的 CNAME 目标。</span></li>
+    <li><span class="en">Click <strong>Test URL</strong> — should open <code>https://your-host/.well-known/migoo-verify.txt</code> on this store (not a registrar parking page).</span><span class="zh">点击 <strong>Test URL</strong> — 应在本店打开 <code>https://your-host/.well-known/migoo-verify.txt</code>（而非注册商停放页）。</span></li>
+    <li><span class="en">When HTTPS loads your store, click <strong>Verify</strong>. Status becomes <strong>Verified</strong> — customers can shop at <code>https://your-host/</code>.</span><span class="zh">HTTPS 能打开店铺后，点击 <strong>Verify</strong>。状态变为 <strong>Verified</strong> — 顾客可在 <code>https://your-host/</code> 购物。</span></li>
+  </ol>
+
+  <h4><span class="en">After verification</span><span class="zh">验证完成后</span></h4>
+  <ul>
+    <li><span class="en">Share <code>https://your-custom-domain/</code> in marketing; the NEXA subdomain still works as a backup.</span><span class="zh">在推广中使用 <code>https://your-custom-domain/</code>；NEXA 子域名仍可作为备用。</span></li>
+    <li><span class="en">Keep DNS pointed to EdgeOne — if the domain shows a parking page again, update CNAME at your DNS provider.</span><span class="zh">保持 DNS 指向 EdgeOne — 若域名再次显示停放页，请在 DNS 服务商更新 CNAME。</span></li>
+    <li><span class="en">Use <strong>Remove domain</strong> in Settings only if you want to disconnect the hostname from this store.</span><span class="zh">仅当要从本店解绑主机名时，才在 Settings 中使用 <strong>Remove domain</strong>。</span></li>
+  </ul>
+
+  <p class="en"><strong>Note:</strong> Platform apex domains (e.g. <code>nexa-mm.com</code>) cannot be used as vendor custom domains. One hostname can belong to one vendor store only.</p>
+  <p class="zh"><strong>说明：</strong>平台主域名（如 <code>nexa-mm.com</code>）不能用作商家自定义域名。一个主机名只能绑定一家店铺。</p>
 
   <h3><span class="en">Settings and sharing</span><span class="zh">设置与推广</span></h3>
-  <p class="en">Configure logo, banner, phone, subdomain, custom domain, terms, and social links. Share <strong>your store URL</strong>, not the main site product list. Use <strong>preview / open store</strong> in admin to verify catalog, categories, checkout, and scroll restore.</p>
-  <p class="zh">配置 Logo、横幅、电话、子域名、自定义域名、条款与社交链接。分享<strong>本店链接</strong>，而非主站商品列表。在后台使用<strong>预览/打开店铺</strong>验证目录、分类、结账与滚动恢复。</p>
+  <p class="en">Configure logo, banner, phone, subdomain preview, terms, and social links under <strong>Settings</strong>. After custom domain is verified, share that branded URL (or your NEXA subdomain). Do not send customers to the main site product list. Use <strong>preview / open store</strong> in admin to verify catalog, categories, checkout, and scroll restore.</p>
+  <p class="zh">在 <strong>Settings</strong> 中配置 Logo、横幅、电话、子域名预览、条款与社交链接。自定义域名验证通过后，分享该品牌网址（或 NEXA 子域名）。勿将顾客导向主站商品列表。使用<strong>预览/打开店铺</strong>验证目录、分类、结账与滚动恢复。</p>
 
   <!-- ===== 4. ADMIN ===== -->
   <h2 id="admin">
@@ -412,8 +450,16 @@
   </h2>
 
   <h3><span class="en">Access</span><span class="zh">访问</span></h3>
-  <p class="en">Open <code>https://www.nexa-mm.com/admin</code> and sign in. Left menu (role-dependent): <strong>Home</strong>, <strong>Product</strong> (Products, Categories, Inventory), <strong>Orders</strong>, <strong>Vendor</strong>, <strong>Chat</strong>, <strong>Customers</strong>, <strong>Subscriptions</strong> (Plans, Subscribers), <strong>Finances</strong>, <strong>Logistics</strong>, <strong>Settings</strong>. <em>Marketing is not in the current menu.</em></p>
-  <p class="zh">打开 <code>https://www.nexa-mm.com/admin</code> 并登录。左侧菜单（因角色而异）：<strong>首页</strong>、<strong>商品</strong>、<strong>订单</strong>、<strong>商家</strong>、<strong>聊天</strong>、<strong>顾客</strong>、<strong>订阅</strong>、<strong>财务</strong>、<strong>物流</strong>、<strong>设置</strong>。<em>营销不在当前菜单中。</em></p>
+  <p class="en">Open <code>https://www.nexa-mm.com/admin</code> and sign in. Left menu (role-dependent): <strong>Home</strong>, <strong>Product</strong> (Products, Categories, Inventory), <strong>Orders</strong>, <strong>Vendor</strong>, <strong>Chat</strong>, <strong>Customers</strong>, <strong>Promo Setting</strong>, <strong>Subscriptions</strong> (Plans, Subscribers), <strong>Finances</strong>, <strong>Logistics</strong>, <strong>Settings</strong>. <em>Legacy Marketing URLs redirect to Promo Setting.</em></p>
+  <p class="zh">打开 <code>https://www.nexa-mm.com/admin</code> 并登录。左侧菜单（因角色而异）：<strong>首页</strong>、<strong>商品</strong>、<strong>订单</strong>、<strong>商家</strong>、<strong>聊天</strong>、<strong>顾客</strong>、<strong>促销设置</strong>、<strong>订阅</strong>、<strong>财务</strong>、<strong>物流</strong>、<strong>设置</strong>。<em>旧 Marketing 路由重定向至促销设置。</em></p>
+
+  <h3><span class="en">Home dashboard</span><span class="zh">首页概览</span></h3>
+  <ul>
+    <li><span class="en">Four cards show <strong>Revenue</strong>, <strong>Orders</strong>, <strong>Customers</strong>, and <strong>Products</strong> — totals match the Orders, Customers, and Products list pages.</span><span class="zh">四张卡片显示<strong>收入</strong>、<strong>订单</strong>、<strong>顾客</strong>、<strong>商品</strong> — 数字与对应列表页一致。</span></li>
+    <li><span class="en">Click a card to open that section (Finances, Orders, Customers, Products).</span><span class="zh">点击卡片进入对应模块。</span></li>
+    <li><span class="en">Use the <strong>date filter</strong> for a custom range; “All time” shows all-time totals.</span><span class="zh">使用<strong>日期筛选</strong>自定义范围；“全部时间”显示累计总数。</span></li>
+    <li><span class="en">Charts and trends on Home come from a separate analytics API.</span><span class="zh">首页图表与趋势来自独立分析接口。</span></li>
+  </ul>
 
   <h3><span class="en">Admin user roles</span><span class="zh">管理员角色</span></h3>
   <table>
@@ -421,8 +467,9 @@
     <tbody>
       <tr><td><span class="en"><strong>Store Owner</strong></span><span class="zh"><strong>店主</strong></span></td><td><span class="en">Full access — <strong>Finances</strong>, <strong>Settings → Users</strong>, all menus</span><span class="zh">全部权限 — 含财务与用户管理</span></td></tr>
       <tr><td><span class="en"><strong>Administrator</strong></span><span class="zh"><strong>管理员</strong></span></td><td><span class="en">All menus except <strong>Finances</strong>; Settings (General + Activities, no Users)</span><span class="zh">除财务外全部菜单；设置（常规+活动，无用户管理）</span></td></tr>
-      <tr><td><span class="en"><strong>Data Entry</strong></span><span class="zh"><strong>数据录入</strong></span></td><td><span class="en">Home, Product, Categories, Inventory, <strong>Chat</strong>, Settings (General, no Users)</span><span class="zh">首页、商品/分类/库存、<strong>聊天</strong>、设置（常规，无用户管理）</span></td></tr>
+      <tr><td><span class="en"><strong>Data Entry</strong></span><span class="zh"><strong>数据录入</strong></span></td><td><span class="en">Home, Product, Categories, Inventory, <strong>Promo Setting</strong>, <strong>Chat</strong>, Settings (General, no Users)</span><span class="zh">首页、商品/分类/库存、<strong>促销设置</strong>、<strong>聊天</strong>、设置（常规，无用户管理）</span></td></tr>
       <tr><td><span class="en"><strong>Warehouse</strong></span><span class="zh"><strong>仓库</strong></span></td><td><span class="en">Home, Orders, Inventory, Logistics only</span><span class="zh">首页、订单、库存、物流</span></td></tr>
+      <tr><td><span class="en"><strong>Customer Services</strong></span><span class="zh"><strong>客服</strong></span></td><td><span class="en">Home, Orders, Chat (full); Product/Categories/Inventory/Logistics (view only); <strong>Promo Setting</strong> (full)</span><span class="zh">首页、订单、聊天（完整）；商品/分类/库存/物流（只读）；<strong>促销设置</strong>（完整）</span></td></tr>
     </tbody>
   </table>
   <p class="en">Only <strong>Store Owner</strong> can add staff under <strong>Settings → Users</strong>.</p>
@@ -447,6 +494,7 @@
   <ol>
     <li><span class="en">Review <strong>Orders</strong> (pending badge)</span><span class="zh">查看<strong>订单</strong>（待处理角标）</span></li>
     <li><span class="en">Recover <strong>KBZPay drafts</strong> if needed — paid checkouts that never became orders</span><span class="zh">必要时恢复 <strong>KBZPay 草稿订单</strong> — 已付但未生成订单的结账</span></li>
+    <li><span class="en">Manage <strong>Promo Setting</strong> campaigns/coupons when applicable</span><span class="zh">按需管理 <strong>促销设置</strong> 活动/优惠码</span></li>
     <li><span class="en"><strong>Vendor → Review applications</strong></span><span class="zh"><strong>商家 → 审核入驻申请</strong></span></li>
     <li><span class="en"><strong>Settings → Activities</strong> audit log</span><span class="zh"><strong>设置 → 活动</strong> 审计日志</span></li>
   </ol>
@@ -462,6 +510,18 @@
   </table>
   <p class="en">There is no separate <strong>Appearance</strong> tab; branding is under <strong>General</strong>.</p>
   <p class="zh">没有单独的<strong>外观</strong>标签；品牌设置在<strong>常规</strong>中。</p>
+
+  <h3><span class="en">Orders list — date filter &amp; pagination</span><span class="zh">订单列表 — 日期筛选与分页</span></h3>
+  <ul>
+    <li><span class="en"><strong>Date filter</strong> matches the <strong>Date</strong> column (UTC day from order <code>createdAt</code>), not a separate stored <code>date</code> field.</span><span class="zh"><strong>日期筛选</strong>与 <strong>Date</strong> 列一致（订单 <code>createdAt</code> 的 UTC 日），而非单独的 <code>date</code> 字段。</span></li>
+    <li><span class="en">Changing the filter resets to <strong>page 1</strong>.</span><span class="zh">更改筛选会回到<strong>第 1 页</strong>。</span></li>
+    <li><span class="en"><strong>Per page</strong> (10 / 15 / 20 / 50): only orders matching the filter are counted; page 2+ never shows older dates to “fill” the page.</span><span class="zh"><strong>每页</strong>条数（10 / 15 / 20 / 50）：只统计符合筛选的订单；第 2 页及之后<strong>不会</strong>用其他日期订单凑满一页。</span></li>
+    <li><span class="en">Header total and page count reflect the filtered set only.</span><span class="zh">标题总数与页码仅反映筛选结果。</span></li>
+  </ul>
+
+  <h3><span class="en">Orders export</span><span class="zh">订单导出</span></h3>
+  <p class="en">Super-admin <strong>Orders</strong> toolbar <strong>Export</strong> downloads <strong>.xls</strong> (opens in Excel/WPS) — not CSV. Includes <strong>Seller ID</strong>, <strong>Region</strong>, logistics partner, delivery date; multi-item orders show one row per SKU with merged order-level cells.</p>
+  <p class="zh">超级管理员 <strong>Orders</strong> 工具栏 <strong>Export</strong> 下载 <strong>.xls</strong>（可用 Excel/WPS 打开）— 非 CSV。包含 <strong>Seller ID</strong>、<strong>Region</strong>、物流伙伴、送达日期；多商品订单按 SKU 分行，订单级字段合并单元格。</p>
 
   <!-- ===== 5. REFERENCE ===== -->
   <h2 id="reference">

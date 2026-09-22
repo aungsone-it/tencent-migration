@@ -7,10 +7,12 @@ import {
   formatSerialOrderNumber,
   isPrefixedOrderNumber,
   normalizeOrderNumberSearch,
+  orderMatchesAdminDateRange,
   ORDER_NUMBER_PREFIX,
   ORDER_SERIAL_GAP_REUSE_FLOOR,
   orderNumberSearchTokens,
   parseOrderSerial,
+  resolveOrderListCalendarDate,
 } from "./orderNumber";
 
 describe("orderNumber", () => {
@@ -59,6 +61,29 @@ describe("orderNumber", () => {
     expect(parseOrderSerial("MOS-NOS-00118")).toBe(118);
     expect(parseOrderSerial("ORD-00001")).toBe(1);
     expect(parseOrderSerial("MOS-MRFDNEWI")).toBe(0);
+  });
+
+  it("derives list calendar day from createdAt, not a mismatched date field", () => {
+    expect(
+      resolveOrderListCalendarDate({
+        date: "2026-09-20",
+        createdAt: "2026-09-19T18:30:00.000Z",
+      }),
+    ).toBe("2026-09-19");
+    expect(
+      orderMatchesAdminDateRange(
+        { date: "2026-09-20", createdAt: "2026-09-19T18:30:00.000Z" },
+        "2026-09-20",
+        "2026-09-20",
+      ),
+    ).toBe(false);
+    expect(
+      orderMatchesAdminDateRange(
+        { createdAt: "2026-09-20T03:30:00.000Z" },
+        "2026-09-20",
+        "2026-09-20",
+      ),
+    ).toBe(true);
   });
 
   it("slots a recovered draft into serial order instead of the top", () => {

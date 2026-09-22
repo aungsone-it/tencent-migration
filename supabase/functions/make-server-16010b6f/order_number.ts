@@ -87,6 +87,34 @@ export function parseSerialFromOrderNumber(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/** UTC calendar day (YYYY-MM-DD) for admin order lists — matches Orders table Date column. */
+export function resolveOrderListCalendarDate(order: {
+  createdAt?: unknown;
+  date?: unknown;
+}): string {
+  const raw = String(order.createdAt || order.date || "").trim();
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+  const dayMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return dayMatch ? dayMatch[1] : "";
+}
+
+/** True when an order's list calendar day falls within yyyy-MM-dd bounds (inclusive). */
+export function orderMatchesAdminDateRange(
+  order: { createdAt?: unknown; date?: unknown },
+  dateFrom: string,
+  dateTo: string,
+): boolean {
+  const day = resolveOrderListCalendarDate(order);
+  if (!day) return !dateFrom && !dateTo;
+  if (dateFrom && day < dateFrom) return false;
+  if (dateTo && day > dateTo) return false;
+  return true;
+}
+
 export function compareOrdersBySerial(
   a: { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },
   b: { orderNumber?: unknown; createdAt?: unknown; date?: unknown; id?: unknown },

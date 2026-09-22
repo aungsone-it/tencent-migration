@@ -78,6 +78,8 @@ import {
   allocateNextOrderNumber,
   canonicalizeOrderNumber,
   compareOrdersBySerial,
+  orderMatchesAdminDateRange,
+  resolveOrderListCalendarDate,
   consumeOrderNumberReservation,
   ensureOrderNumberAssignableForCreate,
   noteOrderNumberUsed,
@@ -5518,15 +5520,7 @@ function filterSortOrdersAdmin(minimalOrders: any[], opts: NonNullable<ReturnTyp
     if (opts.payment !== "all" && String(order.paymentStatus || "") !== opts.payment) return false;
     const vendorLabel = order.vendor || "SECURE Store";
     if (opts.vendor !== "all" && vendorLabel !== opts.vendor) return false;
-    const orderDate = new Date(order.date || order.createdAt || 0);
-    if (opts.dateFrom) {
-      const from = new Date(opts.dateFrom);
-      if (!Number.isNaN(from.getTime()) && orderDate < from) return false;
-    }
-    if (opts.dateTo) {
-      const to = new Date(opts.dateTo + "T23:59:59.999Z");
-      if (!Number.isNaN(to.getTime()) && orderDate > to) return false;
-    }
+    if (!orderMatchesAdminDateRange(order, opts.dateFrom, opts.dateTo)) return false;
     if (opts.q) {
       const customerHay =
         typeof order.customer === "string"
@@ -5977,7 +5971,7 @@ function mapOrderToAdminListRow(order: any) {
     refundAmount: Number(order?.kpay?.refund?.amount || 0) || 0,
     refundedAt: String(order?.kpay?.refund?.refundedAt || order?.kpay?.refund?.failedAt || "").trim(),
     kpay: order.kpay,
-    date: order.date || order.createdAt || new Date().toISOString(),
+    date: resolveOrderListCalendarDate(order) || new Date().toISOString().slice(0, 10),
     createdAt: order.createdAt || new Date().toISOString(),
     updatedAt: order.updatedAt || new Date().toISOString(),
   };

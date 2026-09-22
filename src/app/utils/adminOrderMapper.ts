@@ -9,6 +9,7 @@ import {
   extractOrderShippingFields,
   resolveOrderSellerId,
 } from "./orderShippingAddress";
+import { resolveOrderListCalendarDate } from "./orderNumber";
 
 export type AdminOrderStatus =
   | "pending"
@@ -77,9 +78,9 @@ export function mapApiOrderToOrderItem(order: Record<string, unknown>): AdminOrd
   return {
     id: String(order.id || ""),
     orderNumber: String(order.orderNumber || order.id || ""),
-    date: order.createdAt
-      ? new Date(String(order.createdAt)).toISOString().split("T")[0]
-      : new Date().toISOString().split("T")[0],
+    date:
+      resolveOrderListCalendarDate(order) ||
+      new Date().toISOString().split("T")[0],
     createdAt: String(order.createdAt || new Date().toISOString()),
     updatedAt: String(order.updatedAt || order.createdAt || new Date().toISOString()),
     customer:

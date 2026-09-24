@@ -153,6 +153,11 @@ export const INVOICE_PRINT_STYLES = `
     padding: 1.6vw 0.9vw !important;
   }
 
+  body.invoice-print-active .items-table thead th.col-qty,
+  body.invoice-print-active .items-table tbody td.col-qty {
+    text-align: center !important;
+  }
+
   body.invoice-print-active .items-table tbody td {
     font-size: max(3.2mm, 2.35vw) !important;
     padding: 1.8vw 0.9vw !important;
@@ -274,10 +279,10 @@ export const INVOICE_PRINT_STYLES = `
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    min-width: max(5mm, 3.2vw) !important;
+    min-width: max(6mm, 3.8vw) !important;
     height: max(5mm, 3.2vw) !important;
-    padding: 0 0.4vw !important;
-    border-radius: 50% !important;
+    padding: 0 0.55vw !important;
+    border-radius: max(0.8mm, 0.45vw) !important;
     border: 1.5px solid #e11d48 !important;
     background: rgba(225, 29, 72, 0.12) !important;
     color: #000 !important;
@@ -417,13 +422,18 @@ export const INVOICE_PRINT_STYLES = `
   color: #000;
 }
 
+.items-table thead th.col-qty,
+.items-table tbody td.col-qty {
+  text-align: center;
+}
+
 .items-table tbody td {
   vertical-align: top;
   color: #000;
   border-bottom: none;
 }
 
-.col-qty { width: 10%; text-align: center; }
+.col-qty { width: 10%; }
 .col-product { width: 40%; text-align: left; }
 .col-sku { width: 25%; text-align: left; }
 .col-price { width: 25%; text-align: right; }
@@ -432,10 +442,10 @@ export const INVOICE_PRINT_STYLES = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.35em;
+  min-width: 1.65em;
   height: 1.35em;
-  padding: 0 0.15em;
-  border-radius: 50%;
+  padding: 0 0.35em;
+  border-radius: 4px;
   border: 1.5px solid #e11d48;
   background: rgba(225, 29, 72, 0.12);
   color: #000;

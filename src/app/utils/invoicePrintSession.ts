@@ -283,8 +283,8 @@ export const INVOICE_PRINT_STYLES = `
     height: max(5mm, 3.2vw) !important;
     padding: 0 0.55vw !important;
     border-radius: max(0.8mm, 0.45vw) !important;
-    border: 1.5px solid #e11d48 !important;
-    background: rgba(225, 29, 72, 0.12) !important;
+    border: 1.5px solid #9ca3af !important;
+    background: #f3f4f6 !important;
     color: #000 !important;
     box-sizing: border-box !important;
     line-height: 1 !important;
@@ -446,8 +446,8 @@ export const INVOICE_PRINT_STYLES = `
   height: 1.35em;
   padding: 0 0.35em;
   border-radius: 4px;
-  border: 1.5px solid #e11d48;
-  background: rgba(225, 29, 72, 0.12);
+  border: 1.5px solid #9ca3af;
+  background: #f3f4f6;
   color: #000;
   box-sizing: border-box;
   line-height: 1;

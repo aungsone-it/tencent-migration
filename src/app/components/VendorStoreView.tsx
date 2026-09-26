@@ -4105,13 +4105,12 @@ export function VendorStoreView({
       const qRaw = debouncedVendorServerQ.trim();
       const qk = qRaw.toLowerCase();
       const cat = vendorCatalogServerCategory;
-      const shouldClientFilterVendorCategory = cat !== "all";
-      const pageSize = shouldClientFilterVendorCategory ? VENDOR_SEARCH_PAGE_SIZE : (qRaw ? VENDOR_SEARCH_PAGE_SIZE : VENDOR_BROWSE_PAGE_SIZE);
+      const pageSize = qRaw ? VENDOR_SEARCH_PAGE_SIZE : VENDOR_BROWSE_PAGE_SIZE;
       const cacheKey = CACHE_KEYS.vendorProductsPage(vendorId, 1, qk, cat, pageSize);
       const persistEligible = !qRaw;
       const lsKey = lsVendorCatalogPage1Key(vendorId, qk, cat, pageSize);
 
-      if (!forceRefresh && persistEligible && !shouldClientFilterVendorCategory) {
+      if (!forceRefresh && persistEligible) {
         const sliceKey = vendorCatalogSliceSessionKey(vendorId, cat);
         const loadedMore =
           catalogSliceByCategoryRef.current.get(sliceKey) ??
@@ -4152,7 +4151,7 @@ export function VendorStoreView({
         }
       }
 
-      if (!forceRefresh && persistEligible && !shouldClientFilterVendorCategory) {
+      if (!forceRefresh && persistEligible) {
         const fromLs = readPersistedJson<any>(lsKey, PERSISTED_CATALOG_TTL_MS);
         if (fromLs && typeof fromLs === "object") {
           // Old persisted catalog omitted `storePhone` — bypass LS once so we pick up `contactPhone` from the API.
@@ -4206,20 +4205,17 @@ export function VendorStoreView({
             page: 1,
             pageSize,
             q: qRaw || undefined,
-            category: shouldClientFilterVendorCategory ? undefined : cat,
+            category: cat === "all" ? undefined : cat,
           }),
         forceRefresh
       );
       if (!isLatest()) return false;
       const fetchedProducts = productsData.products || [];
-      const displayProducts = shouldClientFilterVendorCategory
-        ? clientFilterProductsForCatalogCategory(fetchedProducts, cat)
-        : fetchedProducts;
       const slice = {
-        products: displayProducts,
-        total: shouldClientFilterVendorCategory ? displayProducts.length : productsData.total,
+        products: fetchedProducts,
+        total: productsData.total,
         page: productsData.page,
-        hasMore: shouldClientFilterVendorCategory ? false : productsData.hasMore,
+        hasMore: productsData.hasMore,
       };
       if (
         !forceRefresh &&
@@ -5560,22 +5556,24 @@ export function VendorStoreView({
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const matchesSearch = productMatchesVendorClientSearch(product, searchQuery);
-      let matchesCategory = true;
-      if (catalogCategoryForFetch !== "all") {
-        if (isVendorUncategorizedFilter(catalogCategoryForFetch)) {
-          matchesCategory = !vendorCategorizedProductIds.has(String(product.id || "").trim());
-        } else {
-          const vendorCategoryProductIds = vendorCategoryProductIdsByName.get(
-            String(catalogCategoryForFetch).trim().toLowerCase()
-          );
-          matchesCategory = !!vendorCategoryProductIds?.has(String(product.id || "").trim());
-        }
+      if (!matchesSearch) return false;
+      /** Category tabs use server pagination + `category` query — avoid stale client maps dropping rows. */
+      if (catalogCategoryForFetch !== "all" && !debouncedVendorServerQ.trim()) {
+        return true;
       }
-      return matchesSearch && matchesCategory;
+      if (catalogCategoryForFetch === "all") return true;
+      if (isVendorUncategorizedFilter(catalogCategoryForFetch)) {
+        return !vendorCategorizedProductIds.has(String(product.id || "").trim());
+      }
+      const vendorCategoryProductIds = vendorCategoryProductIdsByName.get(
+        String(catalogCategoryForFetch).trim().toLowerCase()
+      );
+      return !!vendorCategoryProductIds?.has(String(product.id || "").trim());
     });
   }, [
     products,
     searchQuery,
+    debouncedVendorServerQ,
     catalogCategoryForFetch,
     vendorCategoryProductIdsByName,
     vendorCategorizedProductIds,

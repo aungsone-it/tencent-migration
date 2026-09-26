@@ -20,6 +20,7 @@ import {
 import { resolveCloudBaseMediaUrl } from '../../../utils/tencent/storageMediaUrl';
 import { SmartCache } from '../../utils/cache';
 import { devLog } from './devLog';
+import { productMatchesAdminLiveSearch } from "./adminProductSearch";
 import { vendorApplicationsApi } from '../../utils/api';
 import { withNetworkRetry } from './networkRetry';
 import { compareOrdersBySerial } from "./orderNumber";
@@ -43,6 +44,7 @@ import {
   PERSISTED_CATALOG_TTL_MS,
   PERSISTED_ADMIN_PRODUCTS_PAGE_TTL_MS,
   lsAdminProductsPage1Key,
+  lsVendorProductsAdminPage1Key,
   lsAdminCustomersPage1Key,
   LS_ADMIN_FINANCES_ANALYTICS,
   LS_ADMIN_AUTH_USERS,
@@ -1811,6 +1813,18 @@ export async function fetchVendorCategoriesAdminDetails(vendorId: string) {
   return filterVendorCreatedCategories(data.categories || [], vendorId);
 }
 
+/** Cached vendor category admin details (free-shipping toggles, product counts). */
+export async function getCachedVendorCategoriesAdminDetails(
+  vendorId: string,
+  forceRefresh = false
+) {
+  return moduleCache.get(
+    CACHE_KEYS.vendorCategoriesAdminDetails(vendorId),
+    () => fetchVendorCategoriesAdminDetails(vendorId),
+    forceRefresh
+  );
+}
+
 // Fetch vendor orders (vendor admin) — first page only; prefer fetchAllVendorOrders for finances.
 export async function fetchVendorOrders(vendorId: string, bustHttpCache = false) {
   const page = await fetchVendorOrdersPage(
@@ -2016,6 +2030,8 @@ export const CACHE_KEYS = {
   /** Vendor admin list (all statuses) — separate from public storefront vendor catalog */
   vendorProductsAdmin: (vendorId: string) => `vendor-products-admin-${vendorId}`,
   vendorCategories: (vendorId: string) => `vendor-categories-${vendorId}`,
+  vendorCategoriesAdminDetails: (vendorId: string) =>
+    `vendor-categories-admin-details-${vendorId}`,
   vendorOrders: (vendorId: string) => `vendor-orders-${vendorId}`,
   vendorOrdersPage: (
     vendorId: string,
@@ -2091,6 +2107,235 @@ export async function fetchProductByIdFromApi(productId: string) {
   return response.json();
 }
 
+export const VENDOR_PRODUCTS_ADMIN_PAGE_CACHE_PREFIX = "vendor-products-admin-page-";
+
+export type VendorProductsAdminPageParams = {
+  page: number;
+  pageSize?: number;
+  q?: string;
+  status?: string;
+  sort?: string;
+};
+
+export type VendorProductsAdminPagePayload = {
+  adminList?: boolean;
+  products: unknown[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  counts?: { all: number; active: number; offShelf: number };
+};
+
+export function vendorProductsAdminPageCacheKey(
+  vendorId: string,
+  p: VendorProductsAdminPageParams
+): string {
+  const pageSize = Math.min(100, Math.max(1, p.pageSize ?? ADMIN_PRODUCTS_INITIAL_PAGE_SIZE));
+  const page = Math.max(1, p.page);
+  const q = normAdminQ(p.q || "");
+  const status = p.status || "all";
+  const sort = p.sort && p.sort !== "" ? p.sort : "newest";
+  return `${VENDOR_PRODUCTS_ADMIN_PAGE_CACHE_PREFIX}${vendorId}-p${page}-ps${pageSize}-st-${status}-so-${sort}-q-${encodeURIComponent(q)}`;
+}
+
+function vendorAdminProductMatchesDerivedPage(
+  product: any,
+  params: VendorProductsAdminPageParams
+): boolean {
+  const q = normAdminQ(params.q || "");
+  if (q && !productMatchesAdminLiveSearch(product, q)) return false;
+  const status = (params.status || "all").toLowerCase();
+  if (status === "all") return true;
+  const ps = String(product.status || "active").toLowerCase();
+  if (status === "active") return ps === "active";
+  if (status === "off-shelf") return ps === "off-shelf";
+  return ps === status;
+}
+
+function countDerivedVendorAdminProductsByStatus(products: any[]) {
+  return {
+    all: products.length,
+    active: products.filter((p) => String(p.status || "active").toLowerCase() === "active")
+      .length,
+    offShelf: products.filter((p) => String(p.status || "").toLowerCase() === "off-shelf").length,
+  };
+}
+
+/** Slice a warmed full vendor-admin list into a paginated payload (no network). */
+export function primeVendorProductsAdminPageFromFullCache(
+  vendorId: string,
+  params: VendorProductsAdminPageParams
+): VendorProductsAdminPagePayload | null {
+  const fullPeek = moduleCache.peek<{ products?: unknown[] }>(
+    CACHE_KEYS.vendorProductsAdmin(vendorId)
+  );
+  const full = fullPeek?.products;
+  if (!Array.isArray(full) || full.length === 0) return null;
+
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? ADMIN_PRODUCTS_INITIAL_PAGE_SIZE));
+  const page = Math.max(1, params.page);
+  const sort = params.sort && params.sort !== "" ? params.sort : "newest";
+  const effectiveParams = { ...params, page, pageSize, sort };
+  const filtered = full
+    .filter((product) => vendorAdminProductMatchesDerivedPage(product, effectiveParams))
+    .sort((a, b) => {
+      if (sort === "oldest") {
+        return (
+          new Date((a as any).createdAt || 0).getTime() -
+          new Date((b as any).createdAt || 0).getTime()
+        );
+      }
+      return (
+        new Date((b as any).createdAt || 0).getTime() -
+        new Date((a as any).createdAt || 0).getTime()
+      );
+    });
+  const start = (page - 1) * pageSize;
+  const payload: VendorProductsAdminPagePayload = {
+    adminList: true,
+    products: filtered.slice(start, start + pageSize),
+    total: filtered.length,
+    page,
+    pageSize,
+    hasMore: start + pageSize < filtered.length,
+    counts: countDerivedVendorAdminProductsByStatus(full as any[]),
+  };
+  moduleCache.prime(vendorProductsAdminPageCacheKey(vendorId, effectiveParams), payload);
+  return payload;
+}
+
+export async function fetchVendorProductsAdminPage(
+  vendorId: string,
+  params: VendorProductsAdminPageParams
+): Promise<VendorProductsAdminPagePayload> {
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? ADMIN_PRODUCTS_INITIAL_PAGE_SIZE));
+  const sp = new URLSearchParams();
+  sp.set("adminList", "1");
+  sp.set("page", String(Math.max(1, params.page)));
+  sp.set("pageSize", String(pageSize));
+  const q = normAdminQ(params.q || "");
+  if (q) sp.set("q", q);
+  if (params.status && params.status !== "all") sp.set("status", params.status);
+  if (params.sort) sp.set("sort", params.sort);
+  const response = await fetch(
+    `${API_ROOT}/vendor/products-admin/${encodeURIComponent(vendorId)}?${sp.toString()}`,
+    { headers: cloudbaseHeaders() }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to fetch vendor products page (admin): ${response.status}`);
+  }
+  const data = await response.json();
+  const list = Array.isArray(data.products) ? data.products : [];
+
+  /** Older edge builds ignore `adminList` and return the full vendor array — slice client-side. */
+  if (!data.adminList && list.length > 0) {
+    moduleCache.prime(CACHE_KEYS.vendorProductsAdmin(vendorId), { products: list });
+    const derived = primeVendorProductsAdminPageFromFullCache(vendorId, params);
+    if (derived) return derived;
+  }
+
+  return {
+    adminList: !!data.adminList,
+    products: list,
+    total: Number(data.total ?? (data.adminList ? 0 : list.length)),
+    page: Number(data.page ?? params.page),
+    pageSize: Number(data.pageSize ?? pageSize),
+    hasMore: !!data.hasMore,
+    counts:
+      data.counts && typeof data.counts === "object"
+        ? {
+            all: Number(data.counts.all ?? 0),
+            active: Number(data.counts.active ?? 0),
+            offShelf: Number(data.counts.offShelf ?? 0),
+          }
+        : list.length > 0 && !data.adminList
+          ? countDerivedVendorAdminProductsByStatus(list)
+          : undefined,
+  };
+}
+
+export function peekVendorProductsAdminPage(
+  vendorId: string,
+  params: VendorProductsAdminPageParams
+): VendorProductsAdminPagePayload | undefined {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? ADMIN_PRODUCTS_INITIAL_PAGE_SIZE));
+  const qNorm = normAdminQ(params.q || "");
+  const status = params.status || "all";
+  const sort = params.sort && params.sort !== "" ? params.sort : "newest";
+  const key = vendorProductsAdminPageCacheKey(vendorId, {
+    ...params,
+    page,
+    pageSize,
+    q: qNorm,
+    status,
+    sort,
+  });
+
+  const fromSession = moduleCache.peek<VendorProductsAdminPagePayload>(key);
+  if (fromSession && Array.isArray(fromSession.products)) {
+    return fromSession;
+  }
+
+  const derived = primeVendorProductsAdminPageFromFullCache(vendorId, {
+    ...params,
+    page,
+    pageSize,
+    q: qNorm,
+    status,
+    sort,
+  });
+  if (derived) return derived;
+
+  if (page === 1 && typeof window !== "undefined") {
+    const fromLs = readPersistedJson<VendorProductsAdminPagePayload>(
+      lsVendorProductsAdminPage1Key(vendorId, { pageSize, status, sort, qNorm }),
+      PERSISTED_ADMIN_PRODUCTS_PAGE_TTL_MS
+    );
+    if (fromLs && Array.isArray(fromLs.products)) {
+      moduleCache.prime(key, fromLs);
+      return fromLs;
+    }
+  }
+
+  return undefined;
+}
+
+export async function getCachedVendorProductsAdminPage(
+  vendorId: string,
+  params: VendorProductsAdminPageParams,
+  forceRefresh = false
+): Promise<VendorProductsAdminPagePayload> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? ADMIN_PRODUCTS_INITIAL_PAGE_SIZE));
+  const qNorm = normAdminQ(params.q || "");
+  const status = params.status || "all";
+  const sort = params.sort && params.sort !== "" ? params.sort : "newest";
+  const effectiveParams = { ...params, page, pageSize, q: qNorm, status, sort };
+  const key = vendorProductsAdminPageCacheKey(vendorId, effectiveParams);
+
+  if (!forceRefresh) {
+    const peeked = peekVendorProductsAdminPage(vendorId, effectiveParams);
+    if (peeked) return peeked;
+  }
+
+  const data = await moduleCache.get(
+    key,
+    () => fetchVendorProductsAdminPage(vendorId, effectiveParams),
+    forceRefresh
+  );
+
+  if (page === 1 && data && Array.isArray(data.products)) {
+    writePersistedJson(
+      lsVendorProductsAdminPage1Key(vendorId, { pageSize, status, sort, qNorm }),
+      data
+    );
+  }
+
+  return data;
+}
+
 /** Vendor admin: all products (all statuses) for one vendor */
 export async function fetchVendorProductsAdmin(vendorId: string) {
   const response = await fetch(
@@ -2127,6 +2372,12 @@ export function invalidateProductByIdCache(productId: string): void {
 
 export function invalidateVendorProductsAdminCache(vendorId: string): void {
   moduleCache.invalidate(CACHE_KEYS.vendorProductsAdmin(vendorId));
+  moduleCache.invalidatePrefix(`${VENDOR_PRODUCTS_ADMIN_PAGE_CACHE_PREFIX}${vendorId}-`);
+  if (typeof window !== "undefined") {
+    removePersistedKeysPrefix(
+      `migoo-ls-vendor-admin-p1-${encodeURIComponent(String(vendorId).trim())}`
+    );
+  }
 }
 
 /** Public vendor storefront catalog (paginated + localStorage page-1) — call after Store Settings name/logo changes */
@@ -2540,6 +2791,7 @@ export const VENDOR_FREE_SHIPPING_CHANGED_EVENT = "migoo-vendor-free-shipping-ch
 export function notifyVendorFreeShippingChanged(vendorId: string): void {
   invalidateVendorProductsAdminCache(vendorId);
   moduleCache.invalidate(CACHE_KEYS.vendorCategories(vendorId));
+  moduleCache.invalidate(CACHE_KEYS.vendorCategoriesAdminDetails(vendorId));
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent(VENDOR_FREE_SHIPPING_CHANGED_EVENT, { detail: { vendorId } })

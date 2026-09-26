@@ -29,7 +29,10 @@ import { Checkbox } from "../ui/checkbox";
 import { Switch } from "../ui/switch";
 import { toast } from "sonner";
 import {
-  getCachedVendorProductsAdmin,
+  getCachedVendorProductsAdminPage,
+  peekVendorProductsAdminPage,
+  vendorProductsAdminPageCacheKey,
+  type VendorProductsAdminPagePayload,
   invalidateVendorProductsAdminCache,
   invalidateVendorStorefrontCatalogCachesAfterProductLinkChange,
   moduleCache,
@@ -39,7 +42,7 @@ import {
   invalidateAdminAllProductsCache,
   ADMIN_PRODUCTS_LIST_CHANGED_EVENT,
   fetchVendorCategories,
-  fetchVendorCategoriesAdminDetails,
+  getCachedVendorCategoriesAdminDetails,
   getCachedAdminAllProducts,
   invalidateStaffActivitiesCache,
   notifyVendorFreeShippingChanged,
@@ -69,6 +72,7 @@ import {
   type VendorAssignPickerSession,
 } from "../../utils/vendorAssignPickerSession";
 import { VendorAdminListingPagination } from "./VendorAdminListingPagination";
+import { AdminClearableSearchInput } from "../AdminClearableSearchInput";
 import { useLanguage } from "../../contexts/LanguageContext";
 import {
   buildVendorProductCategoryLabels,
@@ -78,7 +82,6 @@ import { API_BASE_URL } from "../../../utils/api-client";
 import {
   mapCategoryFreeShippingRows,
   resolveCategoryFreeShippingToggleTarget,
-  syncCategoryFreeShippingCounts,
   type CategoryFreeShippingRow,
 } from "../../utils/freeShipping";
 
@@ -171,17 +174,37 @@ export function VendorAdminProductsCRUD({
   const onVendorHostCleanAdmin =
     vendorHostCleanAdmin && pathnameUnderAdmin(location.pathname);
   const adminPrefix = onVendorHostCleanAdmin ? null : "vendor";
-  const cachedVendorProductsPayload = moduleCache.peek<{ products?: Product[] }>(
-    CACHE_KEYS.vendorProductsAdmin(vendorId)
+  const initialVendorPageSize = ADMIN_PRODUCTS_INITIAL_PAGE_SIZE;
+  const initialVendorPageParams = useMemo(
+    () => ({
+      page: 1,
+      pageSize: initialVendorPageSize,
+      q: "",
+      status: "all" as const,
+      sort: "newest",
+    }),
+    [initialVendorPageSize]
   );
-  const hasWarmVendorProductsCache =
-    cachedVendorProductsPayload != null && Array.isArray(cachedVendorProductsPayload.products);
+  const initialVendorProductsPayload = useMemo(
+    () => peekVendorProductsAdminPage(vendorId, initialVendorPageParams),
+    [vendorId, initialVendorPageParams]
+  );
   const [products, setProducts] = useState<Product[]>(
-    () =>
-      (hasWarmVendorProductsCache ? cachedVendorProductsPayload?.products : undefined) || []
+    () => (initialVendorProductsPayload?.products as Product[]) ?? []
   );
-  const [loading, setLoading] = useState(() => !hasWarmVendorProductsCache);
+  const [loading, setLoading] = useState(() => !initialVendorProductsPayload);
+  const [listRefreshing, setListRefreshing] = useState(false);
+  const initialLoadDoneRef = useRef(!!initialVendorProductsPayload);
   const [searchQuery, setSearchQuery] = useState("");
+  const [committedSearchQuery, setCommittedSearchQuery] = useState("");
+  const [vendorListTotal, setVendorListTotal] = useState(
+    () => initialVendorProductsPayload?.total ?? 0
+  );
+  const [vendorStatusCounts, setVendorStatusCounts] = useState(() => ({
+    all: initialVendorProductsPayload?.counts?.all ?? 0,
+    active: initialVendorProductsPayload?.counts?.active ?? 0,
+    offShelf: initialVendorProductsPayload?.counts?.offShelf ?? 0,
+  }));
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "off-shelf">("all");
   const [sortBy, setSortBy] = useState("newest");
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
@@ -213,25 +236,73 @@ export function VendorAdminProductsCRUD({
   /** Vendor picker: filter saved catalog while typing; server load only after Enter. */
   const [pickerUiMode, setPickerUiMode] = useState<"cache" | "server">("cache");
   const [pickerCommittedSearch, setPickerCommittedSearch] = useState("");
+  const [pickerSelectingCatalog, setPickerSelectingCatalog] = useState(false);
   const pickerEnterFetchRef = useRef(false);
   const pickerServerSessionRef = useRef<VendorAssignPickerSession | null>(null);
+  /** Same-tab free-shipping toggles already patch local state + module cache — skip full reload. */
+  const skipFreeShippingReloadRef = useRef(false);
+
+  const loadVendorProductPage = useCallback(
+    async (forceRefresh = false, opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true;
+      const pageParams = {
+        page: vendorListPage,
+        pageSize: vendorListPageSize,
+        q: committedSearchQuery,
+        status: statusFilter,
+        sort: sortBy,
+      };
+      const hasCachedPage =
+        !forceRefresh &&
+        !!moduleCache.peek<VendorProductsAdminPagePayload>(
+          vendorProductsAdminPageCacheKey(vendorId, pageParams)
+        );
+      const tableOnlyRefresh = initialLoadDoneRef.current && !silent;
+      if (!silent && !initialLoadDoneRef.current) {
+        setLoading(true);
+      }
+      if (!silent) {
+        setListRefreshing(forceRefresh || (tableOnlyRefresh && !hasCachedPage));
+      }
+      try {
+        const payload = await getCachedVendorProductsAdminPage(vendorId, pageParams, forceRefresh);
+        setProducts((payload.products || []) as Product[]);
+        setVendorListTotal(payload.total);
+        if (payload.counts) {
+          setVendorStatusCounts({
+            all: payload.counts.all,
+            active: payload.counts.active,
+            offShelf: payload.counts.offShelf,
+          });
+        }
+      } catch (error) {
+        console.error("Error loading vendor products page:", error);
+        toast.error("Failed to load products");
+        setProducts([]);
+        setVendorListTotal(0);
+      } finally {
+        setListRefreshing(false);
+        if (!silent && !initialLoadDoneRef.current) {
+          setLoading(false);
+        }
+        if (!initialLoadDoneRef.current) {
+          initialLoadDoneRef.current = true;
+        }
+      }
+    },
+    [
+      vendorId,
+      vendorListPage,
+      vendorListPageSize,
+      committedSearchQuery,
+      statusFilter,
+      sortBy,
+    ]
+  );
 
   useEffect(() => {
-    loadProducts(false);
-  }, [vendorId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getCachedAdminAllProducts(false)
-      .then(() => {
-        if (cancelled) return;
-        setProducts((prev) => enrichVendorProductsWithPlatformCategories(prev));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [vendorId]);
+    void loadVendorProductPage(false);
+  }, [loadVendorProductPage]);
 
   // Realtime bridge: central product pulse invalidates vendor product pools without a broad KV subscription here.
   useEffect(() => {
@@ -240,7 +311,7 @@ export function VendorAdminProductsCRUD({
       window.clearTimeout(debounce);
       debounce = window.setTimeout(() => {
         invalidateVendorProductsAdminCache(vendorId);
-        void loadProducts(true);
+        void loadVendorProductPage(true, { silent: true });
       }, 320);
     };
     window.addEventListener(ADMIN_PRODUCTS_LIST_CHANGED_EVENT, schedule);
@@ -248,7 +319,7 @@ export function VendorAdminProductsCRUD({
       window.clearTimeout(debounce);
       window.removeEventListener(ADMIN_PRODUCTS_LIST_CHANGED_EVENT, schedule);
     };
-  }, [vendorId]);
+  }, [vendorId, loadVendorProductPage]);
 
   useEffect(() => {
     if (headerSearchQuery === undefined) return;
@@ -263,6 +334,17 @@ export function VendorAdminProductsCRUD({
     [onHeaderSearchQueryChange]
   );
 
+  const commitVendorProductSearch = useCallback(() => {
+    setCommittedSearchQuery(searchQuery.trim());
+    setVendorListPage(1);
+  }, [searchQuery]);
+
+  const onVendorSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    commitVendorProductSearch();
+  };
+
   const loadVendorCategoryLabels = useCallback(
     async (forceRefresh = false) => {
       try {
@@ -272,7 +354,7 @@ export function VendorAdminProductsCRUD({
             () => fetchVendorCategories(vendorId),
             forceRefresh,
           ),
-          fetchVendorCategoriesAdminDetails(vendorId).catch(() => []),
+          getCachedVendorCategoriesAdminDetails(vendorId, forceRefresh).catch(() => []),
         ]);
         setVendorCategoryByProductId(buildVendorProductCategoryLabels(categories));
         setVendorCategories(mapCategoryFreeShippingRows(adminCategories));
@@ -296,45 +378,33 @@ export function VendorAdminProductsCRUD({
     [vendorCategoryByProductId, t],
   );
 
-  const loadProducts = async (forceRefresh = false) => {
-    void loadVendorCategoryLabels(forceRefresh);
+  useEffect(() => {
+    void loadVendorCategoryLabels(false);
+  }, [vendorId, loadVendorCategoryLabels]);
 
-    if (!forceRefresh) {
-      const cached = moduleCache.peek<{ products?: Product[] }>(
-        CACHE_KEYS.vendorProductsAdmin(vendorId)
-      );
-      if (cached != null && Array.isArray(cached.products)) {
-        setProducts(enrichVendorProductsWithPlatformCategories(cached.products));
-        setLoading(false);
-        return;
-      }
-    }
+  useEffect(() => {
+    setVendorListPage(1);
+  }, [committedSearchQuery, statusFilter, sortBy, vendorListPageSize]);
 
-    // Keep current rows visible when revisiting; only show skeleton on true cold starts.
-    if (products.length === 0) {
-      setLoading(true);
-    }
-    try {
-      const data = await getCachedVendorProductsAdmin(vendorId, forceRefresh);
-      setProducts(enrichVendorProductsWithPlatformCategories(data.products || []));
-    } catch (error) {
-      console.error("Error loading products:", error);
-      toast.error("Failed to load products");
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    const tp = Math.max(1, Math.ceil(vendorListTotal / vendorListPageSize) || 1);
+    setVendorListPage((p) => Math.min(p, tp));
+  }, [vendorListTotal, vendorListPageSize]);
 
   useEffect(() => {
     const onFreeShippingChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ vendorId?: string }>).detail;
       if (detail?.vendorId && detail.vendorId !== vendorId) return;
-      void loadProducts(true);
+      if (skipFreeShippingReloadRef.current) {
+        skipFreeShippingReloadRef.current = false;
+        return;
+      }
+      void loadVendorProductPage(true, { silent: true });
       void loadVendorCategoryLabels(true);
     };
     window.addEventListener(VENDOR_FREE_SHIPPING_CHANGED_EVENT, onFreeShippingChanged);
     return () => window.removeEventListener(VENDOR_FREE_SHIPPING_CHANGED_EVENT, onFreeShippingChanged);
-  }, [vendorId, loadVendorCategoryLabels]);
+  }, [vendorId, loadVendorCategoryLabels, loadVendorProductPage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -386,14 +456,11 @@ export function VendorAdminProductsCRUD({
       if (!res.ok) {
         throw new Error(typeof data?.error === "string" ? data.error : "Failed to update free shipping");
       }
-      setProducts((prev) => {
-        const updatedProducts = prev.map((row) =>
-          row.id === product.id ? { ...row, freeShipping: next } : row
-        );
-        setVendorCategories((categories) => syncCategoryFreeShippingCounts(categories, updatedProducts));
-        return updatedProducts;
-      });
-      invalidateVendorProductsAdminCache(vendorId);
+      setProducts((prev) =>
+        prev.map((row) => (row.id === product.id ? { ...row, freeShipping: next } : row))
+      );
+      void loadVendorCategoryLabels(false);
+      skipFreeShippingReloadRef.current = true;
       notifyVendorFreeShippingChanged(vendorId);
       invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendorId, [
         vendorStoreSlug,
@@ -457,21 +524,20 @@ export function VendorAdminProductsCRUD({
       const updatedCount = Number(data.updatedCount ?? total);
       const enabledCount = Number(data.freeShippingEnabledCount ?? (next ? updatedCount : 0));
       const affectedIds = new Set(category.productIds);
-      setVendorCategories((prev) =>
-        prev.map((cat) =>
-          cat.id === category.id
-            ? {
-                ...cat,
-                freeShippingEnabledCount: enabledCount,
-                freeShippingTotalCount: Number(data.freeShippingTotalCount ?? total),
-              }
-            : cat
-        )
+      const nextVendorCategories = vendorCategories.map((cat) =>
+        cat.id === category.id
+          ? {
+              ...cat,
+              freeShippingEnabledCount: enabledCount,
+              freeShippingTotalCount: Number(data.freeShippingTotalCount ?? total),
+            }
+          : cat
       );
+      setVendorCategories(nextVendorCategories);
       setProducts((prev) =>
         prev.map((row) => (affectedIds.has(row.id) ? { ...row, freeShipping: next } : row))
       );
-      invalidateVendorProductsAdminCache(vendorId);
+      skipFreeShippingReloadRef.current = true;
       notifyVendorFreeShippingChanged(vendorId);
       invalidateVendorStorefrontCatalogCachesAfterProductLinkChange(vendorId, [
         vendorStoreSlug,
@@ -487,8 +553,6 @@ export function VendorAdminProductsCRUD({
           next ? t("categories.freeShippingEnabledForCategory") : t("categories.freeShippingDisabledForCategory")
         );
       }
-      void loadProducts(true);
-      void loadVendorCategoryLabels(true);
     } catch (error) {
       console.error("Failed to toggle category free shipping:", error);
       toast.error(error instanceof Error ? error.message : t("categories.freeShippingUpdateFailed"));
@@ -753,6 +817,7 @@ export function VendorAdminProductsCRUD({
     pickerEnterFetchRef.current = false;
     setPickerSelectedIds([]);
     setPickerAssignedUncheckedIds([]);
+    setPickerSelectingCatalog(false);
     setSearchProductQuery("");
     setPickerCommittedSearch("");
     setPickerUiMode(hasFullCatalogCache ? "cache" : "server");
@@ -762,13 +827,17 @@ export function VendorAdminProductsCRUD({
     setShowProductSelectModal(true);
   };
 
-  const handlePickerSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
+  const commitPickerSearch = useCallback(() => {
     pickerEnterFetchRef.current = true;
     setPickerUiMode("server");
     setPickerCommittedSearch(searchProductQuery.trim());
     setAssignPickerPage(1);
+  }, [searchProductQuery]);
+
+  const handlePickerSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    commitPickerSearch();
   };
 
   const togglePickerCatalogRow = useCallback(
@@ -786,6 +855,90 @@ export function VendorAdminProductsCRUD({
       );
     },
     [isProductAssignedToThisVendor]
+  );
+
+  const applyPickerRowsChecked = useCallback(
+    (rows: any[], checked: boolean) => {
+      const unassignedIds: string[] = [];
+      const assignedIds: string[] = [];
+      for (const product of rows) {
+        const id = String(product?.id ?? "");
+        if (!id) continue;
+        if (isProductAssignedToThisVendor(product)) assignedIds.push(id);
+        else unassignedIds.push(id);
+      }
+      const assignedSet = new Set(assignedIds);
+      const unassignedSet = new Set(unassignedIds);
+      if (checked) {
+        setPickerSelectedIds((prev) => Array.from(new Set([...prev, ...unassignedIds])));
+        setPickerAssignedUncheckedIds((prev) => prev.filter((id) => !assignedSet.has(id)));
+      } else {
+        setPickerSelectedIds((prev) => prev.filter((id) => !unassignedSet.has(id)));
+        setPickerAssignedUncheckedIds((prev) => Array.from(new Set([...prev, ...assignedIds])));
+      }
+    },
+    [isProductAssignedToThisVendor]
+  );
+
+  const peekPickerCatalogRows = useCallback((): any[] => {
+    const q = searchProductQuery.trim();
+    if (assignPickerUseFullCache) return pickerAssignableFromFullCache;
+    const full = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+    if (!full?.length) return [];
+    return full.filter((p) => productMatchesAdminLiveSearch(p, q));
+  }, [assignPickerUseFullCache, pickerAssignableFromFullCache, searchProductQuery]);
+
+  const pickerCatalogSelectableCount = peekPickerCatalogRows().length || assignPickerFooterProductCount;
+
+  const pickerCatalogCheckState = useMemo(() => {
+    const rows = peekPickerCatalogRows();
+    if (rows.length === 0) return false;
+    const selectedSet = new Set(pickerSelectedIds);
+    const uncheckedSet = new Set(pickerAssignedUncheckedIds);
+    return rows.every((product) => {
+      const id = String(product?.id ?? "");
+      if (!id) return false;
+      return isProductAssignedToThisVendor(product)
+        ? !uncheckedSet.has(id)
+        : selectedSet.has(id);
+    });
+  }, [
+    peekPickerCatalogRows,
+    pickerSelectedIds,
+    pickerAssignedUncheckedIds,
+    isProductAssignedToThisVendor,
+  ]);
+
+  const handleToggleSelectEntireCatalog = useCallback(
+    async (checked: boolean) => {
+      const cachedFull = moduleCache.peek<any[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+      if (cachedFull?.length) {
+        applyPickerRowsChecked(peekPickerCatalogRows(), checked);
+        return;
+      }
+
+      setPickerSelectingCatalog(true);
+      try {
+        const full = await getCachedAdminAllProducts(false);
+        const q = searchProductQuery.trim();
+        const rows = Array.isArray(full)
+          ? full.filter((p) => productMatchesAdminLiveSearch(p, q))
+          : [];
+        if (rows.length === 0) {
+          toast.error(t("products.catalogSelectionFailed"));
+          return;
+        }
+        applyPickerRowsChecked(rows, checked);
+        setPickerUiMode("cache");
+        setAssignPickerUseFullCache(true);
+      } catch (error) {
+        console.error("Select entire catalog failed", error);
+        toast.error(t("products.catalogSelectionFailed"));
+      } finally {
+        setPickerSelectingCatalog(false);
+      }
+    },
+    [applyPickerRowsChecked, peekPickerCatalogRows, searchProductQuery, t]
   );
 
   const handleSavePickerProducts = async () => {
@@ -851,7 +1004,7 @@ export function VendorAdminProductsCRUD({
         vendorStoreSlug,
         routeStoreName,
       ]);
-      await loadProducts(true);
+      await loadVendorProductPage(true);
     } catch (error) {
       console.error("Error applying product picker changes:", error);
       toast.error(error instanceof Error ? error.message : "Failed to apply changes");
@@ -885,46 +1038,10 @@ export function VendorAdminProductsCRUD({
     );
   };
 
-  const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
-      const matchesSearch = productMatchesAdminLiveSearch(product, searchQuery);
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "active" &&
-          (product.status === "active" || product.status === "Active")) ||
-      (statusFilter === "off-shelf" && product.status === "off-shelf");
-    return matchesSearch && matchesStatus;
-  });
-  }, [products, searchQuery, statusFilter]);
-
-  const sortedProducts = useMemo(() => {
-    return [...filteredProducts].sort((a, b) => {
-    if (sortBy === "newest") {
-      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-      }
-      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
-    });
-  }, [filteredProducts, sortBy]);
-
-  useEffect(() => {
-    setVendorListPage(1);
-  }, [searchQuery, statusFilter, sortBy]);
-
-  useEffect(() => {
-    const tp = Math.max(1, Math.ceil(sortedProducts.length / vendorListPageSize) || 1);
-    setVendorListPage((p) => Math.min(p, tp));
-  }, [sortedProducts.length, vendorListPageSize]);
-
-  const pagedSortedProducts = useMemo(() => {
-    const start = (vendorListPage - 1) * vendorListPageSize;
-    return sortedProducts.slice(start, start + vendorListPageSize);
-  }, [sortedProducts, vendorListPage, vendorListPageSize]);
-
-  // Get status counts
   const getStatusCount = (status: "all" | "active" | "off-shelf") => {
-    if (status === "all") return products.length;
-    if (status === "active") return products.filter(p => p.status === "active" || p.status === "Active").length;
-    if (status === "off-shelf") return products.filter(p => p.status === "off-shelf").length;
+    if (status === "all") return vendorStatusCounts.all;
+    if (status === "active") return vendorStatusCounts.active;
+    if (status === "off-shelf") return vendorStatusCounts.offShelf;
     return 0;
   };
 
@@ -937,7 +1054,7 @@ export function VendorAdminProductsCRUD({
     );
   };
 
-  const pageProductIds = pagedSortedProducts.map((p) => p.id);
+  const pageProductIds = products.map((p) => p.id);
 
   const toggleSelectAll = () => {
     if (pageProductIds.length > 0 && pageProductIds.every((id) => selectedProducts.includes(id))) {
@@ -995,7 +1112,7 @@ export function VendorAdminProductsCRUD({
         vendorStoreSlug,
         routeStoreName,
       ]);
-      await loadProducts(true);
+      await loadVendorProductPage(true);
     } catch (error) {
       console.error("Error removing products from store:", error);
       toast.error(error instanceof Error ? error.message : "Failed to remove products from store");
@@ -1004,64 +1121,19 @@ export function VendorAdminProductsCRUD({
     }
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <Skeleton className="h-10 w-48 mb-2" />
-            <Skeleton className="h-5 w-64" />
-          </div>
-          <Skeleton className="h-10 w-52" />
-        </div>
+  const showProductsTableSkeleton = loading && products.length === 0;
+  const showProductsEmpty =
+    !showProductsTableSkeleton && vendorListTotal === 0 && !listRefreshing;
 
-        <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4">
-          <Skeleton className="h-10 flex-1 min-w-[280px]" />
-          <Skeleton className="h-10 w-80" />
-          <Skeleton className="h-10 w-[180px]" />
-        </div>
-
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-4" /></th>
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-20" /></th>
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-16" /></th>
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-20" /></th>
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-20" /></th>
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-16" /></th>
-                  <th className="py-3 px-4"><Skeleton className="h-4 w-16" /></th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...Array(5)].map((_, i) => (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td className="py-3 px-4"><Skeleton className="h-4 w-4" /></td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-3">
-                        <Skeleton className="h-12 w-12 rounded-lg" />
-                        <div className="space-y-2">
-                          <Skeleton className="h-4 w-32" />
-                          <Skeleton className="h-3 w-24" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4"><Skeleton className="h-6 w-16" /></td>
-                    <td className="py-3 px-4"><Skeleton className="h-4 w-12" /></td>
-                    <td className="py-3 px-4"><Skeleton className="h-4 w-24" /></td>
-                    <td className="py-3 px-4"><Skeleton className="h-4 w-20" /></td>
-                    <td className="py-3 px-4"><Skeleton className="h-8 w-8" /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  const productTableTotalBadge =
+    vendorStatusCounts.all > 0 ? (
+      <span
+        className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-green-600 px-1.5 text-[10px] font-semibold leading-none text-white ring-2 ring-slate-50 tabular-nums"
+        title={`${vendorStatusCounts.all} ${t("products.total")}`}
+      >
+        {vendorStatusCounts.all}
+      </span>
+    ) : null;
 
   return (
     <div className="space-y-6">
@@ -1071,31 +1143,35 @@ export function VendorAdminProductsCRUD({
           <h1 className="text-3xl font-bold text-slate-900">{t("products.title")}</h1>
           <p className="text-slate-500 mt-1">{t("products.subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleOpenSelectProduct}
-            className="bg-slate-100 border-slate-300 text-slate-900 hover:bg-slate-200"
-          >
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleOpenSelectProduct}
+          className="bg-slate-100 border-slate-300 text-slate-900 hover:bg-slate-200"
+        >
           <Plus className="w-4 h-4 mr-2" />
-            {t("products.selectProduct")}
+          {t("products.selectProduct")}
         </Button>
-          <Badge variant="secondary">{products.length} {t("products.total")}</Badge>
-        </div>
       </div>
 
       {/* Search + Filters Bar */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4">
         {/* Search */}
-        <div className="flex-1 relative min-w-[280px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <Input
+        <div className="flex-1 min-w-[280px] max-w-xl">
+          <AdminClearableSearchInput
             placeholder={t("products.searchPlaceholder")}
-            className="pl-10"
             value={searchQuery}
-            onChange={(e) => handleSearchInputChange(e.target.value)}
+            onValueChange={handleSearchInputChange}
+            onKeyDown={onVendorSearchKeyDown}
+            onClear={() => {
+              handleSearchInputChange("");
+              setCommittedSearchQuery("");
+              setVendorListPage(1);
+            }}
+            onSubmit={commitVendorProductSearch}
+            submitDisabled={listRefreshing || !searchQuery.trim()}
+            submitPending={searchQuery.trim() !== committedSearchQuery.trim()}
           />
         </div>
         
@@ -1202,7 +1278,46 @@ export function VendorAdminProductsCRUD({
       )}
 
       {/* Products Table */}
-      {sortedProducts.length === 0 ? (
+      {showProductsTableSkeleton ? (
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-4" /></th>
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-20" /></th>
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-16" /></th>
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-20" /></th>
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-20" /></th>
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-16" /></th>
+                  <th className="py-3 px-4"><Skeleton className="h-4 w-16" /></th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...Array(8)].map((_, i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="py-3 px-4"><Skeleton className="h-4 w-4" /></td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="h-12 w-12 rounded-lg" />
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-3 w-24" />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4"><Skeleton className="h-6 w-16" /></td>
+                    <td className="py-3 px-4"><Skeleton className="h-4 w-12" /></td>
+                    <td className="py-3 px-4"><Skeleton className="h-4 w-24" /></td>
+                    <td className="py-3 px-4"><Skeleton className="h-4 w-20" /></td>
+                    <td className="py-3 px-4"><Skeleton className="h-8 w-8" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : showProductsEmpty ? (
         <Card className="p-12 text-center border-slate-200">
           <Package className="w-16 h-16 text-slate-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-slate-900 mb-2">
@@ -1225,7 +1340,7 @@ export function VendorAdminProductsCRUD({
           )}
         </Card>
       ) : (
-        <Card>
+        <Card className={listRefreshing ? "opacity-80 pointer-events-none" : undefined}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -1239,7 +1354,12 @@ export function VendorAdminProductsCRUD({
                       onCheckedChange={toggleSelectAll}
                     />
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.product")}</th>
+                  <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">
+                    <span className="inline-flex items-center gap-2">
+                      {t("products.product")}
+                      {productTableTotalBadge}
+                    </span>
+                  </th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.status")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.inventory")}</th>
                   <th className="text-left py-3 px-4 font-medium text-slate-600 text-sm">{t("products.category")}</th>
@@ -1253,7 +1373,7 @@ export function VendorAdminProductsCRUD({
                 </tr>
               </thead>
               <tbody>
-                {pagedSortedProducts.map((product) => (
+                {products.map((product) => (
                   <tr key={product.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="py-3 px-4">
                       <Checkbox
@@ -1340,16 +1460,16 @@ export function VendorAdminProductsCRUD({
               </tbody>
             </table>
           </div>
-          {sortedProducts.length > 0 && (
+          {vendorListTotal > 0 && (
             <VendorAdminListingPagination
               variant="cardFooter"
               page={vendorListPage}
               pageSize={vendorListPageSize}
-              totalCount={sortedProducts.length}
+              totalCount={vendorListTotal}
               onPageChange={setVendorListPage}
               onPageSizeChange={setVendorListPageSize}
               itemLabel={t("products.title").toLowerCase()}
-              loading={loading}
+              loading={loading || listRefreshing}
             />
           )}
         </Card>
@@ -1395,6 +1515,7 @@ export function VendorAdminProductsCRUD({
           if (!open) {
             pickerServerSessionRef.current = null;
             setPickerAssignedUncheckedIds([]);
+            setPickerSelectingCatalog(false);
           }
         }}
       >
@@ -1406,27 +1527,58 @@ export function VendorAdminProductsCRUD({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input
-              type="text"
-              placeholder={t("products.searchCatalogPlaceholder")}
-              value={searchProductQuery}
-              onChange={(e) => {
-                const v = e.target.value;
-                setSearchProductQuery(v);
-                setAssignPickerPage(1);
-                const cached = moduleCache.peek<unknown[]>(CACHE_KEYS.ADMIN_PRODUCTS);
-                if (cached && Array.isArray(cached) && cached.length > 0) {
-                  setPickerUiMode("cache");
-                }
-              }}
-              onKeyDown={handlePickerSearchKeyDown}
-              className="pl-10"
-            />
-            <p className="text-xs text-slate-500 mt-2 pl-1">
+          <div className="space-y-3">
+            <div className="flex justify-center w-full">
+              <div className="w-full min-w-[280px] max-w-xl">
+                <AdminClearableSearchInput
+                  placeholder={t("products.searchCatalogPlaceholder")}
+                  value={searchProductQuery}
+                  onValueChange={(v) => {
+                    setSearchProductQuery(v);
+                    setAssignPickerPage(1);
+                    const cached = moduleCache.peek<unknown[]>(CACHE_KEYS.ADMIN_PRODUCTS);
+                    if (cached && Array.isArray(cached) && cached.length > 0) {
+                      setPickerUiMode("cache");
+                    }
+                  }}
+                  onKeyDown={handlePickerSearchKeyDown}
+                  onClear={() => {
+                    setSearchProductQuery("");
+                    setPickerCommittedSearch("");
+                    setAssignPickerPage(1);
+                  }}
+                  onSubmit={commitPickerSearch}
+                  submitDisabled={loadingAllProducts || !searchProductQuery.trim()}
+                  submitPending={
+                    searchProductQuery.trim() !== pickerCommittedSearch.trim()
+                  }
+                />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 text-center">
               {t("products.catalogSearchHint")}
             </p>
+            {!loadingAllProducts && !pickerShowEmpty ? (
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none pl-4">
+                <Checkbox
+                  checked={pickerCatalogCheckState}
+                  disabled={pickerSelectingCatalog}
+                  onCheckedChange={(checked) => {
+                    void handleToggleSelectEntireCatalog(checked === true);
+                  }}
+                  aria-label={t("products.selectEntireCatalog")}
+                  title={t("products.selectEntireCatalog")}
+                />
+                <span>
+                  {pickerSelectingCatalog
+                    ? t("products.loadingCatalogSelection")
+                    : t("products.selectEntireCatalogCount").replace(
+                        "{count}",
+                        String(pickerCatalogSelectableCount)
+                      )}
+                </span>
+              </label>
+            ) : null}
           </div>
 
           <div className="flex-1 overflow-y-auto min-h-0 scrollbar-dark">
@@ -1495,33 +1647,15 @@ export function VendorAdminProductsCRUD({
                         <Checkbox
                           checked={pickerEveryRowChecked}
                           onCheckedChange={(checked) => {
-                            const unassignedIds = displayPickerRows
-                              .filter((p) => !isProductAssignedToThisVendor(p))
-                              .map((p) => p.id);
-                            const assignedOnPageIds = displayPickerRows
-                              .filter((p) => isProductAssignedToThisVendor(p))
-                              .map((p) => p.id);
-                            const assignedSet = new Set(assignedOnPageIds);
-                            const unassignedSet = new Set(unassignedIds);
-                            if (checked) {
-                              setPickerSelectedIds((prev) =>
-                                Array.from(new Set([...prev, ...unassignedIds]))
-                              );
-                              setPickerAssignedUncheckedIds((prev) =>
-                                prev.filter((id) => !assignedSet.has(id))
-                              );
-                            } else {
-                              setPickerSelectedIds((prev) =>
-                                prev.filter((id) => !unassignedSet.has(id))
-                              );
-                              setPickerAssignedUncheckedIds((prev) =>
-                                Array.from(new Set([...prev, ...assignedOnPageIds]))
-                              );
-                            }
+                            applyPickerRowsChecked(displayPickerRows, checked === true);
                           }}
+                          aria-label={t("products.selectThisPage")}
+                          title={t("products.selectThisPage")}
                         />
                       </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.product")}</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
+                        {t("products.product")}
+                      </th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">SKU</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.category")}</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">{t("products.price")}</th>

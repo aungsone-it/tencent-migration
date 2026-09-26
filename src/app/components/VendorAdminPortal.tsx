@@ -57,6 +57,10 @@ import { useVendorAuth, type VendorUser } from "../contexts/VendorAuthContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { ADMIN_NOTIFICATIONS_UPDATED_EVENT, normalizeAdminInboxNotification, type AdminInboxNotification } from "../utils/adminNotificationsRealtime";
 import { adminOrdersUpdatedStorageKey, readAdminOrdersUpdatedStorageEvent } from "../utils/adminOrdersRealtime";
+import {
+  ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
+  getCachedVendorProductsAdminPage,
+} from "../utils/module-cache";
 
 interface Vendor {
   id: string;
@@ -455,6 +459,21 @@ export function VendorAdminPortal({ vendor, onLogout, onPreviewStore }: VendorAd
   useEffect(() => {
     setMountedPages((prev) => (prev.includes(currentPage) ? prev : [...prev, currentPage]));
   }, [currentPage]);
+
+  useEffect(() => {
+    if (currentPage !== "products") return;
+    void getCachedVendorProductsAdminPage(
+      vendor.id,
+      {
+        page: 1,
+        pageSize: ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
+        q: "",
+        status: "all",
+        sort: "newest",
+      },
+      false
+    );
+  }, [currentPage, vendor.id]);
 
   useEffect(() => {
     if (currentPage !== "subscription-plans" && currentPage !== "subscription-subscribers") return;

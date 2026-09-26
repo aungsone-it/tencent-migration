@@ -256,6 +256,16 @@ export function lsAdminProductsPage1Key(opts: {
   return `migoo-ls-admin-p1-ps-${ps}-t-${encodeURIComponent(opts.tab)}-st-${encodeURIComponent(opts.status)}-s-${encodeURIComponent(opts.sort)}-v-${encodeURIComponent(opts.vendor || "_")}-c-${encodeURIComponent(opts.collaborator || "_")}-q-${encodeURIComponent(opts.qNorm || "_")}-ev-${ev}-v2`;
 }
 
+/** Vendor admin All Products grid — page 1 (`GET vendor/products-admin/:id?adminList=1&page=1`). */
+export function lsVendorProductsAdminPage1Key(
+  vendorId: string,
+  opts: { pageSize: number; status: string; sort: string; qNorm: string }
+): string {
+  const ps = Math.min(100, Math.max(1, opts.pageSize));
+  const vid = encodeURIComponent(String(vendorId || "").trim());
+  return `migoo-ls-vendor-admin-p1-${vid}-ps-${ps}-st-${encodeURIComponent(opts.status)}-s-${encodeURIComponent(opts.sort)}-q-${encodeURIComponent(opts.qNorm || "_")}-v1`;
+}
+
 /** Super Admin orders table — page 1 body (`GET orders?page=1`). */
 export function lsAdminOrdersPage1Key(opts: {
   pageSize: number;

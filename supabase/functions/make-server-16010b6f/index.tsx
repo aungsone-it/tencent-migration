@@ -3816,7 +3816,6 @@ function mapPlatformProductToListRow(product: any) {
     salesVolume: product.salesVolume || 0,
     createDate: product.createDate || product.createdAt,
     image: product.images?.[0] || product.image || null,
-    images: product.images?.[0] ? [product.images[0]] : [],
     description: product.description || "",
     hasVariants: product.hasVariants || false,
     variantOptions: product.variantOptions || [],
@@ -3824,6 +3823,58 @@ function mapPlatformProductToListRow(product: any) {
     vendorId: product.vendorId,
     commissionRate: product.commissionRate || 0,
     selectedVendors: product.selectedVendors || [],
+    createdAt: product.createdAt || product.createDate,
+    vendorFreeShipping: product.vendorFreeShipping,
+    images: Array.isArray(product.images)
+      ? product.images
+      : product.image
+        ? [product.image]
+        : [],
+  };
+}
+
+function mapVendorAdminProductFromListRow(
+  p: any,
+  actualVendorId: string,
+  categoryByProductId: Map<string, string>,
+  vendorFreeShippingEnabled: boolean,
+  vendorTokens: Set<string>
+) {
+  const id = String(p?.id ?? "").trim();
+  return {
+    id: p.id,
+    name: p.name || p.title,
+    sku: p.sku,
+    price: parseFloat(String(p.price ?? "").replace(/[$,]/g, "")) || 0,
+    compareAtPrice: p.compareAtPrice
+      ? parseFloat(String(p.compareAtPrice).replace(/[$,]/g, ""))
+      : undefined,
+    costPerItem: p.costPerItem
+      ? parseFloat(String(p.costPerItem).replace(/[$,]/g, ""))
+      : undefined,
+    description: p.description || "",
+    images: Array.isArray(p.images) ? p.images : p.image ? [p.image] : [],
+    category: categoryByProductId.get(id) || String(p.category || "").trim() || "",
+    inventory: p.inventory ?? p.stock ?? 0,
+    status: p.status || "Active",
+    hasVariants: p.hasVariants || false,
+    variants: p.variants || [],
+    variantOptions: p.variantOptions || [],
+    tags: p.tags || [],
+    productType: p.productType || "",
+    weight: p.weight || "",
+    barcode: p.barcode || "",
+    trackQuantity: p.trackQuantity !== undefined ? p.trackQuantity : true,
+    continueSellingOutOfStock: p.continueSellingOutOfStock || false,
+    createdAt: p.createdAt || p.createDate,
+    updatedAt: p.updatedAt,
+    commissionRate: p.commissionRate || 0,
+    freeShipping: resolveProductFreeShippingForVendor(
+      p,
+      actualVendorId,
+      vendorFreeShippingEnabled,
+      vendorTokens
+    ),
   };
 }
 
@@ -13843,11 +13894,8 @@ app.get("/make-server-16010b6f/vendor/products/:vendorId", async (c) => {
       });
     }
 
-    const allProducts = await withRetry(
-      () => withTimeout(kv.getByPrefix("product:"), 25000),
-      3,
-      1000
-    );
+    const listResp = await ensureProductsListResponse();
+    const allProducts = Array.isArray(listResp.products) ? listResp.products : [];
 
     const vendorMatches = (p: any) => {
       if (!p) return false;
@@ -13994,85 +14042,88 @@ app.get("/make-server-16010b6f/vendor/products-admin/:vendorId", async (c) => {
     ]);
     console.log(`🏢 Vendor current name: "${vendorBusinessName}"`);
 
-    // Get all products from KV store with correct prefix and retry logic
-    const [allProducts, categoryByProductId] = await Promise.all([
-      withRetry(
-        () => withTimeout(kv.getByPrefix("product:"), 30000),
-        5,
-        1500
-      ),
+    /** Reuse cached platform list (same path as super-admin grid) — avoids full KV `product:` scan. */
+    const [listResp, categoryByProductId] = await Promise.all([
+      ensureProductsListResponse(),
       buildVendorProductCategoryNameMap(actualVendorId),
     ]);
-    
-    console.log(`📦 Total products in database: ${allProducts.length}`);
-    console.log(`📋 All products vendor fields:`, allProducts.map((p: any) => ({ 
-      sku: p.sku, 
-      vendor: p.vendor, 
-      vendorId: p.vendorId,
-      selectedVendors: p.selectedVendors 
-    })));
-    
-    // Filter products by vendor only (show ALL statuses for admin)
-    const vendorProducts = allProducts
-      .filter((p: any) => {
-        if (!p) return false;
-        
-        // 🔥 Support multi-vendor products with selectedVendors array (by ID OR name)
-        let vendorMatch = false;
-        
-        if (Array.isArray(p.selectedVendors)) {
-          // Check if vendor is in selectedVendors array (by ID or current/old name)
-          vendorMatch = p.selectedVendors.some((v: string) =>
-            vendorTokens.has(String(v || "").trim()) ||
-            vendorTokens.has(String(v || "").trim().toLowerCase())
-          );
-        } else {
-          // Legacy: Support old single vendor field format (vendor field could be ID or name)
-          vendorMatch =
-            vendorTokens.has(String(p.vendor || "").trim()) ||
-            vendorTokens.has(String(p.vendor || "").trim().toLowerCase()) ||
-            vendorTokens.has(String(p.vendorId || "").trim()) ||
-            vendorTokens.has(String(p.vendorId || "").trim().toLowerCase());
-        }
 
-        console.log('📦 Product:', p.sku, 'selectedVendors:', p.selectedVendors, 'Looking for vendor:', actualVendorId, 'Match:', vendorMatch);
-        
-        return vendorMatch;
-      })
-      .map((p: any) => ({
-        id: p.id,
-        name: p.name || p.title,
-        sku: p.sku,
-        price: parseFloat(String(p.price).replace(/[$,]/g, '')),
-        compareAtPrice: p.compareAtPrice ? parseFloat(String(p.compareAtPrice).replace(/[$,]/g, '')) : undefined,
-        costPerItem: p.costPerItem ? parseFloat(String(p.costPerItem).replace(/[$,]/g, '')) : undefined,
-        description: p.description || "",
-        images: p.images || [],
-        category:
-          categoryByProductId.get(String(p.id || "").trim()) ||
-          String(p.category || "").trim() ||
-          "",
-        inventory: p.inventory || 0,
-        status: p.status || "Active",
-        hasVariants: p.hasVariants || false,
-        variants: p.variants || [],
-        variantOptions: p.variantOptions || [],
-        tags: p.tags || [],
-        productType: p.productType || "",
-        weight: p.weight || "",
-        barcode: p.barcode || "",
-        trackQuantity: p.trackQuantity !== undefined ? p.trackQuantity : true,
-        continueSellingOutOfStock: p.continueSellingOutOfStock || false,
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-        commissionRate: p.commissionRate || 0, // 🔥 Include commission rate
-        freeShipping: resolveProductFreeShippingForVendor(
+    const vendorProducts = (listResp.products || [])
+      .filter((p: any) => productBelongsToVendor(p, vendorTokens))
+      .map((p: any) =>
+        mapVendorAdminProductFromListRow(
           p,
           actualVendorId,
+          categoryByProductId,
           vendorFreeShippingEnabled,
           vendorTokens
-        ),
-      }));
+        )
+      );
+
+    const adminList = c.req.query("adminList") === "1";
+    if (adminList) {
+      const page = Math.max(1, parseInt(c.req.query("page") || "1", 10) || 1);
+      const pageSize = Math.min(
+        100,
+        Math.max(1, parseInt(c.req.query("pageSize") || "20", 10) || 20)
+      );
+      const qRaw = (c.req.query("q") || "").trim();
+      const status = (c.req.query("status") || "all").toLowerCase();
+      let sort = (c.req.query("sort") || "newest").toLowerCase();
+
+      const vendorAdminMatchesSearch = (p: any, qq: string) => {
+        if (!qq) return true;
+        const q = qq.toLowerCase();
+        const name = String(p.name ?? "").toLowerCase();
+        const sku = String(p.sku ?? "").toLowerCase();
+        const id = String(p.id ?? "").toLowerCase();
+        const cat = String(p.category ?? "").toLowerCase();
+        return name.includes(q) || sku.includes(q) || id.includes(q) || cat.includes(q);
+      };
+
+      const counts = {
+        all: vendorProducts.length,
+        active: vendorProducts.filter(
+          (p: any) => String(p.status || "active").toLowerCase() === "active"
+        ).length,
+        offShelf: vendorProducts.filter(
+          (p: any) => String(p.status || "").toLowerCase() === "off-shelf"
+        ).length,
+      };
+
+      let filtered = vendorProducts.filter((p: any) => vendorAdminMatchesSearch(p, qRaw));
+      if (status !== "all") {
+        filtered = filtered.filter(
+          (p: any) => String(p.status || "active").toLowerCase() === status
+        );
+      }
+
+      let sorted: any[];
+      if (sort === "oldest") {
+        sorted = [...filtered].sort(
+          (a, b) =>
+            new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+        );
+      } else {
+        sorted = [...filtered].sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+      }
+
+      const total = sorted.length;
+      const slice = sorted.slice((page - 1) * pageSize, page * pageSize);
+
+      return c.json({
+        adminList: true,
+        products: slice,
+        total,
+        page,
+        pageSize,
+        hasMore: page * pageSize < total,
+        counts,
+      });
+    }
 
     console.log(`✅ Found ${vendorProducts.length} products (all statuses) for vendor ${actualVendorId}`);
     return c.json({ products: vendorProducts });

@@ -1,52 +1,47 @@
-import { useState, useEffect, useMemo, type ReactNode } from "react";
-import {
-  Package,
-  DollarSign,
-  Users,
-  ShoppingCart,
-  TrendingUp,
-  ChevronDown,
-  ArrowUpRight,
-  ArrowDownRight,
-} from "lucide-react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { Package, DollarSign, Users, ShoppingCart, TrendingUp, Calendar } from "lucide-react";
+import { format } from "date-fns";
+import type { DateRange } from "react-day-picker";
+import { StatCard } from "../StatCard";
+import { AdminMmkAmount } from "../AdminMmkAmount";
 import { Card } from "../ui/card";
+import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
+import { AdminDateRangeFilterPopover } from "../AdminDateRangeFilterPopover";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
-import {
-  LineChart,
+  ComposedChart,
+  Area,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   Legend,
+  ResponsiveContainer,
 } from "recharts";
 import {
+  encodeAdminDashboardDateFilter,
   getCachedVendorProductsAdmin,
+  getCachedVendorProductsAdminPage,
   getCachedVendorOrders,
   moduleCache,
   CACHE_KEYS,
+  vendorProductsAdminPageCacheKey,
+  ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
 } from "../../utils/module-cache";
 import {
-  daysForVendorDashboardLabel,
-  filterOrdersInRollingWindow,
-  filterOrdersInPriorWindow,
-  pctChangePriorWindow,
   vendorOrderDisplayTotal,
   isVendorOrderActive,
-  isVendorOrderFinanciallyAccrued,
+  pctChangePriorWindow,
   uniqueCustomerEmails,
-  countActiveOrders,
   topProductsFromOrders,
   recentOrdersFromList,
-  buildMonthlySeries,
+  buildVendorSalesTrend,
+  filterOrdersForDashboardPeriod,
+  filterOrdersForDashboardComparePeriod,
   countProductsLikelyAddedInWindow,
+  vendorDashboardDateRange,
   type TopProductRow,
   type RecentOrderRow,
 } from "../../utils/vendorAdminAnalytics";
@@ -63,37 +58,29 @@ interface DashboardStats {
   productsChange: number;
 }
 
-type DateFilterKey = "revenue" | "orders" | "customers" | "products";
-
-const defaultVendorDashboardStats: DashboardStats = {
-  totalProducts: 0,
-  totalOrders: 0,
-  totalRevenue: 0,
-  totalCustomers: 0,
-  revenueChange: 0,
-  ordersChange: 0,
-  customersChange: 0,
-  productsChange: 0,
-};
-
 interface VendorAdminDashboardProps {
   vendorId: string;
   vendorName: string;
   onNavigate: (page: string) => void;
-  /** Reserved for header/store actions from parent; analytics view does not use it yet. */
   onPreviewStore?: (vendorId: string, storeSlug: string) => void;
 }
 
-function peekCachedVendorDashboardData(vendorId: string): { products: any[]; orders: any[] } | null {
-  const pPeek = moduleCache.peek<{ products?: any[] }>(CACHE_KEYS.vendorProductsAdmin(vendorId));
+function peekCachedVendorDashboardData(vendorId: string): { orders: any[]; productTotal: number } | null {
   const oPeek = moduleCache.peek<any[]>(CACHE_KEYS.vendorOrders(vendorId));
-  if (
-    pPeek != null &&
-    Array.isArray(pPeek.products) &&
-    oPeek != null &&
-    Array.isArray(oPeek)
-  ) {
-    return { products: pPeek.products || [], orders: oPeek };
+  const pPage = moduleCache.peek<{ total?: number }>(
+    vendorProductsAdminPageCacheKey(vendorId, {
+      page: 1,
+      pageSize: ADMIN_PRODUCTS_INITIAL_PAGE_SIZE,
+      q: "",
+      status: "all",
+      sort: "newest",
+    })
+  );
+  if (oPeek != null && Array.isArray(oPeek)) {
+    return {
+      orders: oPeek,
+      productTotal: typeof pPage?.total === "number" ? pPage.total : 0,
+    };
   }
   return null;
 }
@@ -108,90 +95,109 @@ export function VendorAdminDashboard({
   onNavigate,
 }: VendorAdminDashboardProps) {
   const { t } = useLanguage();
-  const tr = (key: string, values: Record<string, string | number> = {}) =>
-    Object.entries(values).reduce(
-      (text, [name, value]) => text.replace(`{${name}}`, String(value)),
-      t(key)
-    );
-  const dateLabel = (value: string) => {
-    if (value === "Last 7 days") return t("vendorAdmin.dashboard.last7");
-    if (value === "Last 90 days") return t("vendorAdmin.dashboard.last90");
-    if (value === "Last year") return t("vendorAdmin.dashboard.lastYear");
-    return t("vendorAdmin.dashboard.last30");
-  };
   const cachedInit = peekCachedVendorDashboardData(vendorId);
   const [rawOrders, setRawOrders] = useState<any[]>(() => cachedInit?.orders ?? []);
-  const [rawProducts, setRawProducts] = useState<any[]>(() => cachedInit?.products ?? []);
+  const [productTotal, setProductTotal] = useState(() => cachedInit?.productTotal ?? 0);
+  const [rawProductsMeta, setRawProductsMeta] = useState<any[]>([]);
   const [loading, setLoading] = useState(() => cachedInit == null);
-  const [dateFilter, setDateFilter] = useState({
-    revenue: "Last 30 days",
-    orders: "Last 30 days",
-    customers: "Last 30 days",
-    products: "Last 30 days",
-  });
+
+  const [pageDateRange, setPageDateRange] = useState<DateRange | undefined>(undefined);
+  const [pageApiFilter, setPageApiFilter] = useState("All time");
+  const [pageDatePickerOpen, setPageDatePickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!pageDateRange?.from) setPageApiFilter("All time");
+    else if (pageDateRange.to) setPageApiFilter(encodeAdminDashboardDateFilter(pageDateRange));
+  }, [pageDateRange]);
 
   const derived = useMemo(() => {
     const endMs = Date.now();
-    const activePool = rawOrders.filter(isVendorOrderActive);
-    const accruedPool = rawOrders.filter(isVendorOrderFinanciallyAccrued);
+    const filter = pageApiFilter;
+    const periodOrders = filterOrdersForDashboardPeriod(rawOrders, filter, endMs);
+    const compareOrders = filterOrdersForDashboardComparePeriod(rawOrders, filter, endMs);
 
-    const revenueDays = daysForVendorDashboardLabel(dateFilter.revenue);
-    const ordersDays = daysForVendorDashboardLabel(dateFilter.orders);
-    const customersDays = daysForVendorDashboardLabel(dateFilter.customers);
-    const productsDays = daysForVendorDashboardLabel(dateFilter.products);
+    const totalRevenue = sumRevenue(periodOrders);
+    const totalOrders = periodOrders.length;
+    const totalCustomers = uniqueCustomerEmails(periodOrders);
 
-    const revCurrent = filterOrdersInRollingWindow(accruedPool, revenueDays, endMs);
-    const revPrev = filterOrdersInPriorWindow(accruedPool, revenueDays, endMs - revenueDays * 86400000);
-    const totalRevenue = sumRevenue(revCurrent);
-
-    const ordCurrent = filterOrdersInRollingWindow(activePool, ordersDays, endMs);
-    const ordPrev = filterOrdersInPriorWindow(activePool, ordersDays, endMs - ordersDays * 86400000);
-
-    const custCurrent = filterOrdersInRollingWindow(activePool, customersDays, endMs);
-    const custPrev = filterOrdersInPriorWindow(activePool, customersDays, endMs - customersDays * 86400000);
-
-    const prodWindowEnd = endMs;
-    const prodWindowStart = endMs - productsDays * 86400000;
-    const prodPrevStart = prodWindowStart - productsDays * 86400000;
-    const prodPrevEnd = prodWindowStart;
-
-    const productsAddedCurrent = countProductsLikelyAddedInWindow(
-      rawProducts,
-      prodWindowStart,
-      prodWindowEnd
-    );
-    const productsAddedPrev = countProductsLikelyAddedInWindow(
-      rawProducts,
-      prodPrevStart,
-      prodPrevEnd
-    );
+    const range = vendorDashboardDateRange(filter, endMs);
+    const productsAddedCurrent = range.isAllTime
+      ? productTotal
+      : countProductsLikelyAddedInWindow(rawProductsMeta, range.startMs, range.endMs);
+    const productsAddedPrev = range.isAllTime
+      ? 0
+      : countProductsLikelyAddedInWindow(
+          rawProductsMeta,
+          range.compareStartMs,
+          range.compareEndMs
+        );
 
     const stats: DashboardStats = {
-      totalProducts: rawProducts.length,
-      totalOrders: countActiveOrders(ordCurrent),
+      totalProducts: productTotal,
+      totalOrders,
       totalRevenue,
-      totalCustomers: uniqueCustomerEmails(custCurrent),
-      revenueChange: pctChangePriorWindow(sumRevenue(revCurrent), sumRevenue(revPrev)),
-      ordersChange: pctChangePriorWindow(ordCurrent.length, ordPrev.length),
+      totalCustomers,
+      revenueChange: pctChangePriorWindow(totalRevenue, sumRevenue(compareOrders)),
+      ordersChange: pctChangePriorWindow(periodOrders.length, compareOrders.length),
       customersChange: pctChangePriorWindow(
-        uniqueCustomerEmails(custCurrent),
-        uniqueCustomerEmails(custPrev)
+        uniqueCustomerEmails(periodOrders),
+        uniqueCustomerEmails(compareOrders)
       ),
-      productsChange: pctChangePriorWindow(productsAddedCurrent, productsAddedPrev),
+      productsChange: range.isAllTime
+        ? 0
+        : pctChangePriorWindow(productsAddedCurrent, productsAddedPrev),
     };
 
-    const topProducts: TopProductRow[] = topProductsFromOrders(revCurrent, 4);
-    const recentOrders: RecentOrderRow[] = recentOrdersFromList(activePool, 5);
-    const chartSeries = buildMonthlySeries(accruedPool, 6);
+    const sectionOrders = filterOrdersForDashboardPeriod(rawOrders, filter, endMs);
+    const topProducts: TopProductRow[] = topProductsFromOrders(sectionOrders, 4);
+    const recentOrders: RecentOrderRow[] = recentOrdersFromList(
+      rawOrders.filter(isVendorOrderActive),
+      5
+    );
+    const chartSeries = buildVendorSalesTrend(rawOrders, filter);
 
     return { stats, topProducts, recentOrders, chartSeries };
-  }, [rawOrders, rawProducts, dateFilter]);
+  }, [rawOrders, rawProductsMeta, productTotal, pageApiFilter]);
 
   const { stats, topProducts, recentOrders, chartSeries } = derived;
 
+  const loadDashboardData = useCallback(
+    async (forceRefresh = false) => {
+      let showLoadingTimer: ReturnType<typeof setTimeout> | null = null;
+      if (!forceRefresh && rawOrders.length === 0) {
+        showLoadingTimer = setTimeout(() => setLoading(true), 300);
+      } else if (forceRefresh) {
+        showLoadingTimer = setTimeout(() => setLoading(true), 300);
+      }
+
+      try {
+        const [orders, productsPage, productsMeta] = await Promise.all([
+          getCachedVendorOrders(vendorId, forceRefresh).catch(() => [] as any[]),
+          getCachedVendorProductsAdminPage(
+            vendorId,
+            { page: 1, pageSize: 1, status: "all", sort: "newest" },
+            forceRefresh
+          ).catch(() => ({ total: 0, products: [] as any[] })),
+          getCachedVendorProductsAdmin(vendorId, forceRefresh).catch(() => ({
+            products: [] as any[],
+          })),
+        ]);
+        setRawOrders(Array.isArray(orders) ? orders : []);
+        setProductTotal(Number(productsPage.total ?? 0));
+        setRawProductsMeta(productsMeta.products || []);
+      } catch (error) {
+        console.error("Failed to load dashboard data:", error);
+      } finally {
+        if (showLoadingTimer) clearTimeout(showLoadingTimer);
+        setLoading(false);
+      }
+    },
+    [vendorId]
+  );
+
   useEffect(() => {
-    void loadDashboardData(false);
-  }, [vendorId]);
+    void loadDashboardData(true);
+  }, [loadDashboardData]);
 
   useEffect(() => {
     const onOrdersUpdated = () => {
@@ -199,250 +205,170 @@ export function VendorAdminDashboard({
     };
     window.addEventListener("adminOrdersUpdated", onOrdersUpdated);
     return () => window.removeEventListener("adminOrdersUpdated", onOrdersUpdated);
-  }, [vendorId]);
+  }, [loadDashboardData]);
 
-  const loadDashboardData = async (forceRefresh = false) => {
-    if (!forceRefresh) {
-      const cached = peekCachedVendorDashboardData(vendorId);
-      if (cached != null) {
-        setRawOrders(cached.orders);
-        setRawProducts(cached.products);
-        setLoading(false);
-        return;
-      }
-    }
+  const formatNumber = (num: number) => new Intl.NumberFormat().format(Math.round(num));
 
-    const hasWarmData = rawOrders.length > 0 || rawProducts.length > 0;
-    if (!hasWarmData) setLoading(true);
-    try {
-      const [productsData, vendorOrders] = await Promise.all([
-        getCachedVendorProductsAdmin(vendorId, forceRefresh).catch(() => ({ products: [] as any[] })),
-        getCachedVendorOrders(vendorId, forceRefresh).catch(() => [] as any[]),
-      ]);
-      setRawProducts(productsData.products || []);
-      setRawOrders(Array.isArray(vendorOrders) ? vendorOrders : []);
-    } catch (error) {
-      console.error("Failed to load dashboard data:", error);
-      if (!hasWarmData) {
-        setRawOrders([]);
-        setRawProducts([]);
-      }
-    } finally {
-      setLoading(false);
-    }
+  const isAllTime = pageApiFilter === "All time";
+  const formatChange = (change: number) => {
+    if (isAllTime) return t("dashboard.changeAllTime");
+    const sign = change >= 0 ? "+" : "";
+    return `${sign}${change.toFixed(1)}% ${t("dashboard.vsPreviousPeriod")}`;
+  };
+  const changeType = (change: number): "positive" | "negative" | "neutral" => {
+    if (isAllTime || change === 0) return "neutral";
+    return change > 0 ? "positive" : "negative";
   };
 
-  const renderCurrency = (num: number) => {
-    const amount = Math.round(Number(num) || 0).toLocaleString();
-    return (
-      <span className="inline-flex items-baseline gap-1">
-        <span>{amount}</span>
-        <span className="text-[0.4rem] font-semibold uppercase tracking-wide text-slate-500">MMK</span>
-      </span>
-    );
-  };
+  const salesChartData = useMemo(() => {
+    return chartSeries.map((row) => ({
+      month: row.month,
+      revenue: Math.round(Number(row.revenue) || 0),
+      orders: Math.round(Number(row.orders) || 0),
+    }));
+  }, [chartSeries]);
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <Skeleton className="h-8 w-48 mb-2" />
-          <Skeleton className="h-4 w-96" />
-        </div>
+  const salesChartHasPoints = salesChartData.length > 0;
+  const salesChartHasActivity = salesChartData.some((d) => d.revenue > 0 || d.orders > 0);
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+  if (loading && rawOrders.length === 0) {
+    return (
+      <div className="p-4 md:p-6 space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => (
-            <Card key={i} className="p-5">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 space-y-3">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-3 w-32" />
-                  <Skeleton className="h-6 w-28" />
-                  <Skeleton className="h-3 w-36" />
-                </div>
-                <Skeleton className="h-9 w-9 rounded-full" />
-              </div>
-            </Card>
+            <Skeleton key={i} className="h-28 w-full rounded-xl" />
           ))}
         </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {[...Array(2)].map((_, i) => (
-            <Card key={i} className="p-6">
-              <Skeleton className="h-6 w-40 mb-2" />
-              <Skeleton className="h-4 w-56 mb-6" />
-              <Skeleton className="h-64 w-full rounded-lg" />
-            </Card>
-          ))}
-        </div>
-
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <Skeleton className="h-6 w-32 mb-2" />
-              <Skeleton className="h-4 w-48" />
-            </div>
-            <Skeleton className="h-4 w-20" />
-          </div>
-          <div className="space-y-3">
-            {[...Array(5)].map((_, i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
-          </div>
-        </Card>
+        <Skeleton className="h-80 w-full rounded-xl" />
       </div>
     );
   }
 
-  const StatCard = ({
-    title,
-    value,
-    change,
-    icon: Icon,
-    iconBg,
-    iconColor,
-    filterKey,
-  }: {
-    title: string;
-    value: ReactNode;
-    change: number;
-    icon: typeof DollarSign;
-    iconBg: string;
-    iconColor: string;
-    filterKey: DateFilterKey;
-  }) => (
-    <Card className="p-5 border-slate-200 bg-white hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="text-sm text-slate-600 font-medium mb-1">{title}</p>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors mb-4"
-              >
-                {dateLabel(dateFilter[filterKey])} <ChevronDown className="w-3 h-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem
-                onClick={() => setDateFilter({ ...dateFilter, [filterKey]: "Last 7 days" })}
-              >
-                {t("vendorAdmin.dashboard.last7")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setDateFilter({ ...dateFilter, [filterKey]: "Last 30 days" })}
-              >
-                {t("vendorAdmin.dashboard.last30")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setDateFilter({ ...dateFilter, [filterKey]: "Last 90 days" })}
-              >
-                {t("vendorAdmin.dashboard.last90")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setDateFilter({ ...dateFilter, [filterKey]: "Last year" })}
-              >
-                {t("vendorAdmin.dashboard.lastYear")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <p className="text-xl font-bold text-slate-900 mb-2">{value}</p>
-          <div className="flex items-center gap-1">
-            {change === 0 ? (
-              <span className="text-xs font-medium text-slate-500">{t("vendorAdmin.dashboard.noChange")}</span>
-            ) : (
-              <>
-                {change > 0 ? (
-                  <ArrowUpRight className="w-3.5 h-3.5 text-green-600 shrink-0" />
-                ) : (
-                  <ArrowDownRight className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                )}
-                <span
-                  className={`text-xs font-medium ${change > 0 ? "text-green-600" : "text-red-600"}`}
-                >
-                  {change > 0 ? "+" : ""}
-                  {change}%
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        <div className={`${iconBg} p-2 rounded-full ml-4 flex-shrink-0`}>
-          <Icon className={`w-5 h-5 ${iconColor}`} />
-        </div>
-      </div>
-    </Card>
-  );
-
-  const chartHasData = chartSeries.some((p) => p.revenue > 0 || p.orders > 0);
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-1">{t("vendorAdmin.dashboard.title")}</h1>
-        <p className="text-sm text-slate-600">
-          {tr("vendorAdmin.dashboard.subtitle", { name: vendorName })}
-        </p>
+    <div className="p-4 md:p-6 lg:p-8 space-y-6 md:space-y-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
+            {t("vendorAdmin.dashboard.title")}
+          </h1>
+          <p className="text-slate-500 mt-1">
+            {t("vendorAdmin.dashboard.subtitle").replace("{name}", vendorName)}
+          </p>
+        </div>
+        <AdminDateRangeFilterPopover
+          value={pageDateRange}
+          onChange={setPageDateRange}
+          hintText={t("dashboard.globalDateFilterHint")}
+          titleText={t("dashboard.globalDateFilterTitle")}
+          open={pageDatePickerOpen}
+          onOpenChange={setPageDatePickerOpen}
+          align="end"
+          presentation="section-modal"
+          showPresets
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            className="max-w-full border-slate-300 self-start font-normal sm:self-auto"
+            disabled={loading}
+            type="button"
+          >
+            <Calendar className="mr-2 h-4 w-4 shrink-0" />
+            <span className="truncate text-left">
+              {!pageDateRange?.from
+                ? t("finances.allTime")
+                : !pageDateRange.to
+                  ? t("finances.selectEndDate")
+                  : `${format(pageDateRange.from, "MMM d, yyyy")} – ${format(pageDateRange.to, "MMM d, yyyy")}`}
+            </span>
+          </Button>
+        </AdminDateRangeFilterPopover>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <StatCard
           title={t("vendorAdmin.dashboard.totalRevenue")}
-          value={renderCurrency(stats.totalRevenue)}
-          change={stats.revenueChange}
+          value={loading ? "..." : <AdminMmkAmount value={stats.totalRevenue} />}
+          change={loading ? "..." : formatChange(stats.revenueChange)}
+          changeType={changeType(stats.revenueChange)}
           icon={DollarSign}
-          iconBg="bg-green-100"
-          iconColor="text-green-600"
-          filterKey="revenue"
+          iconBgColor="bg-gradient-to-br from-green-400 to-green-600"
+          onClick={() => onNavigate("finances")}
         />
         <StatCard
           title={t("vendorAdmin.dashboard.orders")}
-          value={stats.totalOrders}
-          change={stats.ordersChange}
+          value={loading ? "..." : formatNumber(stats.totalOrders)}
+          change={loading ? "..." : formatChange(stats.ordersChange)}
+          changeType={changeType(stats.ordersChange)}
           icon={ShoppingCart}
-          iconBg="bg-blue-100"
-          iconColor="text-blue-600"
-          filterKey="orders"
+          iconBgColor="bg-gradient-to-br from-blue-400 to-blue-600"
+          onClick={() => onNavigate("orders")}
         />
         <StatCard
           title={t("vendorAdmin.dashboard.customers")}
-          value={stats.totalCustomers}
-          change={stats.customersChange}
+          value={loading ? "..." : formatNumber(stats.totalCustomers)}
+          change={loading ? "..." : formatChange(stats.customersChange)}
+          changeType={changeType(stats.customersChange)}
           icon={Users}
-          iconBg="bg-purple-100"
-          iconColor="text-purple-600"
-          filterKey="customers"
+          iconBgColor="bg-gradient-to-br from-purple-400 to-purple-600"
+          onClick={() => onNavigate("customers")}
         />
         <StatCard
           title={t("vendorAdmin.dashboard.products")}
-          value={stats.totalProducts}
-          change={stats.productsChange}
+          value={loading ? "..." : formatNumber(stats.totalProducts)}
+          change={loading ? "..." : formatChange(stats.productsChange)}
+          changeType={changeType(stats.productsChange)}
           icon={Package}
-          iconBg="bg-orange-100"
-          iconColor="text-orange-600"
-          filterKey="products"
+          iconBgColor="bg-gradient-to-br from-orange-400 to-orange-600"
+          onClick={() => onNavigate("products")}
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6 border-slate-200">
+        <Card className="p-6">
           <div className="mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-1">{t("vendorAdmin.dashboard.revenueTrend")}</h3>
-            <p className="text-sm text-slate-600">
-              {dateLabel(dateFilter.revenue)}
-            </p>
+            <h3 className="text-lg font-semibold text-slate-900">{t("dashboard.salesOverview")}</h3>
+            <p className="text-sm text-slate-500">{t("dashboard.salesOverviewDesc")}</p>
           </div>
-          {chartHasData ? (
-            <div className="h-64 w-full min-h-[256px]">
+          {loading && !salesChartHasPoints ? (
+            <div className="h-[300px] flex items-center justify-center bg-slate-50 rounded-lg border border-slate-100">
+              <p className="text-sm text-slate-400">{t("dashboard.loadingChart")}</p>
+            </div>
+          ) : !salesChartHasPoints ? (
+            <div className="h-[300px] flex items-center justify-center bg-slate-50 rounded-lg border border-dashed border-slate-200">
+              <div className="text-center px-4">
+                <TrendingUp className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm text-slate-500">{t("dashboard.noSalesChartData")}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-[300px] w-full min-h-[280px]">
+              {!salesChartHasActivity && (
+                <p className="text-xs text-slate-400 mb-2">{t("dashboard.salesChartFlatHint")}</p>
+              )}
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickLine={false} />
-                  <YAxis
+                <ComposedChart data={salesChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="vendorDashRevenueFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis
+                    dataKey="month"
                     stroke="#64748b"
                     fontSize={11}
                     tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
+                  />
+                  <YAxis
+                    yAxisId="rev"
+                    stroke="#64748b"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
                     tickFormatter={(v) => {
                       const n = Number(v);
                       if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -450,112 +376,134 @@ export function VendorAdminDashboard({
                       return String(Math.round(n));
                     }}
                   />
+                  <YAxis
+                    yAxisId="ord"
+                    orientation="right"
+                    stroke="#64748b"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
+                    allowDecimals={false}
+                  />
                   <Tooltip
-                    formatter={(value: number | string) => [
-                      `${Math.round(Number(value)).toLocaleString()} MMK`,
-                      t("vendorAdmin.dashboard.totalRevenue"),
-                    ]}
                     contentStyle={{
                       backgroundColor: "white",
                       border: "1px solid #e2e8f0",
                       borderRadius: "8px",
+                      fontSize: "12px",
                     }}
+                    formatter={(value: number | string, _name: string, item: { dataKey?: string }) => {
+                      if (item?.dataKey === "revenue") {
+                        return [
+                          `${Math.round(Number(value)).toLocaleString()} MMK`,
+                          t("dashboard.chartRevenueSeries"),
+                        ];
+                      }
+                      if (item?.dataKey === "orders") {
+                        return [Math.round(Number(value)), t("dashboard.chartOrdersSeries")];
+                      }
+                      return [String(value), _name];
+                    }}
+                    labelFormatter={(label) => String(label)}
                   />
-                  <Legend />
-                  <Line
+                  <Legend wrapperStyle={{ fontSize: "12px" }} />
+                  <Area
+                    yAxisId="rev"
                     type="monotone"
                     dataKey="revenue"
-                    name={t("vendorAdmin.dashboard.totalRevenue")}
-                    stroke="#3b82f6"
+                    name={t("dashboard.chartRevenueSeries")}
+                    stroke="#2563eb"
                     strokeWidth={2}
-                    dot={{ fill: "#3b82f6", r: 3 }}
+                    fill="url(#vendorDashRevenueFill)"
+                    dot={{ fill: "#2563eb", r: 3 }}
                     activeDot={{ r: 5 }}
                   />
-                </LineChart>
+                  <Line
+                    yAxisId="ord"
+                    type="monotone"
+                    dataKey="orders"
+                    name={t("dashboard.chartOrdersSeries")}
+                    stroke="#16a34a"
+                    strokeWidth={2}
+                    dot={{ fill: "#16a34a", r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                </ComposedChart>
               </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="h-64 flex items-center justify-center bg-slate-50 rounded-lg border-2 border-dashed border-slate-200">
-              <div className="text-center">
-                <TrendingUp className="w-12 h-12 text-slate-300 mx-auto mb-2" />
-                <p className="text-sm text-slate-400">{t("vendorAdmin.dashboard.noData")}</p>
-              </div>
             </div>
           )}
         </Card>
 
-        <Card className="p-6 border-slate-200">
+        <Card className="p-6">
           <div className="mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-1">{t("vendorAdmin.dashboard.topProducts")}</h3>
-            <p className="text-sm text-slate-600">{dateLabel(dateFilter.revenue)}</p>
+            <h3 className="text-lg font-semibold text-slate-900">{t("dashboard.topProducts")}</h3>
+            <p className="text-sm text-slate-500">{t("dashboard.topProductsDescGlobal")}</p>
           </div>
-          <div className="space-y-4">
-            {topProducts.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">
-                <Package className="w-12 h-12 text-slate-300 mx-auto mb-2" />
-                <p className="text-sm">{t("vendorAdmin.dashboard.noData")}</p>
-              </div>
-            ) : (
-              topProducts.map((product) => (
-                <div key={product.id} className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
+          {loading || topProducts.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              {loading ? t("dashboard.loadingChart") : t("vendorAdmin.dashboard.noData")}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {topProducts.map((product) => (
+                <div
+                  key={product.id}
+                  className="flex items-center gap-4 p-3 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-pink-100 rounded-lg flex items-center justify-center">
                     <Package className="w-5 h-5 text-purple-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-900 truncate">{product.name}</p>
-                    <p className="text-xs text-slate-500">{product.sales} {t("dashboard.sales")}</p>
+                    <p className="font-medium text-slate-900 truncate">{product.name}</p>
+                    <p className="text-sm text-slate-500">
+                      {product.sales} {t("dashboard.sales")}
+                    </p>
                   </div>
-                  <p className="text-sm font-semibold text-slate-900 whitespace-nowrap">
-                    {renderCurrency(product.revenue)}
-                  </p>
+                  <div className="text-right">
+                    <AdminMmkAmount value={product.revenue} size="md" />
+                  </div>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
 
-      <Card className="p-6 border-slate-200">
-        <div className="flex items-center justify-between mb-6">
+      <Card className="p-6">
+        <div className="mb-6 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-1">{t("vendorAdmin.dashboard.recentOrders")}</h3>
-            <p className="text-sm text-slate-600">{t("dashboard.latestOrders")}</p>
+            <h3 className="text-lg font-semibold text-slate-900">{t("vendorAdmin.dashboard.recentOrders")}</h3>
+            <p className="text-sm text-slate-500">{t("dashboard.latestOrders")}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => onNavigate("orders")}
-            className="text-sm font-medium text-blue-600 hover:text-blue-700"
-          >
+          <Button variant="outline" size="sm" type="button" onClick={() => onNavigate("orders")}>
             {t("dashboard.viewAll")}
-          </button>
+          </Button>
         </div>
-
-        {recentOrders.length === 0 ? (
-          <div className="text-center py-8 text-slate-500">
-            <ShoppingCart className="w-12 h-12 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm">{t("vendorAdmin.dashboard.noData")}</p>
+        {loading || recentOrders.length === 0 ? (
+          <div className="text-center py-8 text-slate-400">
+            {loading ? t("dashboard.loadingChart") : t("vendorAdmin.dashboard.noData")}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200">
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                     {t("orders.order")}
                   </th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                     {t("vendorAdmin.users.customer")}
                   </th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                     {t("orders.items")}
                   </th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                     {t("orders.total")}
                   </th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                     {t("vendorAdmin.users.status")}
                   </th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-600">
                     {t("orders.date")}
                   </th>
                 </tr>
@@ -563,32 +511,29 @@ export function VendorAdminDashboard({
               <tbody>
                 {recentOrders.map((order) => (
                   <tr key={order.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="py-3 px-4 text-sm text-slate-900 font-medium">
+                    <td className="py-4 px-4 text-sm font-medium text-slate-900">
                       #{order.id.slice(0, 8)}
                     </td>
-                    <td className="py-3 px-4 text-sm text-slate-900">{order.customerName}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{order.items}</td>
-                    <td className="py-3 px-4 text-sm text-slate-900 font-medium">
-                      {renderCurrency(order.total)}
+                    <td className="py-4 px-4 text-sm text-slate-700">{order.customerName}</td>
+                    <td className="py-4 px-4 text-sm text-slate-700">{order.items}</td>
+                    <td className="py-4 px-4">
+                      <AdminMmkAmount value={order.total} size="sm" />
                     </td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                          order.status === "fulfilled"
-                            ? "bg-green-100 text-green-700"
+                    <td className="py-4 px-4">
+                      <Badge
+                        variant="outline"
+                        className={
+                          order.status === "fulfilled" || order.status === "completed"
+                            ? "bg-green-100 text-green-700 hover:bg-green-100"
                             : order.status === "pending"
-                              ? "bg-yellow-100 text-yellow-700"
-                              : order.status === "processing" || order.status === "ready-to-ship"
-                                ? "bg-blue-100 text-blue-700"
-                                : order.status === "cancelled"
-                                  ? "bg-red-100 text-red-700"
-                                  : "bg-slate-100 text-slate-700"
-                        }`}
+                              ? "bg-amber-100 text-amber-700 hover:bg-amber-100"
+                              : "bg-blue-100 text-blue-700 hover:bg-blue-100"
+                        }
                       >
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                      </span>
+                        {order.status}
+                      </Badge>
                     </td>
-                    <td className="py-3 px-4 text-sm text-slate-600">
+                    <td className="py-4 px-4 text-sm text-slate-600">
                       {new Date(order.date).toLocaleDateString()}
                     </td>
                   </tr>

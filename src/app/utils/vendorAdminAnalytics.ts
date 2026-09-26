@@ -51,9 +51,194 @@ export function daysForVendorDashboardLabel(label: string): number {
       return 90;
     case "Last year":
       return 365;
+    case "All time":
+      return 36500;
     default:
       return 30;
   }
+}
+
+/** Same date windows as super-admin `dashboard/stats` (incl. custom `DashboardRange:…`). */
+export function vendorDashboardDateRange(
+  filter: string,
+  endMs: number = Date.now()
+): {
+  startMs: number;
+  endMs: number;
+  compareStartMs: number;
+  compareEndMs: number;
+  isAllTime: boolean;
+} {
+  const custom = filter.match(/^DashboardRange:(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/);
+  if (custom) {
+    const [, ymdFrom, ymdTo] = custom;
+    const startDate = new Date(`${ymdFrom}T00:00:00`);
+    const endDate = new Date(`${ymdTo}T23:59:59.999`);
+    const periodMs = Math.max(86400000, endDate.getTime() - startDate.getTime() + 1);
+    const compareEnd = new Date(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate()
+    );
+    const compareStart = new Date(compareEnd.getTime() - periodMs);
+    return {
+      startMs: startDate.getTime(),
+      endMs: endDate.getTime(),
+      compareStartMs: compareStart.getTime(),
+      compareEndMs: compareEnd.getTime(),
+      isAllTime: false,
+    };
+  }
+
+  const now = endMs;
+  switch (filter) {
+    case "Last 7 days":
+      return {
+        startMs: now - 7 * 86400000,
+        endMs: now,
+        compareStartMs: now - 14 * 86400000,
+        compareEndMs: now - 7 * 86400000,
+        isAllTime: false,
+      };
+    case "Last 90 days":
+      return {
+        startMs: now - 90 * 86400000,
+        endMs: now,
+        compareStartMs: now - 180 * 86400000,
+        compareEndMs: now - 90 * 86400000,
+        isAllTime: false,
+      };
+    case "Last year":
+      return {
+        startMs: now - 365 * 86400000,
+        endMs: now,
+        compareStartMs: now - 730 * 86400000,
+        compareEndMs: now - 365 * 86400000,
+        isAllTime: false,
+      };
+    case "All time":
+      return { startMs: 0, endMs: now, compareStartMs: 0, compareEndMs: 0, isAllTime: true };
+    case "Last 30 days":
+    default:
+      return {
+        startMs: now - 30 * 86400000,
+        endMs: now,
+        compareStartMs: now - 60 * 86400000,
+        compareEndMs: now - 30 * 86400000,
+        isAllTime: false,
+      };
+  }
+}
+
+export function filterOrdersForDashboardPeriod(
+  orders: any[],
+  filter: string,
+  endMs?: number
+): any[] {
+  const { startMs, endMs: end } = vendorDashboardDateRange(filter, endMs ?? Date.now());
+  return orders.filter((o) => {
+    if (!isVendorOrderActive(o)) return false;
+    const ms = vendorOrderTimeMs(o);
+    return ms >= startMs && ms <= end;
+  });
+}
+
+export function filterOrdersForDashboardComparePeriod(
+  orders: any[],
+  filter: string,
+  endMs?: number
+): any[] {
+  const range = vendorDashboardDateRange(filter, endMs ?? Date.now());
+  if (range.isAllTime) return [];
+  return orders.filter((o) => {
+    if (!isVendorOrderActive(o)) return false;
+    const ms = vendorOrderTimeMs(o);
+    return ms >= range.compareStartMs && ms < range.compareEndMs;
+  });
+}
+
+const SALES_TREND_MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** Mirrors super-admin home sales trend bucketing for vendor order lists. */
+export function buildVendorSalesTrend(orders: any[], globalFilter: string): MonthlyPoint[] {
+  const active = orders.filter(isVendorOrderActive);
+  const range = vendorDashboardDateRange(globalFilter);
+
+  if (globalFilter === "All time" || range.isAllTime) {
+    const now = new Date();
+    const series: MonthlyPoint[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1).getTime();
+      const monthEnd = new Date(
+        monthDate.getFullYear(),
+        monthDate.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999
+      ).getTime();
+      let revenue = 0;
+      let orderCount = 0;
+      for (const o of active) {
+        const ms = vendorOrderTimeMs(o);
+        if (ms >= monthStart && ms <= monthEnd) {
+          revenue += vendorOrderDisplayTotal(o);
+          orderCount += 1;
+        }
+      }
+      series.push({
+        month: SALES_TREND_MONTH_NAMES[monthDate.getMonth()],
+        revenue,
+        orders: orderCount,
+      });
+    }
+    return series;
+  }
+
+  const series: MonthlyPoint[] = [];
+  const startDate = new Date(range.startMs);
+  const endDate = new Date(range.endMs);
+  let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  let n = 0;
+  while (cursor.getTime() <= endDate.getTime() && n < 36) {
+    const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
+    const sliceStart =
+      monthStart.getTime() < range.startMs ? new Date(range.startMs) : monthStart;
+    const sliceEnd = monthEnd.getTime() > range.endMs ? new Date(range.endMs) : monthEnd;
+    let revenue = 0;
+    let orderCount = 0;
+    for (const o of active) {
+      const ms = vendorOrderTimeMs(o);
+      if (ms >= sliceStart.getTime() && ms <= sliceEnd.getTime()) {
+        revenue += vendorOrderDisplayTotal(o);
+        orderCount += 1;
+      }
+    }
+    series.push({
+      month: `${SALES_TREND_MONTH_NAMES[cursor.getMonth()]} ${cursor.getFullYear()}`,
+      revenue,
+      orders: orderCount,
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+    n += 1;
+  }
+  return series;
 }
 
 /** Orders with order time in (endMs - days, endMs]. */

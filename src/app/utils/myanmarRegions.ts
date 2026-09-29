@@ -103,6 +103,8 @@ const REGION_TOWNSHIPS: Record<MyanmarRegion, readonly string[]> = {
     "Ngathayauk",
     "Ngazun",
     "Nyaung-U",
+    "Onchauk",
+    "Paleik",
     "Patheingyi",
     "Pyawbwe",
     "Pyigyitagun",

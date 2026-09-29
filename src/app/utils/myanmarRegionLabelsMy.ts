@@ -333,6 +333,8 @@ export const MYANMAR_TOWNSHIP_LABELS_MY = {
   "Ngathayauk": "ငါ့သရောက်",
   "Ngayokekaung": "ငရုတ်ကောင်း",
   "Ngazun": "ငါန်းဇွန်",
+  "Onchauk": "အုန်းချော",
+  "Paleik": "ပလိပ်",
   "Ngwesaung": "ငွေဆောင်",
   "North Dagon": "မြောက်ဒဂုံ",
   "North Okkalapa": "မြောက်ဥက္ကလာပ",

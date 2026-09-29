@@ -50,6 +50,7 @@ import { Skeleton } from "../ui/skeleton";
 import {
   getCachedVendorOrders,
   getCachedVendorOrdersPage,
+  type VendorOrdersPagePayload,
   getCachedVendorProductsAdmin,
   invalidateVendorOrdersCache,
   moduleCache,
@@ -67,7 +68,6 @@ import {
   pctChangePriorWindow,
   vendorOrderDisplayTotal,
   isVendorOrderActive,
-  isVendorOrderFinanciallyAccrued,
 } from "../../utils/vendorAdminAnalytics";
 import { vendorOrderGrandTotalDisplay } from "../../utils/vendorOrderTotals";
 import {
@@ -115,6 +115,38 @@ function MmkTiny({
       <span className={unitClassName}>MMK</span>
     </span>
   );
+}
+
+function shiftVendorOrdersSummaryStatus(
+  summary: VendorOrdersPagePayload["summary"] | undefined,
+  fromRaw: string | undefined,
+  toRaw: string
+): VendorOrdersPagePayload["summary"] | undefined {
+  if (!summary) return summary;
+  const norm = (s: string | undefined) =>
+    String(s ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-");
+  const from = norm(fromRaw);
+  const to = norm(toRaw);
+  if (!from || from === to) return summary;
+  const next = { ...summary };
+  const bump = (key: "pending" | "processing" | "fulfilled" | "cancelled", delta: number) => {
+    next[key] = Math.max(0, Number(next[key] ?? 0) + delta);
+  };
+  const bucket = (st: string): "pending" | "processing" | "fulfilled" | "cancelled" | null => {
+    if (st === "pending") return "pending";
+    if (st === "processing" || st === "ready-to-ship") return "processing";
+    if (st === "fulfilled" || st === "shipped" || st === "delivered") return "fulfilled";
+    if (st === "cancelled" || st === "canceled") return "cancelled";
+    return null;
+  };
+  const fromKey = bucket(from);
+  const toKey = bucket(to);
+  if (fromKey) bump(fromKey, -1);
+  if (toKey) bump(toKey, 1);
+  return next;
 }
 
 async function fetchVendorContractCommissionPercent(slugOrId: string | undefined): Promise<number> {
@@ -363,7 +395,13 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
   const [bulkStatus, setBulkStatus] = useState<OrderStatus>("processing");
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [orders, setOrders] = useState<OrderItem[]>([]);
-  const [rawVendorOrders, setRawVendorOrders] = useState<any[]>([]);
+  const [kpiOrdersPool, setKpiOrdersPool] = useState<any[]>(() => {
+    const peek = moduleCache.peek<any[]>(CACHE_KEYS.vendorOrders(vendorId));
+    return Array.isArray(peek) ? peek : [];
+  });
+  const [vendorOrdersSummary, setVendorOrdersSummary] = useState<
+    VendorOrdersPagePayload["summary"]
+  >();
   const [vendorProducts, setVendorProducts] = useState<any[]>([]);
   const [vendorCommissionPct, setVendorCommissionPct] = useState(15);
   const [isLoading, setIsLoading] = useState(
@@ -388,6 +426,22 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
   const loadOrdersRef = useRef<(force?: boolean, opts?: AdminOrdersLoadOptions) => Promise<void>>(
     async () => {},
   );
+  const loadKpiOrdersPoolRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+
+  const loadKpiOrdersPool = useCallback(async (forceRefresh = false) => {
+    try {
+      const orders = await getCachedVendorOrders(vendorId, forceRefresh);
+      if (!vendorOrdersSurfaceActiveRef.current) return;
+      setKpiOrdersPool(Array.isArray(orders) ? orders : []);
+    } catch {
+      /* keep last warm pool */
+    }
+  }, [vendorId]);
+  loadKpiOrdersPoolRef.current = loadKpiOrdersPool;
+
+  useEffect(() => {
+    void loadKpiOrdersPool(false);
+  }, [loadKpiOrdersPool]);
 
   useEffect(() => {
     vendorOrdersSurfaceActiveRef.current = true;
@@ -477,9 +531,11 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
         compareOrdersBySerial(a, b, sortOrder)
       );
       console.log(`✅ Transformed ${transformedOrders.length} paged orders`);
-      setRawVendorOrders(data.orders);
       setOrders(transformedOrders);
       setServerTotalOrders(Number(data.total || transformedOrders.length));
+      if (data.summary && typeof data.summary === "object") {
+        setVendorOrdersSummary(data.summary);
+      }
       const hasNextPage = Number(data.total || 0) > ordersListPage * ordersListPageSize;
       if (hasNextPage) {
         void getCachedVendorOrdersPage(
@@ -520,7 +576,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
       }
       
       setOrders([]);
-      setRawVendorOrders([]);
+      setVendorOrdersSummary(undefined);
     } finally {
       if (!silent) {
         setIsLoading(false);
@@ -531,9 +587,10 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
   loadOrdersRef.current = loadOrders;
 
   useEffect(() => {
-    const scheduler = createAdminOrdersRealtimeRefetchScheduler((force, opts) =>
-      loadOrdersRef.current(force, opts),
-    );
+    const scheduler = createAdminOrdersRealtimeRefetchScheduler((force, opts) => {
+      loadOrdersRef.current(force, opts);
+      void loadKpiOrdersPoolRef.current(force);
+    });
     const bump = (ev: Event) => {
       const reason = (ev as CustomEvent<{ reason?: string }>)?.detail?.reason;
       if (
@@ -562,20 +619,21 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
 
   useAdminOrdersResyncOnVisible(() => {
     void loadOrdersRef.current(true, { silent: true });
+    void loadKpiOrdersPoolRef.current(true);
   });
 
   const handlePwaOrderRecovered = () => {
     void loadOrders(true);
+    void loadKpiOrdersPool(true);
   };
 
   const orderPageKpis = useMemo(() => {
     const endMs = Date.now();
-    const activePool = rawVendorOrders.filter(isVendorOrderActive);
-    const accruedPool = rawVendorOrders.filter(isVendorOrderFinanciallyAccrued);
+    const activePool = kpiOrdersPool.filter(isVendorOrderActive);
 
     const revDays = daysForVendorDashboardLabel(statDateFilters.revenue);
-    const revCurrent = filterOrdersInRollingWindow(accruedPool, revDays, endMs);
-    const revPrev = filterOrdersInPriorWindow(accruedPool, revDays, endMs - revDays * 86400000);
+    const revCurrent = filterOrdersInRollingWindow(activePool, revDays, endMs);
+    const revPrev = filterOrdersInPriorWindow(activePool, revDays, endMs - revDays * 86400000);
     const totalRevenueWindow = revCurrent.reduce((s, o) => s + vendorOrderDisplayTotal(o), 0);
     const revenuePrevSum = revPrev.reduce((s, o) => s + vendorOrderDisplayTotal(o), 0);
     const revenueChange = pctChangePriorWindow(totalRevenueWindow, revenuePrevSum);
@@ -598,25 +656,36 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     const commissionChange = pctChangePriorWindow(commissionCurrent, commissionPrev);
 
     const pendDays = daysForVendorDashboardLabel(statDateFilters.pending);
-    const pendCurrent = filterOrdersInRollingWindow(rawVendorOrders, pendDays, endMs);
-    const pendPrev = filterOrdersInPriorWindow(rawVendorOrders, pendDays, endMs - pendDays * 86400000);
-    const pendingCount = pendCurrent.filter(
+    const pendCurrent = filterOrdersInRollingWindow(kpiOrdersPool, pendDays, endMs);
+    const pendPrev = filterOrdersInPriorWindow(kpiOrdersPool, pendDays, endMs - pendDays * 86400000);
+    let pendingCount = pendCurrent.filter(
       (o) => String(o?.status ?? "").toLowerCase() === "pending"
     ).length;
-    const pendingPrevCount = pendPrev.filter(
+    let pendingPrevCount = pendPrev.filter(
       (o) => String(o?.status ?? "").toLowerCase() === "pending"
     ).length;
-    const pendingChange = pctChangePriorWindow(pendingCount, pendingPrevCount);
-
     const fulDays = daysForVendorDashboardLabel(statDateFilters.fulfilled);
-    const fulCurrent = filterOrdersInRollingWindow(rawVendorOrders, fulDays, endMs);
-    const fulPrev = filterOrdersInPriorWindow(rawVendorOrders, fulDays, endMs - fulDays * 86400000);
-    const fulfilledCount = fulCurrent.filter(
+    const fulCurrent = filterOrdersInRollingWindow(kpiOrdersPool, fulDays, endMs);
+    const fulPrev = filterOrdersInPriorWindow(kpiOrdersPool, fulDays, endMs - fulDays * 86400000);
+    let fulfilledCount = fulCurrent.filter(
       (o) => String(o?.status ?? "").toLowerCase() === "fulfilled"
     ).length;
-    const fulfilledPrevCount = fulPrev.filter(
+    let fulfilledPrevCount = fulPrev.filter(
       (o) => String(o?.status ?? "").toLowerCase() === "fulfilled"
     ).length;
+
+    /** Server summary from the list query — instant totals while the full KPI pool loads. */
+    const tableFiltersWide =
+      statusFilter === "all" &&
+      paymentFilter === "all" &&
+      !searchQuery.trim() &&
+      !orderDateRange?.from;
+    if (tableFiltersWide && vendorOrdersSummary && kpiOrdersPool.length === 0) {
+      pendingCount = Number(vendorOrdersSummary.pending ?? pendingCount);
+      fulfilledCount = Number(vendorOrdersSummary.fulfilled ?? fulfilledCount);
+    }
+
+    const pendingChange = pctChangePriorWindow(pendingCount, pendingPrevCount);
     const fulfilledChange = pctChangePriorWindow(fulfilledCount, fulfilledPrevCount);
 
     return {
@@ -629,7 +698,19 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
       fulfilledCount,
       fulfilledChange,
     };
-  }, [rawVendorOrders, vendorProducts, vendorId, vendorCommissionPct, statDateFilters]);
+  }, [
+    kpiOrdersPool,
+    vendorProducts,
+    vendorId,
+    vendorCommissionPct,
+    statDateFilters,
+    vendorOrdersSummary,
+    statusFilter,
+    paymentFilter,
+    searchQuery,
+    orderDateRange?.from,
+    serverTotalOrders,
+  ]);
 
   const filteredOrders = useMemo(() => orders, [orders]);
 
@@ -800,6 +881,7 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
       }
       dispatchAdminProductsCachePatched();
       invalidateVendorOrdersCache(vendorId);
+      void loadKpiOrdersPoolRef.current(true);
     } catch (error) {
       console.error("Failed to update orders:", error);
       setOrders(previousOrders);
@@ -812,6 +894,13 @@ export function VendorAdminOrderManagement({ vendorId, vendorStoreSlug }: Vendor
     const wasNotCancelled = orderBeingUpdated?.status !== "cancelled";
     const isNowCancelled = newStatus === "cancelled";
     const previousOrders = [...orders];
+
+    setKpiOrdersPool((prev) =>
+      prev.map((o) => (String(o?.id) === orderId ? { ...o, status: newStatus } : o))
+    );
+    setVendorOrdersSummary((prev) =>
+      shiftVendorOrdersSummaryStatus(prev, orderBeingUpdated?.status, newStatus)
+    );
 
     setOrders((prevOrders) =>
       prevOrders.map((order) =>

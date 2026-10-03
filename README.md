@@ -12,6 +12,16 @@ There is **no multi-vendor marketplace catalog** (no shared `/products` shopping
 - **Vendor-admin portal** — `/vendor/:slug/admin/*` (and legacy `/store/:slug/admin/*` redirects where configured)
 - **CloudBase/Tencent Edge backend** — auth, orders, products, payments, notifications
 
+## Recent Updates (October 2026)
+
+| Area | What shipped |
+|------|----------------|
+| **Vendor admin — Products** | Paginated **`GET vendor/products-admin/:id?adminList=1`** (12–100/page); server builds from cached platform list (`ensureProductsListResponse`) instead of full KV `product:` scan; **Select Product** modal + category **Add Products** support **select entire catalog**; page-1 **localStorage** cache for instant reopen |
+| **Vendor admin — Analytics** | **Home dashboard** aligned with super-admin: global **All time** date filter, **Sales Overview** (revenue + orders), top products, KPI cards from full vendor order pool (not accrued-only pending gap) |
+| **Vendor admin — Orders** | Top stat cards use **full vendor order pool** + API **`summary`** (same filters as table); realtime refresh via `adminOrdersUpdated` + pulse bridge; commission/revenue windows from cached orders |
+| **Storefront — categories** | Category tabs load **12 products** per page with **Load more** (+12); server **`category`** query + pagination (no client-side 100-item prefetch); category assignment changes invalidate catalog caches |
+| **Checkout — locations** | Myanmar township list updated (**Mandalay:** Onchauk / အုန်းချော, Paleik / ပလိပ်) in `myanmarRegions.ts` |
+
 ## Recent Updates (September 2026)
 
 | Area | What shipped |
@@ -101,7 +111,7 @@ See [docs/TCB_CONSOLE_SETUP.md](docs/TCB_CONSOLE_SETUP.md) and [migration.md](mi
 
 Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared marketplace `Storefront` route).
 
-- Browse products, categories, product detail, saved items, cart, checkout
+- Browse products, categories (**12 per page + Load more** on category tabs), product detail, saved items, cart, checkout
 - **Scroll position preserved** when opening a product and going back (same category tab)
 - Customer profile, addresses, order history, order detail
 - Host modes:
@@ -153,7 +163,9 @@ Implemented in `VendorStorefrontPage` → `VendorStoreView` (not a shared market
 - Public storefront: subdomain/custom domain host root, or `/vendor/:storeName/*`
 - Admin portal: `/vendor/:storeName/admin/*`
 - Settings: branding, subdomain URL preview, custom domain, terms/privacy content, social links, stock policy
-- Analytics, products, categories, orders, customers, finances
+- **Analytics** — dashboard like super-admin Home (date filter, sales chart, top products)
+- **Products** — paginated All Products grid; **Select Product** + category picker with catalog-wide select-all
+- **Categories**, **Orders** (KPI cards from server `summary` + full order cache), customers, finances
 - **Free shipping** (when enabled by platform): toggle per product or bulk by category; applies only to this vendor’s store — [docs/FREE_SHIPPING.md](docs/FREE_SHIPPING.md)
 
 ## Key Routes (quick reference)

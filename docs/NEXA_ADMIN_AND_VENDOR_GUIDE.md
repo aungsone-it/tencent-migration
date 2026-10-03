@@ -63,9 +63,19 @@ Super-admin **Home** (`/admin`) combines two data sources:
 
 - KPI cards are **clickable** → Finances, Orders, Customers, Products
 - Refreshes on order/customer mutations and cross-tab storage events (`adminOrdersUpdated`)
-- Vendor-admin dashboard uses a **different model** — client-side analytics from cached vendor orders/products (`VendorAdminDashboard.tsx`)
+- Vendor-admin **Analytics** uses the **same UX model** as super-admin Home: global date filter (**All time** default), four KPI cards, **Sales Overview** chart (revenue area + orders line), top products, recent orders — computed from **`getCachedVendorOrders`** + product totals (`VendorAdminDashboard.tsx`).
 
-Implementation: `src/app/components/Dashboard.tsx`, `src/app/utils/module-cache.ts`.
+Implementation: `src/app/components/Dashboard.tsx` (super admin), `src/app/components/vendor-admin/VendorAdminDashboard.tsx` (vendor).
+
+### Vendor dashboard (Analytics)
+
+| UI section | Data source |
+|------------|-------------|
+| KPI cards | Full vendor order pool + product count (date windows via `vendorAdminAnalytics.ts`) |
+| Sales chart / top products | Same pool, filtered by global date picker (`encodeAdminDashboardDateFilter`) |
+| Refresh | `adminOrdersUpdated` event + background refetch |
+
+Revenue on the dashboard counts **non-cancelled order totals** in the selected window (includes pending order value), not commission-withdrawal accrual rules (those apply on **Finances**).
 
 ### Settings tabs
 
@@ -189,10 +199,10 @@ After approval, the vendor completes setup at `/vendor/setup` and signs in at `/
 
 ### Vendor admin areas
 
-- Analytics
-- **Products → All Products** — select/unselect items from the **platform catalog** (read-only price, stock, status); remove from store; free-shipping toggles
-- **Products → Categories** — create vendor-owned categories and assign already-selected products for storefront tabs
-- Orders (includes **KBZPay draft recovery** for paid PWA checkouts with no order)
+- **Analytics** — see [Vendor dashboard](#vendor-dashboard-analytics) above
+- **Products → All Products** — **server-paginated** grid (`adminList=1`, default 20/page); total count badge on **Product** column; **Select Product** modal with **select entire catalog** (search-aware); remove from store; free-shipping toggles
+- **Products → Categories** — create vendor-owned categories; **Add Products** picker is paginated with **select all** matching products; assignments refresh storefront category tabs via cache invalidation events
+- **Orders** — paginated table; top **four stat cards** use API **`summary`** + full cached order list (realtime refresh like super-admin Orders); includes **KBZPay draft recovery** where applicable
 - Customers
 - **Subscriptions** — Plans and Subscribers
 - Finances
@@ -237,7 +247,7 @@ Operators configure KBZ Enterprise Payment / VPS relay on the backend — see [V
 
 Use **preview / open store** from vendor admin to verify:
 
-- catalog visibility and category tabs (`/`, `/{category-slug}`)
+- catalog visibility and category tabs (`/`, `/{category-slug}`) — **12 products** then **Load more** (not full category dump on first paint)
 - **scroll position** when opening a product and going back (same category tab)
 - pricing and stock
 - checkout readiness: Cash on Delivery, KBZPay QR, and KBZPay PWA
@@ -296,7 +306,8 @@ Before release windows, confirm:
 - admin login and section navigation
 - vendor login and vendor-admin navigation
 - vendor storefront on **subdomain** and **path-based** URLs
-- category routes (e.g. `/cosmetic`) show full category catalog without requiring “Load more” on home first
+- category routes (e.g. `/cosmetic`) show **12** products first, then **Load more**; counts match vendor category assignments after admin save (allow a few seconds for cache refresh)
+- vendor **Products** and **Orders** admin pages feel responsive after first visit (module + localStorage page-1 caches)
 - order updates sync correctly across admin/vendor/customer views
 - KBZPay return lands on apex `/summary` (current: `nexa-apex.online/summary`) and Continue Shopping returns to the vendor storefront
 - chat and notification flows are healthy (admin `/admin/chat` + FloatingChat emoji/image)

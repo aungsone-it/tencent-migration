@@ -140,6 +140,23 @@ GET /vendor/products/:vendorId?page=&pageSize=&category=&q=
 
 Uses server pagination + category filter (see `fetchVendorProducts` in `module-cache.ts`).
 
+**Browse defaults (storefront):** `VendorStoreView` uses **`VENDOR_BROWSE_PAGE_SIZE = 12`**. Category routes pass `category=` to the API so the server filters and paginates (legacy path used a 100-item client slice — removed). Responses include `total`, `page`, `hasMore` for **Load more**.
+
+**Vendor admin catalog:**
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/vendor/products-admin/:vendorId?adminList=1&page=&pageSize=&q=&status=&sort=` | Paginated vendor product grid (all statuses); list built from **`ensureProductsListResponse()`** + `productBelongsToVendor` (not full KV scan) |
+| `GET` | `/vendor/products-admin/:vendorId` | Legacy full array (avoid for large catalogs; client prefers paginated cache) |
+
+**Vendor admin orders:**
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `GET` | `/vendor/orders/:vendorId?page=&pageSize=&q=&status=&payment=&from=&to=&sort=` | Paginated list + **`summary`** (`totalRevenue`, `pending`, `processing`, `fulfilled`, `cancelled`) over the **filtered** set (not just the current page) |
+
+Read model: `rpc_vendor_orders_page` when backfilled; KV fallback computes the same `summary` shape. Client: `VendorAdminOrderManagement.tsx` — KPI cards from **`getCachedVendorOrders`** pool + `summary`; list from `getCachedVendorOrdersPage`.
+
 **Vendor application validation** (`POST /vendor-applications`, `PUT /vendor-applications/:id`, `POST /vendors/validate`):
 
 - Myanmar phone: `+959XXXXXXXXX` or `09XXXXXXXXX`

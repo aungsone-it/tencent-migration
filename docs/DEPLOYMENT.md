@@ -29,8 +29,8 @@ See [README.md § Local Development](../README.md#local-development).
 
 | You changed | Deploy | Do **not** need |
 |-------------|--------|-----------------|
-| React UI (`src/`) — scroll, reset page, checkout, admin | `npm run build` → EdgeOne `dist/` | Function zip |
-| API / auth / SES / KBZPay (`supabase/functions/`) | Function zip or `npm run deploy:functions` | EdgeOne (unless UI also changed) |
+| React UI (`src/`) — scroll, reset page, checkout, admin, vendor dashboard/orders KPIs, storefront load-more | `npm run build` → EdgeOne `dist/` | Function zip |
+| API / auth / SES / KBZPay (`supabase/functions/`) — incl. **`vendor/products-admin`**, **`vendor/products` category pagination** | Function zip or `npm run deploy:functions` | EdgeOne (unless UI also changed) |
 | DB migrations only | `npm run db:schema` | Frontend |
 | Env vars on function | TCB console → function env (no zip if code unchanged) | — |
 

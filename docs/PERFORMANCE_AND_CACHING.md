@@ -55,8 +55,16 @@ Frontend-only — deploy **`dist/`** to EdgeOne after changes (no function zip).
 ## Vendor catalog caching
 
 - Vendor product pages are fetched with server pagination and optional **category** filter (`VendorStoreView` → `fetchVendorProducts`).
-- Cache keys include vendor id, page, search query, category, and page size — category tab changes must refetch, not only filter the first loaded page in memory.
-- Persisted localStorage slices are keyed per vendor + category where applicable.
+- **Browse page size:** **12** products initially; **Load more** fetches the next page (`loadMoreVendorCatalog`). Search mode may use a larger page size for server `q` + client filter.
+- Cache keys include vendor id, page, search query, category, and page size — category tab changes **refetch from the API** with `category=` (do not rely on filtering a home “all products” blob in memory).
+- **Session + localStorage:** page-1 slices keyed per vendor + category + search (`persistedLocalCache` / `persistedSessionCache`); invalidated on `broadcastVendorCategoryAssignmentChanged` and product link mutations.
+- **Vendor admin products:** `getCachedVendorProductsAdminPage` + **`lsVendorProductsAdminPage1Key`** (page 1 localStorage, same TTL pattern as super-admin products grid). Server list uses shared platform cache (`ensureProductsListResponse`) on `vendor/products-admin?adminList=1`.
+
+## Vendor admin orders KPI cache
+
+- **Table:** `getCachedVendorOrdersPage` (paginated, respects toolbar filters).
+- **Stat cards:** `getCachedVendorOrders` loads the **full vendor order list** into module cache for date-window KPIs; **`summary`** from the paginated API provides instant pending/fulfilled/revenue totals for the active filter set while the pool warms.
+- Realtime: `adminOrdersUpdated` + `OrderRealtimeBridge` pulse poll → debounced refetch (same pattern as super-admin Orders).
 
 ## Frontend load
 

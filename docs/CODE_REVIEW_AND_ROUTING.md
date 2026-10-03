@@ -97,6 +97,7 @@ Guarded by `VendorHostOrMarketplaceRoutes.tsx` — routes return **404** on the 
 
 - Product grid, categories, search, and pagination live in **`VendorStoreView`**.
 - Category tabs use **server-side category filtering** (`fetchVendorProducts` with `category` param) — not client-only filtering of the first loaded page.
+- Default **12** products per page (`VENDOR_BROWSE_PAGE_SIZE`); **Load more** appends the next page (`loadMoreVendorCatalog`).
 - Module cache keys include vendor id, page, query, and category (`CACHE_KEYS.vendorProductsPage`).
 - Storefront language menu exposes **English + Burmese** only; admin/vendor-admin language controls expose **English + Simplified Chinese**.
 - Storefront phone contact supports both native dial (`tel:`) and Viber chat (`viber://chat?number=...`).

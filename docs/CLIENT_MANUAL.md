@@ -225,7 +225,7 @@ Client caches by vendor + page + category + query
 Instant search filters loaded rows; debounced `q` refetches server
 ```
 
-**Client rule:** Pagination and category filters always come from the server. Client filter is UX-only on loaded data.
+**Client rule:** Pagination and category filters always come from the server. Client filter is UX-only on loaded data. Storefront browse uses **12** items per page with **Load more** (+12).
 
 Files: `VendorStoreView.tsx`, `module-cache.ts`, `vendorStorefrontProductStats.ts`, `vendorBrowseScroll.ts`, `ScrollController.tsx`
 
@@ -311,6 +311,8 @@ Redirect to apex `/summary` (current: `https://nexa-apex.online/summary` via `KP
 **Client rule:** Client never marks an order as paid. It waits for server state.
 
 **Free shipping:** When every cart line qualifies (`checkoutQualifiesForFreeShipping` in `freeShipping.ts`), `Checkout.tsx` sets shipping to **0 MMK**, delivery dropdown labels show **FREE** (no quoted MMK fee or ETA text), and still requires region/township + delivery partner selection. Server order create re-validates zero shipping against product KV (`checkoutFreeShipping` flag + line item flags).
+
+**Myanmar checkout locations:** Region/township dropdowns are driven by `src/app/utils/myanmarRegions.ts` + Burmese labels in `myanmarRegionLabelsMy.ts`. Update those files when adding townships (e.g. Mandalay: Onchauk, Paleik).
 
 **Seller ID:** Required text field at checkout; persisted as `sellerId` on the order (legacy alias `zipCode`).
 

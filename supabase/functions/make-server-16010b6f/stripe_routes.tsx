@@ -13,6 +13,19 @@ import { Context } from "hono";
  */
 export async function createPaymentIntent(c: Context) {
   try {
+    // Card/Stripe checkout is not active in production storefront flows.
+    // Keep the route disabled so arbitrary clients cannot mint PaymentIntents.
+    const stripeEnabled = String(Deno.env.get("STRIPE_PAYMENTS_ENABLED") || "").trim() === "1";
+    if (!stripeEnabled) {
+      return c.json(
+        {
+          error: "Stripe payments are disabled",
+          code: "STRIPE_DISABLED",
+        },
+        403,
+      );
+    }
+
     const { amount, currency = 'mmk' } = await c.req.json();
 
     // Validate input

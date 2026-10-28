@@ -14,6 +14,12 @@ import {
 import { queueCustomerReadModelSync, queueVendorReadModelSync } from "./read_model.ts";
 import { linkGuestOrdersToUser } from "./guest_order_linking.ts";
 import { issueCustomerSessionToken } from "./customer_session_guard.tsx";
+import {
+  assertStaffSession,
+  issueStaffSessionToken,
+  resolveStaffSession,
+  revokeStaffSession,
+} from "./staff_session_guard.tsx";
 import { hashPasswordPlain, verifyPasswordPlain, isPasswordHashFormat } from "./password_crypto.tsx";
 import {
   buildSesFromAddress,
@@ -273,6 +279,7 @@ function isSyntheticAuthEmail(email: string): boolean {
 const PHONE_REGISTER_OTP_TTL_MS = 10 * 60 * 1000;
 const PHONE_REGISTER_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const PHONE_REGISTER_OTP_MAX_ATTEMPTS = 5;
+const EMAIL_PASSWORD_RESET_OTP_MAX_ATTEMPTS = 5;
 const PHONE_VERIFICATION_TOKEN_TTL_MS = 15 * 60 * 1000;
 // SMS OTP temporarily disabled — set true to re-enable phone verification at signup.
 const PHONE_OTP_ENABLED = false;
@@ -1476,6 +1483,9 @@ authApp.post("/update-password", async (c) => {
       return c.json({ error: "userId and password are required" }, 400);
     }
 
+    const sessionError = await assertStaffSession(c, { userId: String(userId) });
+    if (sessionError) return sessionError;
+
     const profile = await kv.get(`auth:user:${userId}`);
     if (!profile || typeof profile !== "object") {
       return c.json({ error: "User not found" }, 404);
@@ -1503,6 +1513,9 @@ authApp.post("/update-password", async (c) => {
 authApp.post("/update-temp-password", async (c) => {
   try {
     const { userId } = await c.req.json();
+    const sessionError = await assertStaffSession(c, { userId: String(userId || "") });
+    if (sessionError) return sessionError;
+
     const profile = await kv.get(`auth:user:${userId}`);
 
     if (!profile) {
@@ -1539,6 +1552,9 @@ authApp.post("/create-user", async (c) => {
     if (!createdBy || String(createdBy).trim() === "") {
       return c.json({ error: "createdBy is required" }, 400);
     }
+
+    const sessionError = await assertStaffSession(c, { userId: String(createdBy).trim() });
+    if (sessionError) return sessionError;
 
     const creator = await kv.get(`auth:user:${createdBy}`);
     if (!creator || typeof creator !== "object") {
@@ -1770,6 +1786,14 @@ authApp.put("/user/:userId", async (c) => {
       bio,
     } = body;
 
+    const session = await resolveStaffSession(c);
+    if (!session) {
+      return c.json({ error: "Staff login required. Please sign in again." }, 401);
+    }
+    if (updatedBy && String(session.userId || "").trim() !== String(updatedBy).trim()) {
+      return c.json({ error: "Staff session does not match updatedBy." }, 403);
+    }
+
     const profile = await kv.get(`auth:user:${userId}`);
     if (!profile) {
       return c.json({ error: "User not found" }, 404);
@@ -1934,6 +1958,18 @@ authApp.delete("/user/:userId", async (c) => {
     const userId = c.req.param("userId");
     const deletedBy = String(c.req.query("deletedBy") || "").trim();
 
+    const session = await resolveStaffSession(c);
+    if (!session) {
+      return c.json({ error: "Staff login required. Please sign in again." }, 401);
+    }
+    if (deletedBy && String(session.userId || "").trim() !== deletedBy) {
+      return c.json({ error: "Staff session does not match deletedBy." }, 403);
+    }
+    const actorRole = String(session.role || "").trim();
+    if (!OWNER_ROLES.has(actorRole) && !ADMIN_TIER_ROLES.has(actorRole)) {
+      return c.json({ error: "Unauthorized" }, 403);
+    }
+
     const profile = await kv.get(`auth:user:${userId}`);
     if (!profile) {
       return c.json({ error: "User not found" }, 404);
@@ -1995,6 +2031,7 @@ authApp.delete("/user/:userId", async (c) => {
     });
 
     await bumpStaffSessionPulse(userId, "deleted");
+    await revokeStaffSession(userId).catch(() => undefined);
 
     return c.json({ success: true });
   } catch (error: any) {
@@ -2015,6 +2052,18 @@ authApp.post("/reset-password/:userId", async (c) => {
       resetBy = typeof body?.resetBy === "string" ? body.resetBy.trim() : "";
     } catch {
       resetBy = "";
+    }
+
+    const session = await resolveStaffSession(c);
+    if (!session) {
+      return c.json({ error: "Staff login required. Please sign in again." }, 401);
+    }
+    if (resetBy && String(session.userId || "").trim() !== resetBy) {
+      return c.json({ error: "Staff session does not match resetBy." }, 403);
+    }
+    const actorRole = String(session.role || "").trim();
+    if (!OWNER_ROLES.has(actorRole) && !ADMIN_TIER_ROLES.has(actorRole)) {
+      return c.json({ error: "Unauthorized" }, 403);
     }
 
     const profile = await kv.get(`auth:user:${userId}`);
@@ -2130,6 +2179,7 @@ authApp.post("/send-email-otp", async (c) => {
     await kv.set(otpKey, {
       code: otp,
       expiresAt,
+      attempts: 0,
       userId,
       accountKind: account.kind,
       createdAt: new Date().toISOString(),
@@ -2262,10 +2312,32 @@ authApp.post("/verify-otp-and-reset", async (c) => {
       return c.json({ error: "OTP has expired. Please request a new code." }, 400);
     }
 
+    const attempts = Number(storedOtpData.attempts || 0);
+    if (attempts >= EMAIL_PASSWORD_RESET_OTP_MAX_ATTEMPTS) {
+      await kv.del(otpKey);
+      return c.json(
+        { error: "Too many incorrect attempts. Please request a new code." },
+        429,
+      );
+    }
+
     const submittedOtp = String(otp || "").trim();
     if (String(storedOtpData.code || "").trim() !== submittedOtp) {
       console.warn(`❌ Invalid OTP attempt for: ${normalizedEmail}`);
-      return c.json({ error: "Invalid OTP code. Please check and try again." }, 400);
+      await kv.set(otpKey, {
+        ...storedOtpData,
+        attempts: attempts + 1,
+      });
+      return c.json(
+        {
+          error: "Invalid OTP code. Please check and try again.",
+          attemptsRemaining: Math.max(
+            0,
+            EMAIL_PASSWORD_RESET_OTP_MAX_ATTEMPTS - attempts - 1,
+          ),
+        },
+        400,
+      );
     }
 
     console.log(`✅ OTP verified for: ${normalizedEmail}`);
@@ -2381,6 +2453,9 @@ authApp.post("/verify-otp-and-reset", async (c) => {
 // ============================================
 authApp.get("/list-emails", async (c) => {
   try {
+    const sessionError = await assertStaffSession(c);
+    if (sessionError) return sessionError;
+
     console.log("📧 Listing all registered emails...");
     
     const { data: authUsers, error } = await supabaseAdmin.auth.admin.listUsers();
@@ -2452,9 +2527,16 @@ authApp.post("/staff/login", async (c) => {
 
     console.log(`✅ Staff login successful: ${user.email} (${user.role})`);
 
+    const sessionToken = await issueStaffSessionToken(
+      String(user.id),
+      String(user.email || ""),
+      String(user.role || ""),
+    );
+
     return c.json({
       success: true,
       user,
+      sessionToken,
     });
   } catch (error: any) {
     console.error("Staff login error:", error);

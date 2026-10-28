@@ -88,6 +88,21 @@ describe("vendorCommissionEarned", () => {
     expect(computeVendorPayoutEarned([order], products, vendorId, 0)).toBe(1);
   });
 
+  it("blocks unpaid non-COD orders from withdraw even when ready-to-ship", () => {
+    const order = {
+      status: "ready-to-ship",
+      paymentStatus: "unpaid",
+      paymentMethod: "KBZPay",
+      inventoryDeducted: true,
+      subtotal: 2,
+      discount: 0,
+      total: 2,
+      vendorId: "v1",
+      items: [{ productId: "p1", price: 2, quantity: 1, subtotal: 2, commissionRate: 50 }],
+    };
+    expect(isVendorOrderWithdrawable(order)).toBe(false);
+  });
+
   it("makes unpaid COD ready-to-ship withdrawable from order status alone", () => {
     const order = {
       status: "ready-to-ship",

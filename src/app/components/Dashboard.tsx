@@ -8,7 +8,7 @@ import { Badge } from "./ui/badge";
 import { AdminDateRangeFilterPopover } from "./AdminDateRangeFilterPopover";
 import { useLanguage } from "../contexts/LanguageContext";
 import { devLog } from "../utils/devLog";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router";
 import {
   ComposedChart,
@@ -114,11 +114,16 @@ export function Dashboard() {
     ? format(pageDateRange.to, "yyyy-MM-dd")
     : orderDateFromParam;
 
+  const dashboardFetchSeqRef = useRef(0);
+
   const fetchDashboardStats = useCallback(
     async (forceRefresh = false) => {
+      const seq = ++dashboardFetchSeqRef.current;
       let showLoadingTimer: ReturnType<typeof setTimeout> | null = null;
       showLoadingTimer = setTimeout(() => {
-        setLoading(true);
+        if (dashboardFetchSeqRef.current === seq) {
+          setLoading(true);
+        }
       }, 300);
 
       try {
@@ -151,6 +156,10 @@ export function Dashboard() {
           ),
         ]);
 
+        if (dashboardFetchSeqRef.current !== seq) {
+          return;
+        }
+
         if (dash.cached) {
           devLog(
             `⚡ Dashboard charts loaded from SERVER CACHE (age: ${dash.cacheAge}s)`
@@ -166,12 +175,16 @@ export function Dashboard() {
           totalProducts: Number(productsPage.counts?.all ?? productsPage.total ?? 0),
         });
       } catch (error) {
-        console.error("Error fetching dashboard stats:", error);
+        if (dashboardFetchSeqRef.current === seq) {
+          console.error("Error fetching dashboard stats:", error);
+        }
       } finally {
         if (showLoadingTimer) {
           clearTimeout(showLoadingTimer);
         }
-        setLoading(false);
+        if (dashboardFetchSeqRef.current === seq) {
+          setLoading(false);
+        }
       }
     },
     [filterPayload, orderDateFromParam, orderDateToParam]

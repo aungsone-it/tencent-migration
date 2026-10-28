@@ -187,6 +187,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       );
       
       if (response.ok) {
+        // Session may have changed while the request was in flight (logout / user switch).
+        if (loadedUserRef.current !== userId) {
+          console.log(`⏭️ Ignoring stale cart load for ${userId}`);
+          return;
+        }
+
         const data = await response.json();
         const dbCart = data.cart || [];
         
@@ -211,6 +217,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
           }
         });
         
+        if (loadedUserRef.current !== userId) {
+          console.log(`⏭️ Ignoring stale cart merge for ${userId}`);
+          return;
+        }
+
         console.log(`✅ Cart loaded: ${dbCart.length} items from DB, ${guestCart.length} guest items, ${mergedCart.length} total`);
         suppressNextSyncRef.current = true;
         setItems(mergedCart);
@@ -226,6 +237,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         
         // Sync merged cart back to database if there were guest items
         if (guestCart.length > 0 && mergedCart.length > dbCart.length) {
+          if (loadedUserRef.current !== userId) return;
           await syncCartToDatabase(userId, mergedCart);
         }
       }

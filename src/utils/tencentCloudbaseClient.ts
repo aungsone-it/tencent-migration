@@ -3,6 +3,11 @@ import {
   cloudbasePublishableKey,
   getCloudBaseRequestHeaders,
 } from "../../utils/tencent/cloudbase";
+import {
+  clearStaffSessionToken,
+  getStaffSessionHeaders,
+  storeStaffSessionToken,
+} from "../app/utils/staffSessionHeaders";
 
 type AuthUser = {
   id: string;
@@ -68,6 +73,7 @@ function authHeaders(): Record<string, string> {
     ...(!session?.access_token && cloudbasePublishableKey
       ? { Authorization: `Bearer ${cloudbasePublishableKey}` }
       : {}),
+    ...getStaffSessionHeaders(),
   };
 }
 
@@ -180,8 +186,13 @@ async function persistAuthSessionFromLoginResponse(data: Record<string, unknown>
     };
   }
 
+  const sessionToken = String(data.sessionToken || "").trim();
+  if (sessionToken) {
+    storeStaffSessionToken(sessionToken);
+  }
+
   const session: AuthSession = {
-    access_token: String(data.accessToken || data.token || cloudbasePublishableKey || ""),
+    access_token: String(data.accessToken || data.token || sessionToken || cloudbasePublishableKey || ""),
     user,
     expires_at: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
   };
@@ -296,6 +307,7 @@ export function createTencentCloudBaseCompatClient(): TencentCloudBaseCompatClie
 
       async signOut() {
         writeSession(null);
+        clearStaffSessionToken();
         return { error: null };
       },
 

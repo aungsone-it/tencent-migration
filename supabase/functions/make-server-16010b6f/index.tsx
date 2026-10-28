@@ -44,6 +44,7 @@ import { issueVendorSessionToken, revokeVendorSession, assertVendorSession } fro
 import { deleteVendorSubscriberRecords } from "./subscription_subscriber_delete.ts";
 import { correctFinancesAnalyticsVendorPayouts } from "./finances_vendor_payout.ts";
 import { assertCustomerSession } from "./customer_session_guard.tsx";
+import { resolveStaffSession } from "./staff_session_guard.tsx";
 import {
   deletePwaCheckoutDraft,
   resolveMerchantOrderIdFromOrder,
@@ -379,6 +380,7 @@ app.use("*", cors({
     "x-admin-operation-secret",
     "x-vendor-session",
     "x-customer-session",
+    "x-staff-session",
   ],
   exposeHeaders: ["Content-Length"],
   maxAge: 86400,
@@ -1881,69 +1883,22 @@ async function getSignedImageUrl(filePath: string): Promise<string | null> {
 }
 
 
-// Admin signup - Create user from Settings page
+// Legacy admin signup — disabled. Use authenticated /auth/create-user instead.
 app.post("/make-server-16010b6f/auth/signup", async (c) => {
-  try {
-    const body = await c.req.json();
-    const { email, name, phone, role, storeId } = body;
-    
-    if (!email || !name) {
-      return c.json({ error: "Email and name are required" }, 400);
-    }
-    
-    console.log(`👤 Admin creating user: ${email} with role: ${role}${storeId ? ` for store: ${storeId}` : ''}`);
-    
-    // Check if user already exists
-    const existingUser = await withTimeout(kv.get(`user:${email}`), 5000);
-    if (existingUser) {
-      return c.json({ error: "User already exists" }, 409);
-    }
-    
-    const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    
-    // Generate a temporary password (user should change this on first login)
-    const tempPassword = `temp_${Math.random().toString(36).substring(2, 9)}`;
-    
-    const userData = {
-      id: userId,
-      email,
-      password: tempPassword, // In production, this should be hashed
-      name: name || "",
-      phone: phone || "",
-      role: role || "user",
-      storeId: storeId || "", // Store the storeId if provided
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: "active",
-    };
-    
-    await withTimeout(kv.set(`user:${email}`, userData), 5000);
-    await withTimeout(kv.set(`userId:${userId}`, { email }), 5000);
-    
-    // Create empty wishlist for user
-    await withTimeout(kv.set(`wishlist:${userId}`, { productIds: [] }), 5000);
-    
-    console.log(`✅ User created by admin: ${email}`);
-    
-    // Return user without password
-    const { password: _, ...userWithoutPassword } = userData;
-    return c.json({ 
-      success: true,
-      user: userWithoutPassword,
-      message: "User created successfully",
-      tempPassword: tempPassword, // Send temp password to admin
-    }, 201);
-  } catch (error) {
-    console.error("❌ Error creating user:", error);
-    return c.json({ error: "Failed to create user", details: String(error) }, 500);
-  }
+  return c.json(
+    {
+      error: "This signup endpoint is disabled. Create staff users from Settings while signed in.",
+      code: "SIGNUP_DISABLED",
+    },
+    403,
+  );
 });
 
 // Initialize user in auth system (idempotent - won't fail if user already exists)
 app.post("/make-server-16010b6f/auth/init-user", async (c) => {
   try {
     const body = await c.req.json();
-    const { id, email, name, phone, role, password } = body;
+    const { id, email } = body;
     
     if (!email || !id) {
       return c.json({ error: "Email and ID are required" }, 400);
@@ -1957,33 +1912,16 @@ app.post("/make-server-16010b6f/auth/init-user", async (c) => {
       console.log(`✅ User already exists: ${email}`);
       return c.json({ success: true, message: "User already exists", existed: true });
     }
-    
-    // Create user data
-    const userData = {
-      id,
-      email,
-      password: password || "default_password_123",
-      name: name || "",
-      phone: phone || "",
-      role: role || "user",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: "active",
-    };
-    
-    await withTimeout(kv.set(`user:${email}`, userData), 5000);
-    await withTimeout(kv.set(`userId:${id}`, { email }), 5000);
-    
-    // Create empty wishlist for user
-    await withTimeout(kv.set(`wishlist:${id}`, { productIds: [] }), 5000);
-    
-    console.log(`✅ Auth user initialized: ${email}`);
-    
-    return c.json({ 
-      success: true,
-      message: "User initialized successfully",
-      existed: false
-    });
+
+    // Do not create accounts from unauthenticated clients (password/role spoofing).
+    return c.json(
+      {
+        success: false,
+        existed: false,
+        message: "User record missing; create staff via Settings (authenticated create-user).",
+      },
+      200,
+    );
   } catch (error) {
     console.error("❌ Error initializing auth user:", error);
     return c.json({ error: "Failed to initialize user", details: String(error) }, 500);
@@ -2490,8 +2428,10 @@ app.put("/make-server-16010b6f/auth/profile/:userId", async (c) => {
       }
     }
 
-    const existingIdentity = await loadStorefrontProfileIdentity(userId);
-    if (profileIdentityChanged(body, existingIdentity)) {
+    const staffSession = await resolveStaffSession(c);
+    const staffOwnsProfile =
+      staffSession && String(staffSession.userId || "").trim() === String(userId || "").trim();
+    if (!staffOwnsProfile) {
       const sessionError = await assertCustomerSession(c, userId);
       if (sessionError) return sessionError;
     }
@@ -7029,6 +6969,20 @@ app.post("/make-server-16010b6f/orders", async (c) => {
     const parsedSubtotal = body.subtotal ? (typeof body.subtotal === 'string' ? parseFloat(body.subtotal) : body.subtotal) : parsedTotal;
     const parsedDiscount = body.discount ? (typeof body.discount === 'string' ? parseFloat(body.discount) : body.discount) : 0;
     
+    // Preserve KBZ/PWA paid creates (body includes kpay / KBZPay method).
+    // Block Card/BankTransfer/etc. from self-declaring paid without a gateway.
+    const paymentMethodRaw = String(body.paymentMethod || "").toLowerCase();
+    const hasKpayPayload = body.kpay != null && typeof body.kpay === "object";
+    const isKpayPath =
+      hasKpayPayload ||
+      paymentMethodRaw.includes("kpay") ||
+      paymentMethodRaw.includes("kbz");
+    const claimedPaymentStatus = String(body.paymentStatus || "unpaid").toLowerCase();
+    const resolvedCreatePaymentStatus =
+      !isKpayPath && claimedPaymentStatus === "paid"
+        ? "unpaid"
+        : body.paymentStatus || "unpaid";
+
     const orderData = {
       ...applyNormalizedShippingToOrderBody(slimOrderCreateBody(body)),
       orderNumber: requestedOrderNumber,
@@ -7039,7 +6993,7 @@ app.post("/make-server-16010b6f/orders", async (c) => {
       createdAt: await resolveAllocatedOrderCreatedAt(requestedOrderNumber, body.createdAt),
       updatedAt: new Date().toISOString(),
       date: body.date || new Date().toISOString().split('T')[0],
-      paymentStatus: body.paymentStatus || 'unpaid',
+      paymentStatus: resolvedCreatePaymentStatus,
       shippingStatus: body.shippingStatus || 'pending',
       /** Inventory is reduced only when admin sets status to ready-to-ship or fulfilled */
       inventoryDeducted: false,
@@ -14793,6 +14747,8 @@ app.delete("/make-server-16010b6f/vendor/subscribers/:vendorId/:customerId", asy
 app.get("/make-server-16010b6f/vendor/audience/:vendorId", async (c) => {
   try {
     const vendorId = c.req.param("vendorId");
+    const authError = await assertVendorSession(c, vendorId);
+    if (authError) return authError;
     const pageQ = c.req.query("page");
     const hasPagination = pageQ !== undefined && pageQ !== "";
     const page = Math.max(1, parseInt(String(pageQ || "1"), 10) || 1);

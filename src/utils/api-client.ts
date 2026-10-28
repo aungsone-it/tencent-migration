@@ -9,6 +9,7 @@ import {
 } from '../../utils/supabase/info';
 import { devLog, devWarn } from '../app/utils/devLog';
 import { getCustomerSessionHeaders } from '../app/utils/customerSessionHeaders';
+import { getStaffSessionHeaders } from '../app/utils/staffSessionHeaders';
 import {
   API_TIMEOUTS,
   PAYLOAD_LIMITS,
@@ -145,6 +146,7 @@ async function apiRequest<T = any>(
     ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
     ...(actorUserId ? { "x-actor-user-id": actorUserId } : {}),
     ...getCustomerSessionHeaders(),
+    ...getStaffSessionHeaders(),
     ...getAdminOperationHeaders(),
     ...fetchOptions.headers,
   };

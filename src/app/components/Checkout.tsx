@@ -1087,6 +1087,7 @@ export function Checkout({
   );
   const pwaFinalizeInFlightRef = useRef<Set<string>>(new Set());
   const pwaOrderPersistedRef = useRef(false);
+  const placingOrderRef = useRef(false);
   const vendorSubdomainSlug = resolveVendorSubdomainStoreSlug();
   const { slug: customHostSlug } = useResolvedVendorHostSlug();
   const summaryPath = useMemo(
@@ -2888,9 +2889,14 @@ export function Checkout({
   const handlePlaceOrder = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
 
+    if (placingOrderRef.current || loading) return;
     if (!validateRequiredCheckoutFields()) return;
     if (paymentMethod === "None") {
       toast.error(t("checkout.selectPaymentMethod"));
+      return;
+    }
+    if (paymentMethod === "Card" || paymentMethod === "BankTransfer") {
+      toast.error("Card and bank transfer checkout are not available. Please use COD or KBZPay.");
       return;
     }
     if (!shippingMethodComplete) {
@@ -2903,52 +2909,31 @@ export function Checkout({
     }
     const orderEmail = resolveOrderEmail();
 
+    placingOrderRef.current = true;
     setLoading(true);
+    const stopPlacing = () => {
+      placingOrderRef.current = false;
+      setLoading(false);
+    };
 
     let latestKpaySession = kpaySession;
 
-    if (paymentMethod === "Card") {
-      if (!paymentInfo.cardNumber || !paymentInfo.cardName || !paymentInfo.expiryDate || !paymentInfo.cvv) {
-        toast.error("Please fill in all card details");
-        setLoading(false);
-        return;
-      }
-
-      const cardNumberClean = paymentInfo.cardNumber.replace(/\s/g, "");
-      if (cardNumberClean.length < 13 || cardNumberClean.length > 19) {
-        toast.error("Invalid card number");
-        setLoading(false);
-        return;
-      }
-      if (!/^\d{2}\/\d{2}$/.test(paymentInfo.expiryDate)) {
-        toast.error("Invalid expiry date format (MM/YY)");
-        setLoading(false);
-        return;
-      }
-      if (paymentInfo.cvv.length < 3 || paymentInfo.cvv.length > 4) {
-        toast.error("Invalid CVV");
-        setLoading(false);
-        return;
-      }
-
-      toast.info("Processing payment...", { duration: 2000 });
-      toast.success("💳 Payment Successful!", { duration: 3000 });
-    } else if (paymentMethod === "KPay") {
+    if (paymentMethod === "KPay") {
       if (!canSubmitKPayOrder) {
         toast.error("KBZPay QR payload is missing. Please regenerate QR first");
-        setLoading(false);
+        stopPlacing();
         return;
       }
       if (!kpayAmountMatchesTotal) {
         toast.error(
           `KBZPay QR is for ${formatStorefrontPrice(kpayLockedAmount ?? 0)}, but order total is ${formatStorefrontPrice(finalTotal)}. Wait for QR refresh.`,
         );
-        setLoading(false);
+        stopPlacing();
         return;
       }
       if (!kpayWebhookConfirmed) {
         toast.error("Payment not confirmed yet. Please complete the payment in KBZPay first.");
-        setLoading(false);
+        stopPlacing();
         return;
       }
       // Webhook from KBZ has confirmed the payment via CloudBase realtime,
@@ -2956,7 +2941,7 @@ export function Checkout({
       latestKpaySession = { ...(kpaySession || {}), status: "paid" } as any;
     } else if (paymentMethod !== "COD") {
       toast.info("🚀 Coming Soon! This payment method will be available soon.", { duration: 3000 });
-      setLoading(false);
+      stopPlacing();
       return;
     }
 
@@ -2986,7 +2971,7 @@ export function Checkout({
       }
     }
     if (!orderNum) {
-      setLoading(false);
+      stopPlacing();
       toast.error(
         "Could not allocate an order number. Rebuild the backend zip (npm run deploy:functions:zip), upload it, and restart the local API (npm run dev:api) if testing on localhost."
       );
@@ -3128,7 +3113,7 @@ export function Checkout({
 
       // 🚨 CHECK FOR STOCK ERRORS
       if (!response.ok || result.error === 'Insufficient stock') {
-        setLoading(false);
+        stopPlacing();
         
         if (result.stockIssues && result.stockIssues.length > 0) {
           // Show detailed stock error
@@ -3158,7 +3143,7 @@ export function Checkout({
         resolvedOrderNumber = orderNum;
       }
       if (!resolvedOrderNumber) {
-        setLoading(false);
+        stopPlacing();
         toast.error(
           orderNum
             ? "Failed to place order: server did not confirm the order number. Please try again."
@@ -3263,7 +3248,7 @@ export function Checkout({
       }
     } catch (error) {
       console.error("❌ Failed to save order:", error);
-      setLoading(false);
+      stopPlacing();
       toast.error("Failed to place order. Please try again.", {
         description: String(error),
         duration: 5000,
@@ -3282,7 +3267,7 @@ export function Checkout({
       onOrderPlacedSuccess?.({ userId: placedUserId });
     }
 
-    setLoading(false);
+    stopPlacing();
     try {
       const snapshot: CheckoutSummarySnapshot = {
         orderNumber: placedOrderNumber,

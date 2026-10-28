@@ -18,6 +18,10 @@ import {
   registerStaffForceLogoutHandler,
   type StaffForceLogoutReason,
 } from '../utils/staffForceLogout';
+import {
+  clearStaffSessionToken,
+  getStaffSessionHeaders,
+} from '../utils/staffSessionHeaders';
 
 // ============================================
 // REMOVED: Session cleanup code
@@ -87,7 +91,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /** Throttle background profile refresh to avoid a burst of API calls when alt-tabbing (each was 2+ fetches). */
 const PROFILE_BG_REFRESH_MIN_MS = 5 * 60 * 1000;
-const STAFF_SESSION_HEARTBEAT_MS = 800;
+/** Was 800ms — too aggressive; 30s is enough for deactivate/delete detection. */
+const STAFF_SESSION_HEARTBEAT_MS = 30_000;
 
 /** Profile fetch: long enough for cold edge + local dev; background refresh stays shorter. */
 const PROFILE_FETCH_TIMEOUT_MS = (background: boolean) => (background ? 12_000 : 25_000);
@@ -166,10 +171,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         staffHeartbeatTimerRef.current = null;
       }
       await supabase.auth.signOut();
+      clearStaffSessionToken();
       setUser(null);
       persistStaffActorId(null);
     } catch (error) {
       console.error('❌ Force logout error:', error);
+      clearStaffSessionToken();
       setUser(null);
       persistStaffActorId(null);
     } finally {
@@ -302,7 +309,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void forceLogout('deactivated');
         return response;
       }
-      if (response.status === 404 && target.includes('/auth/profile/')) {
+      if (
+        response.status === 404 &&
+        target.includes('/auth/profile/') &&
+        target.includes(`/auth/profile/${encodeURIComponent(currentUserId)}`)
+      ) {
         void forceLogout('deleted');
         return response;
       }
@@ -634,6 +645,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log('🔓 Logging out...');
       await supabase.auth.signOut();
+      clearStaffSessionToken();
       setUser(null);
       persistStaffActorId(null);
       console.log('✅ Logout successful');
@@ -661,6 +673,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               'Content-Type': 'application/json',
               ...getCloudBaseRequestHeaders(),
               ...(cloudbasePublishableKey ? { 'Authorization': `Bearer ${cloudbasePublishableKey}` } : {}),
+              ...getStaffSessionHeaders(),
             },
             body: JSON.stringify({ userId: user.id }),
           });

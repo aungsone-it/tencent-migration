@@ -108,6 +108,13 @@ function lineCommissionPercent(
   return resolveLineCommissionPercentFromCatalog(item, productMap, vendorContractPercent);
 }
 
+function isCodPaymentMethod(order: AnyRecord): boolean {
+  const m = String(order.paymentMethod || "")
+    .trim()
+    .toLowerCase();
+  return m.includes("cod") || m.includes("cash on delivery") || m === "cash";
+}
+
 function isOrderWithdrawable(order: AnyRecord): boolean {
   if (!order || typeof order !== "object") return false;
   const st = normalizeOrderStatus(order.status);
@@ -115,6 +122,9 @@ function isOrderWithdrawable(order: AnyRecord): boolean {
   if (!WITHDRAWABLE_STATUSES.has(st)) return false;
   // Ready-to-ship+ is the fulfillment commit; do not block when stock flag was skipped (catalog load failure).
   if (orderRefundBlocksWithdraw(order)) return false;
+  // Require collected funds: paid gateway orders, or COD (cash at delivery).
+  const pay = normalizePaymentKey(order.paymentStatus);
+  if (pay !== "paid" && !isCodPaymentMethod(order)) return false;
   return true;
 }
 

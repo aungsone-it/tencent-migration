@@ -193,10 +193,15 @@ function adjustStatusBreakdown(breakdown: StatusBreakdown, from: string, to: str
   return next;
 }
 
+function isInventoryCommitStatusClient(status: string | undefined): boolean {
+  const n = normalizeOrderListStatus(status);
+  return n === "processing" || n === "ready-to-ship" || n === "fulfilled";
+}
+
 function buildOrderStatusOptimisticPatch(
   order: OrderItem,
   newStatus: OrderStatus,
-): Pick<OrderItem, "status" | "paymentStatus" | "shippingStatus"> {
+): Pick<OrderItem, "status" | "paymentStatus" | "shippingStatus" | "inventoryDeducted"> {
   if (newStatus === "cancelled") {
     return {
       status: newStatus,
@@ -216,7 +221,16 @@ function buildOrderStatusOptimisticPatch(
       status: newStatus,
       paymentStatus: order.paymentStatus === "refunded" ? "refunded" : ("unpaid" as PaymentStatus),
       shippingStatus: "pending" as ShippingStatus,
+      ...(isInventoryCommitStatusClient(newStatus) ? { inventoryDeducted: true } : {}),
     };
+  }
+  // Mark inventory deducted optimistically on first commit-status transition so a second
+  // rapid status flip in the same band cannot double-deduct session product stock.
+  if (
+    isInventoryCommitStatusClient(newStatus) &&
+    order.inventoryDeducted !== true
+  ) {
+    return { status: newStatus, inventoryDeducted: true };
   }
   return { status: newStatus };
 }
@@ -324,6 +338,7 @@ type PendingOrderStatusDraft = {
   at: number;
   paymentStatus?: PaymentStatus;
   shippingStatus?: ShippingStatus;
+  inventoryDeducted?: boolean;
 };
 
 // Keeps just-updated statuses stable across fast section switches/remounts.
@@ -413,6 +428,9 @@ function applyPendingStatusDrafts(rows: OrderItem[]): OrderItem[] {
       status: draft.status,
       ...(draft.paymentStatus ? { paymentStatus: draft.paymentStatus } : {}),
       ...(draft.shippingStatus ? { shippingStatus: draft.shippingStatus } : {}),
+      ...(draft.inventoryDeducted !== undefined
+        ? { inventoryDeducted: draft.inventoryDeducted }
+        : {}),
     };
   });
 }
@@ -1460,6 +1478,8 @@ export function Orders({
       ? buildOrderStatusOptimisticPatch(orderBeingUpdated, newStatus)
       : { status: newStatus };
 
+    markOrderSaving([rowKey]);
+
     setOrders(prevOrders =>
       prevOrders.map(order =>
         orderMatchesRowKey(order, rowKey) ? { ...order, ...statusPatch } : order
@@ -1488,18 +1508,10 @@ export function Orders({
       at: Date.now(),
       ...(statusPatch.paymentStatus ? { paymentStatus: statusPatch.paymentStatus } : {}),
       ...(statusPatch.shippingStatus ? { shippingStatus: statusPatch.shippingStatus } : {}),
+      ...(statusPatch.inventoryDeducted !== undefined
+        ? { inventoryDeducted: statusPatch.inventoryDeducted }
+        : {}),
     });
-    clearOrderSaveState([rowKey]);
-
-    if (wasNotCancelled && isNowCancelled) {
-      toast.message("Order cancelled", {
-        duration: 2500,
-        description: "Refund confirmation may take a moment on KPay orders.",
-      });
-    } else {
-      toast.success(`Status updated to ${newStatus}`);
-    }
-    onOrderUpdate?.();
 
     if (orderBeingUpdated) {
       syncAdminInventoryCacheAfterOrderStatusChange(toInventorySyncSnapshot(orderBeingUpdated), newStatus);
@@ -1617,6 +1629,16 @@ export function Orders({
           )
         );
       }
+      clearOrderSaveState([rowKey]);
+      if (wasNotCancelled && isNowCancelled) {
+        toast.message("Order cancelled", {
+          duration: 2500,
+          description: "Refund confirmation may take a moment on KPay orders.",
+        });
+      } else {
+        toast.success(`Status updated to ${newStatus}`);
+      }
+      onOrderUpdate?.();
       void loadOrdersRef.current(true, { silent: true });
     } catch (error) {
       // Roll back on error
@@ -1635,7 +1657,6 @@ export function Orders({
             { orderId, status: orderBeingUpdated.status },
           ]);
         }
-        void refetchAdminProductsInventoryCaches();
         toast.error("Failed to save status. Changes reverted.", {
           description: detail,
           duration: 8000,
@@ -1649,6 +1670,8 @@ export function Orders({
           duration: 10000,
         });
       }
+      // Always reconcile product stock caches — do not skip when Orders unmounted.
+      void refetchAdminProductsInventoryCaches();
       forgetPendingStatusDraft(orderId, orderBeingUpdated?.orderNumber);
       clearOrderSaveState([rowKey]);
       onOrderUpdate?.();

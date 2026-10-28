@@ -79,8 +79,16 @@ interface CacheEntry<T> {
 class ModuleCache {
   private cache: Map<string, CacheEntry<any>> = new Map();
   private loading: Map<string, Promise<any>> = new Map();
+  /** Bumped on invalidate so in-flight fetches cannot repopulate stale data. */
+  private generation: Map<string, number> = new Map();
   private hits: number = 0;
   private misses: number = 0;
+
+  private nextGeneration(key: string): number {
+    const next = (this.generation.get(key) || 0) + 1;
+    this.generation.set(key, next);
+    return next;
+  }
 
   /**
    * Get data from cache or fetch if not available
@@ -119,10 +127,16 @@ class ModuleCache {
     this.misses++;
     devLog(`${forceRefresh ? '🔄' : '❌'} [MODULE CACHE ${forceRefresh ? 'REFRESH' : 'MISS'}] ${key} - Fetching...`);
 
+    const gen = this.nextGeneration(key);
+
     // Create loading promise — one retry on transient network failure (e.g. flaky Wi‑Fi)
     const loadingPromise = withNetworkRetry(() => fetcher(), { retries: 1, delayMs: 500 })
       .then((data) => {
-        // Store in cache
+        // Ignore writes after invalidate / newer forceRefresh replaced this load.
+        if (this.generation.get(key) !== gen) {
+          devLog(`⏭️ [MODULE CACHE] Dropped stale write for ${key}`);
+          return data;
+        }
         this.cache.set(key, {
           data,
           timestamp: Date.now(),
@@ -131,8 +145,10 @@ class ModuleCache {
         return data;
       })
       .finally(() => {
-        // Remove from loading map
-        this.loading.delete(key);
+        // Only clear loading if this promise is still the active one.
+        if (this.loading.get(key) === loadingPromise) {
+          this.loading.delete(key);
+        }
       });
 
     // Store loading promise to prevent duplicate requests
@@ -169,6 +185,7 @@ class ModuleCache {
    */
   invalidate(key: string): void {
     devLog(`🗑️ [MODULE CACHE] Invalidated ${key}`);
+    this.nextGeneration(key);
     this.cache.delete(key);
     this.loading.delete(key);
   }
@@ -176,11 +193,13 @@ class ModuleCache {
   invalidatePrefix(prefix: string): void {
     for (const key of [...this.cache.keys()]) {
       if (key.startsWith(prefix)) {
+        this.nextGeneration(key);
         this.cache.delete(key);
       }
     }
     for (const key of [...this.loading.keys()]) {
       if (key.startsWith(prefix)) {
+        this.nextGeneration(key);
         this.loading.delete(key);
       }
     }

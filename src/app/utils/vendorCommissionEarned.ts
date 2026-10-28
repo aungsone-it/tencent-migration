@@ -74,12 +74,22 @@ export function isVendorOrderAccrued(order: any): boolean {
   return true;
 }
 
+function isCodPaymentMethod(order: any): boolean {
+  const m = String(order?.paymentMethod || "")
+    .trim()
+    .toLowerCase();
+  return m.includes("cod") || m.includes("cash on delivery") || m === "cash";
+}
+
 export function isVendorOrderWithdrawable(order: any): boolean {
   if (order == null || typeof order !== "object") return false;
   const st = normalizeOrderStatusKey(String(order.status ?? ""));
   if (st === "cancelled" || st === "canceled") return false;
   if (!VENDOR_WITHDRAWABLE_STATUSES.has(st)) return false;
   if (orderRefundBlocksWithdraw(order)) return false;
+  // Require collected funds: paid gateway orders, or COD (cash at delivery).
+  const pay = normalizePaymentKey(order.paymentStatus);
+  if (pay !== "paid" && !isCodPaymentMethod(order)) return false;
   return true;
 }
 

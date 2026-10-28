@@ -1,4 +1,5 @@
 import { projectId, publicAnonKey, cloudbaseApiBaseUrl, cloudbasePublishableKey, getCloudBaseRequestHeaders } from '../../../utils/supabase/info';
+import { getStaffSessionHeaders } from '../utils/staffSessionHeaders';
 import {
   normalizePlatformStoreName,
 } from "../utils/platformBranding";
@@ -1109,6 +1110,7 @@ export function Settings() {
             ...getCloudBaseRequestHeaders(),
 
             ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+            ...getStaffSessionHeaders(),
           },
           body: JSON.stringify(createPayload),
         }
@@ -1225,6 +1227,7 @@ export function Settings() {
             ...getCloudBaseRequestHeaders(),
 
             ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+            ...getStaffSessionHeaders(),
           },
           body: JSON.stringify({
             status: newStatus,
@@ -1269,6 +1272,7 @@ export function Settings() {
             ...getCloudBaseRequestHeaders(),
 
             ...(cloudbasePublishableKey ? { Authorization: `Bearer ${cloudbasePublishableKey}` } : {}),
+            ...getStaffSessionHeaders(),
           },
         }
       );
